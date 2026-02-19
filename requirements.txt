@@ -1,6 +1,6 @@
 streamlit
 passlib
-brcypt
+bcrypt
 python-dotenv
 sqlalchemy
 pandas
