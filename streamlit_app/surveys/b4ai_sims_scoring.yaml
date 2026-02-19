@@ -1,0 +1,26 @@
+---
+title: b4ai_sims_scoring
+description: Likert scoring for B4AI SIMS survey
+
+scoring_type: likert
+
+default_scale:
+  Strongly disagree: 1
+  Disagree: 2
+  Agree: 3
+  Strongly agree: 4
+
+reverse_scale:
+  Strongly disagree: 4
+  Disagree: 3
+  Agree: 2
+  Strongly agree: 1
+
+reverse_questions:
+  - Q4_1
+  - Q4_2
+  - Q4_3
+  - Q4_4
+  - Q5_1
+  - Q5_2
+  - Q5_3

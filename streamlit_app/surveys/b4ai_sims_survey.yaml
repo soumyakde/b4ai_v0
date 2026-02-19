@@ -1,0 +1,178 @@
+---
+title: B4AI SIMS Survey
+
+sections:
+  - name: Learner_Name
+    questions:
+      - id: Q1_1
+        text: >
+          Activity: Module 1 - Maze: Write your first name initial and
+          last name initial in the box.
+        type: text
+        placeholder: "Enter initials"
+        system_date: true
+        required: true
+
+  - name: Intrinsic_motivation
+    questions:
+      - id: Q2_1
+        text: >
+          Choose the explanation that best matches your answer to the question:
+          Why are you currently engaged in this activity? Because I think that
+          this activity is interesting.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+      - id: Q2_2
+        text: >
+          Choose the explanation that best matches your answer to the question:
+          Why are you currently engaged in this activity? Because I like doing
+          this activity.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+      - id: Q2_3
+        text: >
+          Choose the explanation that best matches your answer to the question:
+          Why are you currently engaged in this activity? Because I feel good
+          when doing this activity.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+  - name: Identified_regulation
+    questions:
+      - id: Q3_1
+        text: >
+          Choose the explanation that best matches your answer to the question:
+          Why are you currently engaged in this activity? Because I think that
+          this activity is good for me.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+      - id: Q3_2
+        text: >
+          Choose the explanation that best matches your answer to the question:
+          Why are you currently engaged in this activity? Because I think that
+          this activity is important for me.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+      - id: Q3_3
+        text: >
+          Choose the explanation that best matches your answer to the question:
+          Why are you currently engaged in this activity? Because this activity
+          will help me later.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+  - name: External_regulation
+    questions:
+      - id: Q4_1
+        text: >
+          Choose the explanation that best matches your answer to the question:
+          Why are you currently engaged in this activity? Because I am supposed
+          to do it.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+      - id: Q4_2
+        text: >
+          Choose the explanation that best matches your answer to the question:
+          Why are you currently engaged in this activity? Because I have no
+          choice.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+      - id: Q4_3
+        text: >
+          Choose the explanation that best matches your answer to the question:
+          Why are you currently engaged in this activity? Because I do not want
+          to get in trouble.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+      - id: Q4_4
+        text: >
+          Choose the explanation that best matches your answer to the question:
+          Why are you currently engaged in this activity? Because I feel I have
+          to do it.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+  - name: Amotivation
+    questions:
+      - id: Q5_1
+        text: >
+          Choose the explanation that best matches your answer to the question:
+          Why are you currently engaged in this activity? There may be good
+          reasons to do this activity, but personally, I do not see any.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+      - id: Q5_2
+        text: >
+          Choose the explanation that best matches your answer to the question:
+          Why are you currently engaged in this activity? I am doing this
+          activity, but I am not sure if it is worth it.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+      - id: Q5_3
+        text: >
+          Choose the explanation that best matches your answer to the question:
+          Why are you currently engaged in this activity? I am doing this
+          activity, but I am not sure it is a good thing to pursue it.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"

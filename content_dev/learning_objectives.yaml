@@ -1,0 +1,44 @@
+---
+learning_objectives:
+  module_1:
+    title: "Understanding Intelligence and Problem-Solving"
+    core_ai_concepts:
+      - intelligence (natural vs artificial)
+      - problem-solving
+      - agents and environments
+      - algorithms as strategies
+    learning_objectives:
+      - >
+        Learners can describe differences and similarities between human, animal,
+        and machine problem-solving.
+      - >
+        Learners can explain how simple strategies (e.g., trial-and-error,
+        left-hand-on-the-wall) help solve problems.
+      - >
+        Learners can identify characteristics that distinguish AI-enabled systems
+        from automation or IoT systems.
+    analytic_indicators:
+      - use of examples from mazes or robots
+      - references to planning, decision-making, or learning
+      - reflections on responsibility or ethics
+
+  module_2:
+    title: "Goal-Based Problem Solving"
+    core_ai_concepts:
+      - initial, present, and goal states
+      - decomposition
+      - abstraction
+      - supervised learning
+    learning_objectives:
+      - >
+        Learners can explain what a goal is and how breaking problems into smaller
+        steps helps solve them.
+      - >
+        Learners can relate model-building activities to how machines learn from
+        examples.
+    analytic_indicators:
+      - references to steps or planning
+      - understanding of goals and subgoals
+      - real-life transfer examples
+
+      # Modules 3–7 follow the same structure

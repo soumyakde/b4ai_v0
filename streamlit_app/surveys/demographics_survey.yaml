@@ -1,0 +1,73 @@
+---
+title: Demographics Survey
+description: Participant background and initial information (Pre-Event Rev 3)
+
+questions:
+  - id: Q1_1
+    text: |
+      Activity Name: Demographics Survey
+      Write your first and last initials in the box.
+    type: text
+    system_date: true
+    required: true
+
+  - id: Q2_1
+    text: >
+      Where are you attending this event now?
+      Pick the one that fits best.
+    type: mcq
+    options:
+      - During school
+      - After-school program
+      - Community youth center
+      - Library
+      - At UB
+
+  - id: Q2_2
+    text: "Select your grade."
+    type: mcq
+    options:
+      - Fourth (4th) grade
+      - Fifth (5th) grade
+      - Sixth (6th) grade
+      - Seventh (7th) grade
+      - Eighth (8th) grade
+      - Adult
+
+  - id: Q2_3
+    text: "Is English your first language?"
+    type: mcq
+    options:
+      - true
+      - false
+
+  - id: Q2_4
+    text: "How do you describe yourself? (Select one)"
+    type: mcq
+    options:
+      - Male
+      - Female
+
+  - id: Q2_5
+    text: >
+      Before today, have you ever heard about AI
+      (Artificial Intelligence)?
+    type: mcq
+    options:
+      - "Yes, a lot"
+      - "Yes, a little"
+      - "No, not really"
+
+  - id: Q2_6
+    text: "Where have you heard about AI? (Check all that apply.)"
+    type: checkbox
+    options:
+      - Home - parents
+      - Home - siblings
+      - School - teachers
+      - School - peers
+      - Friends
+      - >
+        Media (TV, Newspaper, Magazines, Storybooks,
+        Library, or any other sources)
+      - "Not applicable, I haven't heard about AI"

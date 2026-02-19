@@ -1,0 +1,65 @@
+---
+title: Pre-Intervention AI Misconceptions
+
+questions:
+  - id: Q3_1
+    text: "AI systems learn and understand what they are doing on their own."
+    type: select
+    options:
+      - "True"
+      - "False"
+
+  - id: Q3_2
+    text: >
+      I always identify a machine to be an AI machine if it imitates human
+      characteristics like voice, movements, and appearance.
+    type: select
+    options:
+      - "True"
+      - "False"
+
+  - id: Q3_3
+    text: "AI systems have emotions and intuitions."
+    type: select
+    options:
+      - "True"
+      - "False"
+
+  - id: Q3_4
+    text: "AI methods work similar to the brain."
+    type: select
+    options:
+      - "True"
+      - "False"
+
+  - id: Q3_5
+    text: "Any software that uses a database is AI."
+    type: select
+    options:
+      - "Yes"
+      - "No"
+
+  - id: Q3_6
+    text: >
+      Recommendation systems in games, social media, or search engines are all
+      examples of AI.
+    type: select
+    options:
+      - "Yes"
+      - "No"
+
+  - id: Q3_7
+    text: "Can something be called AI if it does not involve technology?"
+    type: select
+    options:
+      - "Yes"
+      - "No"
+
+  - id: Q3_8
+    text: >
+      Would you consider AI as a machine with pre-installed knowledge or
+      intelligence?
+    type: select
+    options:
+      - "Yes"
+      - "No"

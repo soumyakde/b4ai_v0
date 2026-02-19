@@ -1,0 +1,163 @@
+---
+construct_definitions:
+  messaging_perception:
+    coherency_of_messaging:
+      definition: >
+        The degree to which learners perceive the instructional message as logically
+        organized, internally consistent, and easy to follow, supporting engagement
+        and conceptual change.
+      theoretical_basis:
+        - Dole & Sinatra (1998)
+      analytic_focus:
+        - clarity of sequence
+        - logical connections
+        - perceived consistency across activities
+
+    plausibility_of_messaging:
+      definition: >
+        Learners’ subjective judgment about the potential truthfulness and realism
+        of the message, which influences willingness to engage in deeper cognitive
+        processing and conceptual change.
+      theoretical_basis:
+        - Lombardi & Sinatra (2012)
+        - Dole & Sinatra (1998)
+      analytic_focus:
+        - perceived realism
+        - alignment with prior beliefs
+        - willingness to reconsider ideas
+
+    credibility_of_messaging:
+      definition: >
+        The extent to which learners perceive the source of the message as trustworthy
+        and knowledgeable, influencing motivation and depth of cognitive engagement.
+      theoretical_basis:
+        - Wegener et al. (2010)
+        - Lombardi et al. (2014)
+        - Dole & Sinatra (1998)
+      analytic_focus:
+        - trust in instructor or system
+        - perceived expertise
+        - authority of examples or explanations
+
+    comprehensibility_of_messaging:
+      definition: >
+        The degree to which learners understand the instructional message; low
+        comprehensibility may lead to disengagement and persistence of misconceptions.
+      theoretical_basis:
+        - Vosniadou (1994)
+        - Pintrich et al. (1993)
+        - Eagly (1974)
+      analytic_focus:
+        - clarity of language
+        - ease of understanding
+        - breakdowns in comprehension
+
+  individual_characteristics:
+    attention:
+      definition: >
+        The amount of focus learners report giving to the task, which predicts
+        cognitive engagement and supports conceptual change.
+      theoretical_basis:
+        - Broughton et al. (2010)
+        - Jones et al. (2015)
+      analytic_focus:
+        - sustained focus
+        - distraction
+        - task absorption
+
+    personal_relevance:
+      definition: >
+        The extent to which learners perceive the content as connected to their
+        personal experiences, interests, or goals.
+      theoretical_basis:
+        - Dole & Sinatra (1998)
+        - Petty et al. (1981)
+        - Heddy & Sinatra (2013)
+      analytic_focus:
+        - real-life connections
+        - relevance to daily experiences
+        - personal meaning
+
+    culture:
+      definition: >
+        The influence of learners’ cultural knowledge and experiences on engagement
+        and conceptual change, including potential cultural border crossing.
+      theoretical_basis:
+        - Costa (1995)
+        - Aikenhead & Jegede (1999)
+        - Abd-El-Khalick & Akerson (2004)
+      analytic_focus:
+        - cultural congruence
+        - conflict with prior cultural knowledge
+        - accessibility of examples
+
+    engagement_with_task:
+      definition: >
+        Learners’ perceived level of involvement and active participation during
+        the task.
+      analytic_focus:
+        - enjoyment
+        - active participation
+        - interest during activity
+
+    effort_and_persistence:
+      definition: >
+        Learners’ self-reported effort and persistence while working through the task,
+        especially when challenged.
+      analytic_focus:
+        - perseverance
+        - willingness to continue
+        - response to difficulty
+
+    experience_of_flow:
+      definition: >
+        The experience of being fully absorbed in the activity, often marked by
+        focused attention and enjoyment.
+      analytic_focus:
+        - loss of time awareness
+        - deep immersion
+        - sustained enjoyment
+
+  motivation:
+    intrinsic_motivation:
+      definition: >
+        Engagement in an activity for inherent enjoyment and satisfaction.
+      theoretical_basis:
+        - Deci & Ryan (1985)
+      analytic_focus:
+        - enjoyment
+        - curiosity
+        - interest for its own sake
+
+    identified_regulation:
+      definition: >
+        A self-determined form of extrinsic motivation where the activity is valued
+        and personally endorsed.
+      theoretical_basis:
+        - Deci & Ryan (1985)
+      analytic_focus:
+        - perceived usefulness
+        - personal value
+        - goal alignment
+
+    external_regulation:
+      definition: >
+        Motivation driven by external rewards or avoidance of negative consequences.
+      theoretical_basis:
+        - Deci & Ryan (1985)
+      analytic_focus:
+        - rewards
+        - pressure
+        - compliance
+
+    amotivation:
+      definition: >
+        A lack of motivation characterized by feelings of incompetence and lack
+        of control over outcomes.
+      theoretical_basis:
+        - Deci & Ryan (1985)
+        - Abramson et al. (1978)
+      analytic_focus:
+        - disengagement
+        - helplessness
+        - lack of purpose

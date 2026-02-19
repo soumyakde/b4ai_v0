@@ -1,0 +1,27 @@
+---
+title: post_aici_assessment_scoring
+description: Scoring key for Post-AI Conceptual Inventory survey
+scoring_type: binary      # Correct = 1; Incorrect = 0
+true_value: 1
+
+correct_answers:
+  Q4_1: "B"
+  Q4_2: "A"
+  Q4_3: "B"
+  Q4_4: "A"
+  Q4_5: "A"
+  Q4_6: "B"
+  Q4_7: "D"
+  Q4_8: "A"
+  Q4_9: "B"
+  Q4_10: "B"
+  Q4_11: "A"
+  Q4_12: "B"
+  Q4_13: "A"
+  Q4_14: "B"
+  Q4_15: "A"
+  Q4_16: "B"
+  Q4_17: "A"
+  Q4_18: "A"
+  Q4_19: "A"
+  Q4_20: "A"

@@ -1,0 +1,243 @@
+---
+title: B4AI SCCCES Survey
+
+sections:
+  - name: Learner_Initials_w_date
+    questions:
+      - id: Q1_1
+        text: >
+          Module #1. Write your first name initial and
+          last name initial in the box.
+        type: text
+        placeholder: "Enter initials"
+        system_date: true
+        required: true
+
+  - name: Engagement_with_task
+    questions:
+      - id: Q2_1
+        text: "I was engaged with the topic at hand."
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+  - name: Effort_and_persistence
+    questions:
+      - id: Q3_1
+        text: "I put in a lot of effort."
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+      - id: Q3_2
+        text: "I wish we could still continue with the work for a while."
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+  - name: Experience_of_flow
+    questions:
+      - id: Q4_1
+        text: "I was so involved that I forgot everything around me."
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+  - name: Coherency_of_messaging
+    questions:
+      - id: Q5_1
+        text: >
+          While going through this module, I thought about whether the
+          information was well organized.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+      - id: Q5_2
+        text: >
+          While going through this module, I considered whether the
+          information was easy to understand.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+      - id: Q5_3
+        text: >
+          While going through this module, I thought about whether the
+          information flowed well.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+  - name: Plausibility_of_messaging
+    questions:
+      - id: Q6_1
+        text: >
+          While going through this module, I thought about whether the
+          information was believable.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+      - id: Q6_2
+        text: >
+          While going through this module, I thought about whether the
+          information was reasonable.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+  - name: Credibility_of_messaging
+    questions:
+      - id: Q7_1
+        text: >
+          While going through this module, I thought about whether the source
+          of the information was trustworthy.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+      - id: Q7_2
+        text: >
+          While going through this module, I thought about whether the source
+          of the information was believable.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+  - name: Comprehensibility_of_messaging
+    questions:
+      - id: Q8_1
+        text: >
+          While going through this module, I thought about whether the
+          information presented was easy to follow.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+      - id: Q8_2
+        text: >
+          While going through this module, I thought about whether the
+          information was clear.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+  - name: Attention
+    questions:
+      - id: Q9_1
+        text: "I was having trouble paying attention during the module."
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+      - id: Q9_2
+        text: "I was distracted by other thoughts during the module."
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+  - name: Culture
+    questions:
+      - id: Q10_1
+        text: >
+          While going through this module, I thought about whether the topic
+          conflicts with my culture (for example, religion or family values).
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+      - id: Q10_2
+        text: >
+          While going through this module, I thought about whether I agreed
+          with the topic conflicts based on my culture (for example, religion
+          or family values).
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+  - name: Personal_relevance
+    questions:
+      - id: Q11_1
+        text: >
+          While going through this module, I thought about how this topic
+          relates to things I like or care about.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+      - id: Q11_2
+        text: >
+          While going through this module, I thought about how the information
+          could be useful to me.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"
+
+      - id: Q11_3
+        text: >
+          While going through this module, I thought about how the activities
+          would be helpful to my personal goals.
+        type: select
+        options:
+          - "Strongly disagree"
+          - "Disagree"
+          - "Agree"
+          - "Strongly agree"

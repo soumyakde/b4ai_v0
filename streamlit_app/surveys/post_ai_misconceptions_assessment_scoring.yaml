@@ -1,0 +1,15 @@
+---
+title: post_ai_misconceptions_scoring
+description: Scoring key for post_ai_misconceptions assessment
+scoring_type: binary
+true_value: "True"
+
+correct_answers:
+  Q3_1: "False"
+  Q3_2: "False"
+  Q3_3: "False"
+  Q3_4: "False"
+  Q3_5: "No"
+  Q3_6: "Yes"
+  Q3_7: "No"
+  Q3_8: "No"
