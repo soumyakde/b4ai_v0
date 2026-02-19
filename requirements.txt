@@ -1,3 +1,13 @@
 streamlit
-openai
+passlib
+brcypt
 python-dotenv
+sqlalchemy
+pandas
+requests
+pyyaml
+pytest
+openai
+transformers
+tqdm
+altair
