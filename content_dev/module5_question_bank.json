@@ -1,0 +1,17 @@
+[
+  {"id":"Q1","question":"What is a constraint?","options":["Something that gives us more choices","A fun activity","Something that makes everything easy","Something that prevents us from reaching the goal"]},
+  {"id":"Q2","question":"In the context of Sudoku, what are the constraints?","options":["The Rules","The game pieces","None of the above"]},
+  {"id":"Q3","question":"In the context of online shopping, what were the constraints?","options":["The stores' carrying the items or not","Matching the exact items to buy","The budget","All of the above"]},
+  {"id":"Q4","question":"Why it important to follow the rules in Sudoku?","options":["To make the puzzle easy to solve","To make sure you win a prize","To solev the puzzle correctly","To finish the puzzle quickly"]},
+  {"id":"Q5","question":"Imagine you are using an online shopping app. What could be a constraint when choosing what to buy?","options":["Choosing items that are out of stock","Staying within your budget","Adding as many items as you want to the shopping cart","Buying evrything in the store"]},
+  {"id":"Q6","question":"Imagine you are shopping for a shoe, what are some of the constraints","options":["The price","The size","The shape","The brand","All of the above"]},
+  {"id":"Q7","question":"When the robot solved the Sudoku, which part of the problem-solving process helped address constraints","options":["Scanning","Thresholding","Segmentation","Thinning","Algorithm"]},
+  {"id":"Q8","question":"When the robot solved the Sudoku, what was part of the problem-solving process?","options":["Scanning","Thresholding","Segmentation","Thinning","Algorithm","All of the above"]},
+  {"id":"Q9","question":"What was the sensor used by the robot to solve Sudoku","options":["Camera","Line sensor","Scanner","Wheels"]},
+  {"id":"Q10","question":"What was the actuator used by the robot to solve Sudoku","options":["Scanner arm with motor","Wheels with motor","All of the above"]},
+  {"id":"Q11","question":"When you solve Sudoku what sensors did you use?","options":["Eyes to see","Skin to touch","Arms to move","The first two options"]},
+  {"id":"Q12","question":"When you solve Sudoku what actuators did you use?","options":["Eyes to see","Skin to touch","Arms to move","None of the above"]},
+  {"id":"Q13","question":"What helped you solve the Sudoku puzzle?","options":["The rules of the game","The algorithms","All of the above"]},
+  {"id":"Q14","question":"When we connect facts and rules, we can:","options":["Solve problems","Lose our way","Get confused","Stop thinking"]},
+  {"id":"Q15","question":"In the online shopping app, when you completed the activity by meeting all constraints and saved money, what did we say you achieved?","options":["Finished the task","Optimized the budget","All of the above","None of the above"]}
+]

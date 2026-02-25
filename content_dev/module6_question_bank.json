@@ -1,0 +1,20 @@
+[
+  {"id":"Q1","question":"What does \"uncertainty\" mean?","options":["Always having the right answer","Knowing exactly what will happen","Predicting the future with 100% accuracy","Not knowing for sure what will happen"]},
+  {"id":"Q2","question":"\"Uncertainty\" makes the problem-solving environment \"Deterministic (predictable)\":","options":["True","False"]},
+  {"id":"Q3","question":"\"Uncertainty\" makes the problem-solving environment \"Stochastic (unpredictable)\":","options":["True","False"]},
+  {"id":"Q4","question":"Drawing of a colored ball from a transparent (see-through) bag makes the problem-solving environment","options":["Sequential only","Fully observable only","Deterministic (predictable) and Fully observable","None of the above"]},
+  {"id":"Q5","question":"Drawing of colored ball from a transparent bag without replacement makes the problem-solving environment","options":["Sequential only","Fully observable only","Deterministic (predictable), Sequential and Fully observable","None of the above"]},
+  {"id":"Q6","question":"Drawing of colored balls from an opaque (not see-through) bag without replacement makes the problem-solving environment","options":["Sequential only","Partially observable only","Stochastic (unpredictable) and Sequential","None of the above"]},
+  {"id":"Q7","question":"Drawing of a colored ball from an opaque (not see-through) bag makes the problem-solving environment","options":["Sequential only","partially observable only","Stochastic","None of the above"]},
+  {"id":"Q8","question":"Drawing of colored balls from an opaque (not see-through) bag with replacement makes the problem-solving environment","options":["Episodic only","Partially observable only","Deterministic (predictable), Sequential and partially observable","Stochastic (unpredictable) and Episodic"]},
+  {"id":"Q9","question":"Drawing of colored balls from a transparent bag with replacement makes the problem-solving environment","options":["Sequential only","Fully observable only","Deterministic (predictable), Episodic and Fully observable","None of the above"]},
+  {"id":"Q10","question":"Rolling 1 dice, what's the probability of getting a 6","options":["1","1/2","1/3","1/4","1/5","1/6"]},
+  {"id":"Q11","question":"Rolling 2 dice together, what's the probability of getting two 6s","options":["1/6","1/12","1/18","1/36"]},
+  {"id":"Q12","question":"Rolling 2 dice together, what's the probability that the numbers add up to 7","options":["1/6","1/12","1/18","1/36"]},
+  {"id":"Q13","question":"Rolling 2 dice together, what's the probability of atleast on dice shows a 6","options":["1/36","5/36","10/36","11/36"]},
+  {"id":"Q14","question":"In the real-life example of uncertainty, the weather forecast was shown as an example, why?","options":["Modern equipment and AI makes the weather forecast predictable","Even the most modern equipment and AI cannot make the weather forecast predictable","Weather does not have pattern","None of the above"]},
+  {"id":"Q15","question":"When a weather forecaster says \"30% chance of rain\", what do they mean?","options":["It will rain","It will not rain","There is a small possibility it may rain","There is a high possibility it may rain"]},
+  {"id":"Q16","question":"When a weather forecaster says \"80% chance of rain\", what do they mean?","options":["It may rain","It may not rain","There is a small possibility it may rain","There is a high possibility it may rain"]},
+  {"id":"Q17","question":"When a weather forecaster says \"80% chance of rain\", what is the possibility that it may not rain?","options":["None","There is a small possibility it may rain","There is a 20% possibility it may not rain"]},
+  {"id":"Q18","question":"When a weather forecaster says \"30% chance of rain\", what is the possibility that it may not rain?","options":["It will rain","It will not rain","There is a small possibility it may rain","There is a 70% possibility it may not rain"]}
+]
