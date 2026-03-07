@@ -1,0 +1,44 @@
+# streamlit_app/surveys/qualitative_prompts.yaml
+
+# ----------------------------------------
+# Qualitative Prompts — Streamlit Surveys
+# ----------------------------------------
+
+# -----------------------------
+# Instrument 1: Student Reflections
+# -----------------------------
+instrument_key: module_reflections
+description: "Student reflection responses for each module."
+model_name: gpt-4
+theory_block: |
+  CONSTRUCT DEFINITIONS:
+  1. Reflection Depth — how deeply the student analyzes the topic.
+  2. Evidence Use — quality of examples or reasoning.
+  3. Self-Awareness — recognition of own learning or challenges.
+constructs:
+  - Reflection Depth
+  - Evidence Use
+  - Self-Awareness
+prompt_example: |
+  "Module: m1
+   Question: What did you learn in this module?
+   Response: I realized that..."
+  
+# -----------------------------
+# Instrument 2: Self-Assessment
+# -----------------------------
+---
+instrument_key: self_assessment
+description: "Student self-assessments of their own skills or confidence."
+model_name: gpt-4
+theory_block: |
+  CONSTRUCT DEFINITIONS:
+  1. Confidence Level — how confident the student feels about applying skills.
+  2. Accuracy of Self-Evaluation — correctness of student's own assessment.
+constructs:
+  - Confidence Level
+  - Accuracy of Self-Evaluation
+prompt_example: |
+  "Module: m1
+   Question: Rate your confidence in solving problems related to this module.
+   Response: I feel fairly confident because..."

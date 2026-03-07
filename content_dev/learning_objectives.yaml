@@ -1,44 +1,254 @@
 ---
 learning_objectives:
+
   module_1:
-    title: "Understanding Intelligence and Problem-Solving"
+    title: "Natural vs. Artificial Intelligence in Problem-Solving"
+
+    module_goal: >
+      Give students a concrete, curiosity-driven foundation for understanding AI —
+      not through code or hardware, but through direct comparison of how living
+      and artificial agents sense the world, make decisions, and learn from experience.
+
     core_ai_concepts:
       - intelligence (natural vs artificial)
-      - problem-solving
       - agents and environments
-      - algorithms as strategies
+      - sensing and acting
+      - problem-solving
+      - inference and feedback
+
     learning_objectives:
       - >
-        Learners can describe differences and similarities between human, animal,
-        and machine problem-solving.
+        Learners can identify and compare attributes of biological and artificial
+        agents, including sensing, processing, and acting mechanisms.
       - >
-        Learners can explain how simple strategies (e.g., trial-and-error,
-        left-hand-on-the-wall) help solve problems.
+        Learners can classify problem-solving environments using descriptors such
+        as known vs unknown, observable vs partially observable, static vs dynamic,
+        and single vs multi-agent.
       - >
-        Learners can identify characteristics that distinguish AI-enabled systems
-        from automation or IoT systems.
+        Learners can distinguish similarities and differences between biological
+        and machine problem-solving processes using maze-based examples.
+      - >
+        Learners can practice evidence-based observation and reasoning by drawing
+        conclusions from observed behaviors.
+      - >
+        Learners can reflect on accountability, feedback, and learning in intelligent systems.
+
     analytic_indicators:
-      - use of examples from mazes or robots
-      - references to planning, decision-making, or learning
-      - reflections on responsibility or ethics
+      - comparison between humans, animals, and machines
+      - references to sensing or decision-making
+      - evidence-based reasoning explanations
+      - reflections on responsibility or learning
 
   module_2:
-    title: "Goal-Based Problem Solving"
+    title: "Goal-Based Problem-Solving"
+
+    module_goal: >
+      Ground abstract AI problem-solving concepts in tangible experiences,
+      helping students internalize that structured planning and decision-making
+      processes underpin both human reasoning and intelligent systems.
+
     core_ai_concepts:
-      - initial, present, and goal states
+      - goal states
+      - planning
       - decomposition
       - abstraction
       - supervised learning
+      - problem-solving environments
+
     learning_objectives:
       - >
-        Learners can explain what a goal is and how breaking problems into smaller
-        steps helps solve them.
+        Learners can execute goal-based tasks using an 8-step structured
+        problem-solving process from initial state to goal state.
       - >
-        Learners can relate model-building activities to how machines learn from
-        examples.
-    analytic_indicators:
-      - references to steps or planning
-      - understanding of goals and subgoals
-      - real-life transfer examples
+        Learners can characterize problem-solving environments across multiple dimensions.
+      - >
+        Learners can distinguish between strategic planning and tactical execution.
+      - >
+        Learners can apply decomposition and abstraction to complex tasks.
+      - >
+        Learners can differentiate sequential and episodic actions during problem solving.
+      - >
+        Learners can explain supervised learning through hands-on model-building experiences.
 
-      # Modules 3–7 follow the same structure
+    analytic_indicators:
+      - references to goals or subgoals
+      - planning language or sequencing
+      - decomposition examples
+      - transfer to real-world scenarios
+
+  module_3:
+    title: "Introduction to Algorithms"
+
+    module_goal: >
+      Help students demystify how AI “thinks” by revealing that intelligent
+      behavior emerges from structured logic, pattern recognition, and
+      algorithmic decision-making processes.
+
+    core_ai_concepts:
+      - algorithms
+      - rule-based systems
+      - decision trees
+      - search strategies
+      - minimax optimization
+      - pattern recognition
+
+    learning_objectives:
+      - >
+        Learners can recognize patterns and explain their importance in both
+        human and AI problem-solving.
+      - >
+        Learners can apply rule-based strategies to structured games.
+      - >
+        Learners can construct and interpret decision trees representing possible outcomes.
+      - >
+        Learners can explain how Depth-First Search evaluates solution paths.
+      - >
+        Learners can describe the MiniMax algorithm in competitive environments.
+      - >
+        Learners can design and follow step-by-step algorithms to solve defined problems.
+      - >
+        Learners can connect algorithmic reasoning to broader AI environment concepts.
+
+    analytic_indicators:
+      - rule-based reasoning references
+      - algorithm descriptions
+      - decision-tree explanations
+      - optimization reasoning
+
+  module_4:
+    title: "Bias, Hallucinations & Natural Language in AI"
+
+    module_goal: >
+      Equip students with critical AI literacy skills to evaluate, question,
+      and responsibly interact with AI systems, emphasizing fairness,
+      transparency, and limitations of language models.
+
+    core_ai_concepts:
+      - natural language processing
+      - inference
+      - ambiguity
+      - hallucinations
+      - bias in AI
+      - ethical evaluation
+
+    learning_objectives:
+      - >
+        Learners can apply evidence-based inferencing using textual information.
+      - >
+        Learners can identify and resolve referential ambiguity in language.
+      - >
+        Learners can critically evaluate AI-generated responses against human reasoning.
+      - >
+        Learners can explain AI hallucinations and their consequences.
+      - >
+        Learners can describe historical foundations of NLP concepts.
+      - >
+        Learners can detect and analyze sources of bias in AI systems.
+
+    analytic_indicators:
+      - references to evidence or justification
+      - bias identification
+      - critique of AI outputs
+      - ethical reflections
+
+  module_5:
+    title: "Constraints in Problem-Solving"
+
+    module_goal: >
+      Move students from abstract rule-following toward critical thinking by
+      understanding constraints as the structural framework enabling intelligent
+      decision-making.
+
+    core_ai_concepts:
+      - constraints
+      - optimization
+      - rule-based reasoning
+      - trade-offs
+      - recommendation systems
+      - bias and decision limits
+
+    learning_objectives:
+      - >
+        Learners can define constraints and explain their role in shaping decisions.
+      - >
+        Learners can apply constraint reasoning using Sudoku-style logic problems.
+      - >
+        Learners can compare human intuition and algorithmic problem-solving approaches.
+      - >
+        Learners can evaluate trade-offs under competing real-world constraints.
+      - >
+        Learners can recognize bias and optimization in recommendation systems.
+      - >
+        Learners can connect constraint-based reasoning across multiple contexts.
+
+    analytic_indicators:
+      - constraint identification
+      - optimization reasoning
+      - trade-off explanations
+      - comparison of human vs AI strategies
+
+  module_6:
+    title: "Uncertainty in Problem-Solving"
+
+    module_goal: >
+      Help students understand that uncertainty is inherent in real-world
+      decision-making and that probabilistic reasoning is essential for
+      interpreting AI predictions responsibly.
+
+    core_ai_concepts:
+      - uncertainty
+      - probability
+      - stochastic environments
+      - prediction
+      - inference under incomplete information
+
+    learning_objectives:
+      - >
+        Learners can define uncertainty and distinguish it from deterministic outcomes.
+      - >
+        Learners can classify environments as deterministic or stochastic.
+      - >
+        Learners can calculate basic probabilities using simple scenarios.
+      - >
+        Learners can interpret uncertainty in real-world AI applications.
+      - >
+        Learners can connect probabilistic reasoning to earlier AI problem-solving concepts.
+
+    analytic_indicators:
+      - probability reasoning
+      - uncertainty explanations
+      - prediction discussions
+      - real-world AI examples
+
+  module_7:
+    title: "Introduction to Machine Learning"
+
+    module_goal: >
+      Bridge conceptual understanding and real implementation by enabling
+      students to train, evaluate, and deploy functional machine learning models.
+
+    core_ai_concepts:
+      - supervised learning
+      - training data
+      - classification
+      - model evaluation
+      - confidence and uncertainty
+      - AI application deployment
+
+    learning_objectives:
+      - >
+        Learners can integrate concepts from earlier modules into machine learning contexts.
+      - >
+        Learners can train supervised learning models using labeled datasets.
+      - >
+        Learners can identify constraints affecting training data quality and diversity.
+      - >
+        Learners can evaluate model predictions and interpret confidence levels.
+      - >
+        Learners can implement trained AI models within Scratch applications.
+
+    analytic_indicators:
+      - references to training or labeling
+      - evaluation of model performance
+      - discussion of uncertainty in predictions
+      - application-building reflections

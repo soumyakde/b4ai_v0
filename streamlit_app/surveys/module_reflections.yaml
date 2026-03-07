@@ -1,6 +1,12 @@
 # Shared reflection questions for all modules
 # Student-facing, ages 10–12
 ---
+instrument_key: module_reflections
+instrument_type: assessment
+version: 1.0
+
+module_id: global
+scope: pre_post
 REFLECTION_QUESTIONS:
   - id: conceptual_change
     text: |

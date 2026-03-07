@@ -1,4 +1,10 @@
 ---
+instrument_key: post_ai_misconceptions_assessment
+instrument_type: assessment
+version: 1.0
+
+module_id: global
+scope: post
 title: Post Intervention AI Misconceptions
 
 questions:

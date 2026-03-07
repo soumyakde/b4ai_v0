@@ -1,4 +1,10 @@
 ---
+instrument_key: b4ai_sccces_survey
+instrument_type: survey
+version: 1.0
+
+module_id: global
+scope: pre_post
 title: B4AI SCCCES Survey
 
 sections:

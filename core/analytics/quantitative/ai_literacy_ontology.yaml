@@ -1,0 +1,156 @@
+#  core/analysis/quantitative/ai_literacy_ontology.yaml
+---
+ontology_name: basicsb4ai_ai_literacy
+version: 1.0
+
+description: >
+  Cross-module competency ontology defining developmental progression
+  of AI literacy skills across the BasicsB4AI curriculum.
+
+# -------------------------------------------------
+# LEVEL 1 — AI LITERACY DIMENSIONS
+# -------------------------------------------------
+
+dimensions:
+
+  cognitive_understanding:
+    description: Conceptual understanding of how AI systems work.
+
+  computational_reasoning:
+    description: Ability to reason using structured, algorithmic thinking.
+
+  critical_ai_literacy:
+    description: Ability to evaluate AI outputs, bias, and limitations.
+
+  probabilistic_thinking:
+    description: Understanding uncertainty and prediction.
+
+  applied_ai_creation:
+    description: Ability to build and deploy AI-enabled artifacts.
+
+# -------------------------------------------------
+# LEVEL 2 — COMPETENCIES (LATENT CONSTRUCTS)
+# -------------------------------------------------
+
+competencies:
+
+  agent_reasoning:
+    dimension: cognitive_understanding
+    description: Understanding agents, environments, and goal-directed behavior.
+
+  goal_based_planning:
+    dimension: computational_reasoning
+    description: Planning actions toward goals using structured reasoning.
+
+  algorithmic_thinking:
+    dimension: computational_reasoning
+    description: Designing and following step-by-step procedures.
+
+  constraint_reasoning:
+    dimension: computational_reasoning
+    description: Solving problems within defined rules and limits.
+
+  probabilistic_reasoning:
+    dimension: probabilistic_thinking
+    description: Reasoning under uncertainty using probability concepts.
+
+  model_evaluation:
+    dimension: critical_ai_literacy
+    description: Evaluating AI outputs critically and identifying limitations.
+
+  bias_awareness:
+    dimension: critical_ai_literacy
+    description: Recognizing societal and data bias in AI systems.
+
+  machine_learning_understanding:
+    dimension: applied_ai_creation
+    description: Understanding training, prediction, and model behavior.
+
+  ai_application_building:
+    dimension: applied_ai_creation
+    description: Implementing AI models into functioning applications.
+
+# -------------------------------------------------
+# LEVEL 3 — PROGRESSION LEVELS
+# -------------------------------------------------
+
+progression_levels:
+
+  level_1:
+    label: awareness
+    description: Recognizes concepts with guidance.
+
+  level_2:
+    label: comprehension
+    description: Explains ideas using examples.
+
+  level_3:
+    label: application
+    description: Applies concepts in structured tasks.
+
+  level_4:
+    label: transfer
+    description: Applies concepts to novel contexts independently.
+
+# -------------------------------------------------
+# MODULE → COMPETENCY ALIGNMENT
+# -------------------------------------------------
+
+module_alignment:
+
+  module_1:
+    competencies:
+      - agent_reasoning
+      - model_evaluation
+
+  module_2:
+    competencies:
+      - goal_based_planning
+      - agent_reasoning
+
+  module_3:
+    competencies:
+      - algorithmic_thinking
+      - goal_based_planning
+
+  module_4:
+    competencies:
+      - bias_awareness
+      - model_evaluation
+
+  module_5:
+    competencies:
+      - constraint_reasoning
+      - algorithmic_thinking
+
+  module_6:
+    competencies:
+      - probabilistic_reasoning
+      - model_evaluation
+
+  module_7:
+    competencies:
+      - machine_learning_understanding
+      - ai_application_building
+      - probabilistic_reasoning
+
+# -------------------------------------------------
+# ANALYTIC SIGNALS (FOR LLM + QUANT PIPELINE)
+# -------------------------------------------------
+
+evidence_signals:
+
+  explanation_quality:
+    weight: 0.25
+
+  task_completion:
+    weight: 0.25
+
+  transfer_example:
+    weight: 0.20
+
+  reasoning_language:
+    weight: 0.15
+
+  reflection_depth:
+    weight: 0.15

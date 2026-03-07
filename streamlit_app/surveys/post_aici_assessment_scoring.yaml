@@ -1,4 +1,10 @@
 ---
+instrument_key: post_aici_assessment_scoring
+instrument_type: assessment
+version: 1.0
+
+module_id: global
+scope: post
 title: post_aici_assessment_scoring
 description: Scoring key for Post-AI Conceptual Inventory survey
 scoring_type: binary      # Correct = 1; Incorrect = 0

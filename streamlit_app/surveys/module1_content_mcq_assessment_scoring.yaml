@@ -1,4 +1,9 @@
 ---
+instrument_key: module1_content_mcq_assessment
+instrument_type: assessment
+version: 1.0
+module_id: module1
+scope: module
 title: module1_content_mcq_assessment_scoring
 description: Scoring key for Module 1 MCQ Assessment
 scoring_type: binary      # Correct = 1; Incorrect = 0

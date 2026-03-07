@@ -1,4 +1,10 @@
 ---
+instrument_key: pre_ai_misconceptions_assessment_scoring
+instrument_type: assessment
+version: 1.0
+
+module_id: global
+scope: pre
 title: pre_ai_misconceptions_scoring
 description: Scoring key for pre_ai_misconceptions assessment
 type: binary

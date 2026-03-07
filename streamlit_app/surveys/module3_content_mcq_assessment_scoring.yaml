@@ -1,4 +1,9 @@
 ---
+instrument_key: module3_content_mcq_assessment
+instrument_type: assessment
+version: 1.0
+module_id: module3
+scope: module
 title: module3_content_mcq_assessment_scoring
 description: Scoring key for Module 3 MCQ Assessment
 scoring_type: binary
@@ -6,32 +11,32 @@ true_value: 1
 
 correct_answers:
   Q1: "B"
-  Q2: "B"
+  Q2: "C"
   Q3: "B"
-  Q4: "B"
+  Q4: "D"
   Q5: "A"
-  Q6: "A"
-  Q7: "A"
+  Q6: "D"
+  Q7: "D"
   Q8: "A"
-  Q9: "A"
+  Q9: "C"
   Q10: "B"
-  Q11: "A"
-  Q12: "A"
+  Q11: "C"
+  Q12: "D"
   Q13: "A"
-  Q14: "A"
-  Q15: "A"
-  Q16: "A"
+  Q14: "D"
+  Q15: "B"
+  Q16: "C"
   Q17: "A"
-  Q18: "B"
-  Q19: "A"
+  Q18: "C"
+  Q19: "B"
   Q20: "A"
-  Q21: "A"
+  Q21: "D"
   Q22: "A"
   Q23: "A"
   Q24: "A"
-  Q25: "A"
+  Q25: "B"
   Q26: "A"
-  Q27: "A"
+  Q27: "D"
   Q28: "A"
-  Q29: "A"
-  Q30: "A"
+  Q29: "C"
+  Q30: "B"

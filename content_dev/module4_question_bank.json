@@ -1,8 +1,8 @@
 [
-  {"id":"Q1","question":"When you read the passage, were the answers to the questions explicitly (mentioned clearly) in the passage?","options":["Yes","No"]},
+  {"id":"Q1","question":"When you read the passage, were the answers to the questions explicitly (mentioned clearly) stated in the passage?","options":["Yes","No"]},
   {"id":"Q2","question":"When you read the passage, were the answers to the questions implicit (not mentioned clearly) in the passage?","options":["Yes","No"]},
-  {"id":"Q3","question":"When you read the passage, to find the answers to the questions, what did you have to look for in the passage?","options":["Information","Words","Evidence"]},
-  {"id":"Q4","question":"What is evidence, in the context of the passage?","options":["A pattern of words/phrases that helps support your answers","A pattern of words/phrases","All of the above"]},
+  {"id":"Q3","question":"When you read the passage, to find the answers to the questions, what did you have to look for in the passage?","options":["Information","Words","Sentences","Evidence"]},
+  {"id":"Q4","question":"What is evidence, in the context of the passage?","options":["A pattern of words/phrases that helps support your answers","A pattern of words/phrases","Any sentence in the paragraph","All of the above"]},
   {"id":"Q5","question":"When AI answered the questions from the passage, what was the expectation?","options":["The answers could be hallucinated (made up)","The answers could have bias","All the AIs could give the same answers","The answers could be different for all AIs","All the above"]},
   {"id":"Q6","question":"When AI answered the questions from the passage, what did we find?","options":["The answers were hallucinated (made up)","The answers were biased","All the AIs gave almost the same answers","All the above"]},
   {"id":"Q7","question":"Should you always trust the answers AI gives you?","options":["Yes","No"]},
@@ -12,10 +12,10 @@
   {"id":"Q11","question":"When you inferred the answers based on evidence from the passage, did you fill missing information in the passage?","options":["Yes","No"]},
   {"id":"Q12","question":"When you inferred the answers based on evidence from the passage, did you connect different parts in the passage?","options":["Yes","No"]},
   {"id":"Q13","question":"When you inferred the answers based on evidence from the passage, did you make smart guesses?","options":["Yes","No"]},
-  {"id":"Q14","question":"When you say to Alexa, \"I am feeling cold\"and it switches off the fan; How did it know what you actually wanted it to do?","options":["It inferred","It randomly guessed","It asked another AI","None of the above"]},
-  {"id":"Q15","question":"When you say to Alexa, \"I am feeling sleepy\"and it switches off the light; How did it know what you actually wanted it to do?","options":["It inferred","It randomly guessed","It asked another AI","None of the above"]},
+  {"id":"Q14","question":"When you say to Alexa, \"I am feeling cold\"and it switches off the fan; How did it know what you actually wanted it to do?","options":["It randomly guessed","It inferred","It asked another AI","None of the above"]},
+  {"id":"Q15","question":"When you say to Alexa, \"I am feeling sleepy\"and it switches off the light; How did it know what you actually wanted it to do?","options":["It randomly guessed","It asked another AI","It inferred","None of the above"]},
   {"id":"Q16","question":"When you say to Alexa, \"I am feeling warm\"and it switches on the fan; How did it know what you actually wanted it to do?","options":["It inferred","It randomly guessed","It asked another AI","None of the above"]},
-  {"id":"Q17","question":"When you say to Alexa, \"I need to study now\"and it switches on the light; How did it know what you actually wanted it to do?","options":["It inferred","It randomly guessed","It asked another AI","None of the above"]},
-  {"id":"Q18","question":"If AI always mentions \"he\" in the sentence, \"the doctor phoned the nurse because he was late\" what does it inform us about its training?","options":["It's training had societal bias","Its training had language bias","Its training has human thinking bias","All of the above"]},
-  {"id":"Q19","question":"If AI always mentions \"she\" in the sentence, \"the nurse phoned the doctor because she was late\" what does it inform us about its training?","options":["It's training had societal bias","Its training had language bias","Its training has human thinking bias","All of the above"]}
+  {"id":"Q17","question":"When you say to Alexa, \"I need to study now\"and it switches on the light; How did it know what you actually wanted it to do?","options":["It randomly guessed","It inferred","It asked another AI","None of the above"]},
+  {"id":"Q18","question":"If AI always mentions \"he\" in the sentence, \"the doctor phoned the nurse because he was late\" what does it inform us about its training?","options":["Its training had language bias","Its training has human thinking bias","It's training had societal bias","All of the above"]},
+  {"id":"Q19","question":"If AI always mentions \"she\" in the sentence, \"the nurse phoned the doctor because she was late\" what does it inform us about its training?","options":["Its training had language bias","It's training had societal bias","Its training has human thinking bias","All of the above"]}
 ]

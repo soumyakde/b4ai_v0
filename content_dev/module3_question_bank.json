@@ -1,10 +1,10 @@
 [
   {"id":"Q1","question":"Why is it important to be flexible and change your plan while solving problems?","options":["to stick with one plan no matter what","to adjust if things change","to confuse others","to avoid making any decisions"]},
   {"id":"Q2","question":"What does recognizing patterns help you do?","options":["Ignore repeating things","Make random guesses","Find similarities and themes","Avoid looking for connections"]},
-  {"id":"Q3","question":"What is a \"goal\" when solving a maze? It is:","options":["The start","The exit","The wall","The pencil"]},
-  {"id":"Q4","question":"The place where you begin is called the:","options":["Goal state","Initial state","Present state","Destination"]},
+  {"id":"Q3","question":"What is a \"goal\" when solving a maze? It is:","options":["To get to the start","To get to the exit","To get to the wall","To get the pencil"]},
+  {"id":"Q4","question":"The state where you begin the problem-solving process is called the:","options":["Goal state","Initial state","Present state","Destination"]},
   {"id":"Q5","question":"If you try one path, go back, and try another, you are:","options":["Exploring","Learning","Optimizing","All of the above"]},
-  {"id":"Q6","question":"Looking at all possible paths is called:","options":["Searching","Learning","Optimizing","All of the above"]},
+  {"id":"Q6","question":"Looking at all possible paths is called:","options":["Searching","Learning","Optimizing", "Both A and B","All of the above"]},
   {"id":"Q7","question":"What do rules help you with in games and activities?","options":["To make things confusing","To let you do anything you want","To ignore steps and instructions","To guide what you do and how you decide"]},
   {"id":"Q8","question":"What is commonsense reasoning?","options":["Using everyday knowledge to solve problems","Ignoring what you know","Making random choices","Doing things without thinking"]},
   {"id":"Q9","question":"What do you need to do when making a decision?","options":["Guess without thinking","Always do what someone else says","Compare options and think about what could happen","Ignore the consequences"]},
@@ -17,16 +17,16 @@
   {"id":"Q16","question":"Why should you observe your opponent's moves closely?","options":["To ignore what they are doing","To confuse yourself","To learn from them and predict their next move","To copy them"]},
   {"id":"Q17","question":"What does it mean to model effective strategies from a more experienced player?","options":["To imitate their good strategies and learn from them","To ignore their moves","To do the opposite they do","To guess randomly"]},
   {"id":"Q18","question":"Why is giving feedback helpful when playing with others?","options":["To make them feel bad","To confuse them","To help them learn from mistakes and improve","None of the above"]},
-  {"id":"Q19","question":"How can talking with your opponent help during a game?","options":["By distracting them","By learning about their thought process","By confusing youself","By ignoring the game"]},
+  {"id":"Q19","question":"How can talking with your opponent help you during a game?","options":["By distracting them","By learning about their thought process","By confusing youself","By ignoring the game"]},
   {"id":"Q20","question":"If you can only see one step ahead, it is:","options":["Partially observable","Known","Fully observable","None of the above"]},
   {"id":"Q21","question":"What can you learn from your opponent's non-verbal communications like facial expressions and body language?","options":["Nothing important","Make yourself feel better","How to lose quickly","Clues about their thought processes and strategy"]},
   {"id":"Q22","question":"You playing TicTacToe with another player is an example of","options":["Single-agent Competitive Stochastic Environment","Multi-agent Competitive Stochastic Environment","Single-agent Cooperative Environment","Single-agent Competitive Deterministic Environment"]},
-  {"id":"Q23","question":"Is playing with Rubik's cube considered?","options":["Single-agent Sequential Fully observable Deterministic Environment","Single-agent Sequential Partially observable Stochastic Environment","Multi-agent Sequential Fully observable Deterministic Environment","All of the above"]},
+  {"id":"Q23","question":"Is playing with Rubik's cube considered?","options":["Single-agent, Sequential, Fully observable, Deterministic Environment","Single-agent, Episodic, Partially observable, Stochastic Environment","Multi-agent, Sequential, Fully observable, Deterministic Environment","All of the above"]},
   {"id":"Q24","question":"Playing TicTacToe requires sequential moves; however, two TicTacToe games are Episodic","options":["True","False"]},
   {"id":"Q25","question":"Is the outcome of a TicTacToe game determinsitic?","options":["Yes","No"]},
   {"id":"Q26","question":"Is the outcome of a TicTacToe game stochastic?","options":["Yes","No"]},
   {"id":"Q27","question":"What algorithm did the AI TicTacToe use to play the game?","options":["Depth First Search","Best guess","Game Tree","MiniMax"]},
   {"id":"Q28","question":"What strategy did the AI TicTacToe use to play the game?","options":["Depth First Search","Best guess","Game Tree","MiniMax"]},
   {"id":"Q29","question":"How do we describe the layers of the TicTacToe game starting from the root node to the leafs?","options":["Depth First Search","Best guess","Game Tree","MiniMax"]},
-  {"id":"Q30","question":"Why is the game of TicTacToe called Zero Sum game?","options":["It has 3 possible results","The sum of the results is 0","The game has no result","All results are zero"]}
+  {"id":"Q30","question":"Why is the game of TicTacToe called Zero Sum game?","options":["It has 3 possible results","The sum of the possible results (+1,0,-1) is 0","The game has no result","All results are zero"]}
 ]

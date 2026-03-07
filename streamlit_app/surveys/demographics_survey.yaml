@@ -1,4 +1,9 @@
 ---
+instrument_key: demographics_survey
+instrument_type: survey
+version: 1.0
+module_id: global
+scope: baseline
 title: Demographics Survey
 description: Participant background and initial information (Pre-Event Rev 3)
 

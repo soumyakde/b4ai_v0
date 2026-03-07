@@ -1,6 +1,6 @@
 # ==========================================================
-# modules/module_1.py
-# Module 1 Runtime Renderer
+# modules/module_2.py
+# Module 2 Runtime Renderer
 # Clean, YAML-driven survey architecture
 # ==========================================================
 

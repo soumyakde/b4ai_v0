@@ -1,4 +1,11 @@
 ---
+instrument_key: b4ai_sccces_scoring
+instrument_type: survey
+version: 1.0
+
+module_id: global
+scope: pre_post
+
 title: b4ai_sccces_scoring
 description: Likert scoring for B4AI SCCCES survey
 

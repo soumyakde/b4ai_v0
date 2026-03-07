@@ -54,7 +54,7 @@ MODULE_DEFINITION = {
                     #r"C:\Users\soumy\basics4aiv1_clean\content_dev"
                     #r"\module1_question_bank.json"
                 #),
-                "num_questions": 20,
+                "num_questions": 20, # 02/24/26 replaced 20 with 10 to generate questionnaire with 10 randomly selected questions 
                 "randomize": True,
             },
 
