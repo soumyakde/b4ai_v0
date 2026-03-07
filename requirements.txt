@@ -11,3 +11,8 @@ openai
 transformers
 tqdm
 altair
+numpy
+matplotlib
+plotly
+scikit-learn
+seaborn
