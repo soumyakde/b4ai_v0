@@ -1,4 +1,5 @@
 """
+modules/registry/validators.py 
 Passive validators for module and instrument definitions.
 
 This module is intentionally NON-BLOCKING:

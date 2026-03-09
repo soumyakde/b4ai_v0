@@ -12,8 +12,6 @@ Provides functionalities:
 """
 
 import streamlit as st
-import sqlite3
-
 from core.admin import (
     user_service,
     data_service,
@@ -52,15 +50,15 @@ def show_admin_dashboard(username: str):
     ])
 
     # ---------------------------------------------------------
-# USER MANAGEMENT
-# ---------------------------------------------------------
+    # USER MANAGEMENT
+    # ---------------------------------------------------------
     with tabs[0]:
         st.subheader("User Governance")
 
         # Fetch users
         try:
             users = user_service.get_all_users()
-            st.dataframe(users, width="stretch")
+            st.dataframe(users, use_container_width=True)
         except Exception as e:
             st.error(f"Error fetching users: {e}")
             st.stop()
@@ -69,59 +67,27 @@ def show_admin_dashboard(username: str):
         st.subheader("Create User")
         new_user = st.text_input("Username")
         new_role = st.selectbox("Role", ["student", "teacher", "admin"])
-
-        # -----------------------------
-        # Cohort dropdown
-        # -----------------------------
-        cohort_list = user_service.get_all_cohorts()  # fetch from cohorts table
-        new_cohort = st.selectbox(
-            "Assign Cohort",
-            ["None"] + cohort_list
-        )
-        cohort_to_pass = None if new_cohort == "None" else new_cohort
-
         if st.button("Create User"):
             if new_user:
                 try:
-                    user_service.create_user(
-                        admin_user=username,      # current admin performing the action
-                        username=new_user,
-                        role=new_role,
-                        password="defaultpass",   # adjust if you want a password input field
-                        cohort_id=cohort_to_pass
-                    )
+                    user_service.create_user(username, new_user, new_role)
                     st.success("User created")
                     st.experimental_rerun()
                 except Exception as e:
                     st.error(f"Error creating user: {e}")
 
         st.divider()
-        st.subheader("Change Role & Cohort")
+        st.subheader("Change Role")
         target_user = st.text_input("Username to modify")
         role_change = st.selectbox("New Role", ["student", "teacher", "admin"], key="role_change")
-
-        # Cohort dropdown for reassignment
-        cohort_list = user_service.get_all_cohorts()  # fetch from cohorts table
-        selected_cohort = st.selectbox(
-            "Reassign Cohort (optional)",
-            ["None"] + cohort_list,
-            key="cohort_change"
-        )
-        cohort_to_pass = None if selected_cohort == "None" else selected_cohort
-
-        if st.button("Update Role & Cohort"):
+        if st.button("Update Role"):
             if target_user:
                 try:
-                    # Update role
-                    user_service.change_role(admin_user=username, username=target_user, new_role=role_change)
-
-                    # Update cohort (None will clear cohort assignment)
-                    user_service.update_user_cohort(admin_user=username, username=target_user, new_cohort_id=cohort_to_pass)
-
-                    st.success("Role and cohort updated")
+                    user_service.change_role(username, target_user, role_change)
+                    st.success("Role updated")
                     st.experimental_rerun()
                 except Exception as e:
-                    st.error(f"Error updating role/cohort: {e}")
+                    st.error(f"Error updating role: {e}")
 
         st.divider()
         st.subheader("Delete User")
@@ -142,25 +108,6 @@ def show_admin_dashboard(username: str):
             if impersonate_user:
                 st.session_state.username = impersonate_user
                 st.rerun()
-
-        st.divider()
-        st.subheader("Cohort Management")
-        new_cohort_input = st.text_input("New Cohort ID")
-        if st.button("Create Cohort"):
-            if new_cohort_input:
-                try:
-                    conn = user_service.get_connection()
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "INSERT OR IGNORE INTO cohorts (cohort_id) VALUES (?)",
-                        (new_cohort_input.strip(),)
-                    )
-                    conn.commit()
-                    conn.close()
-                    st.success(f"Cohort '{new_cohort_input}' created.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error creating cohort: {e}")
 
     # ---------------------------------------------------------
     # DATA MANAGEMENT
@@ -204,7 +151,7 @@ def show_admin_dashboard(username: str):
         st.subheader("Loaded Instruments")
         try:
             instruments = research_service.get_loaded_instruments()
-            st.dataframe({"Instrument": instruments}, width="stretch")
+            st.dataframe({"Instrument": instruments}, use_container_width=True)
         except Exception as e:
             st.error(f"Error loading instruments: {e}")
 
@@ -304,6 +251,6 @@ def show_admin_dashboard(username: str):
         st.subheader("Audit Log")
         try:
             logs = diagnostics_service.get_audit_log()
-            st.dataframe(logs, width="stretch")
+            st.dataframe(logs, use_container_width=True)
         except Exception as e:
             st.error(f"Error fetching audit log: {e}")

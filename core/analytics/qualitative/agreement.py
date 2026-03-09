@@ -1,5 +1,5 @@
 """
-agreement.py
+core/analytics/qualitative/agreement.py
 -------------------------------------------------------
 Qualitative Inter-Rater Reliability Module
 

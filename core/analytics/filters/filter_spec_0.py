@@ -5,15 +5,27 @@ import hashlib
 import json
 import pandas as pd
 
+
 class FilterSpec:
     """
     Deterministic filter contract for canonical dataset.
-    Now includes optional cohort filtering.
 
     Operates ONLY on canonical schema:
-        user_id, module_id, instrument_key, question_id,
-        response_value, item_score, construct, grade,
-        submitted_at, completed_at
+
+        user_id
+        module_id
+        instrument_key
+        question_id
+        response_value
+        item_score
+        construct
+        grade
+        submitted_at
+        completed_at
+
+    No raw-schema coupling.
+    No free-form filters.
+    Fully reproducible.
     """
 
     # -----------------------------------------------------
@@ -33,7 +45,6 @@ class FilterSpec:
         completed_before: Optional[str] = None,
         min_score: Optional[float] = None,
         max_score: Optional[float] = None,
-        cohort_ids: Optional[List[str]] = None,  # NEW
     ):
         self.module_ids = module_ids
         self.instrument_keys = instrument_keys
@@ -47,10 +58,9 @@ class FilterSpec:
         self.completed_before = completed_before
         self.min_score = min_score
         self.max_score = max_score
-        self.cohort_ids = cohort_ids  # NEW
 
     # -----------------------------------------------------
-    # Internal sorting for deterministic hashing
+    # Internal normalization for hashing
     # -----------------------------------------------------
     def _sorted(self, value):
         if value is None:
@@ -75,13 +85,13 @@ class FilterSpec:
             "completed_before": self.completed_before,
             "min_score": self.min_score,
             "max_score": self.max_score,
-            "cohort_ids": self._sorted(self.cohort_ids),  # NEW
         }
 
     # -----------------------------------------------------
     # Validation
     # -----------------------------------------------------
     def validate(self) -> bool:
+
         list_fields = [
             "module_ids",
             "instrument_keys",
@@ -89,7 +99,6 @@ class FilterSpec:
             "user_ids",
             "grades",
             "constructs",
-            "cohort_ids",  # NEW
         ]
 
         for field in list_fields:
@@ -117,6 +126,7 @@ class FilterSpec:
     # Vectorized Mask
     # -----------------------------------------------------
     def as_mask(self, df: pd.DataFrame) -> pd.Series:
+
         required_columns = [
             "user_id",
             "module_id",
@@ -127,9 +137,6 @@ class FilterSpec:
             "grade",
             "submitted_at",
         ]
-        # Cohort must exist if filtering by cohort
-        if self.cohort_ids:
-            required_columns.append("cohort_id")
 
         missing = [col for col in required_columns if col not in df.columns]
         if missing:
@@ -139,36 +146,45 @@ class FilterSpec:
 
         if self.module_ids:
             mask &= df["module_id"].isin(self.module_ids)
+
         if self.instrument_keys:
             mask &= df["instrument_key"].isin(self.instrument_keys)
+
         if self.question_ids:
             mask &= df["question_id"].isin(self.question_ids)
+
         if self.user_ids:
             mask &= df["user_id"].isin(self.user_ids)
+
         if self.grades:
             mask &= df["grade"].isin(self.grades)
+
         if self.constructs:
             mask &= df["construct"].isin(self.constructs)
-        if self.cohort_ids:  # NEW
-            mask &= df["cohort_id"].isin(self.cohort_ids)
 
         # -----------------------
-        # Date handling
+        # Date handling (typed)
         # -----------------------
         if self.submitted_after or self.submitted_before:
             submitted = pd.to_datetime(df["submitted_at"], errors="coerce")
+
             if self.submitted_after:
                 after = pd.to_datetime(self.submitted_after)
                 mask &= submitted > after
+
             if self.submitted_before:
                 before = pd.to_datetime(self.submitted_before)
                 mask &= submitted < before
 
-        if "completed_at" in df.columns and (self.completed_after or self.completed_before):
+        if "completed_at" in df.columns and (
+            self.completed_after or self.completed_before
+        ):
             completed = pd.to_datetime(df["completed_at"], errors="coerce")
+
             if self.completed_after:
                 after = pd.to_datetime(self.completed_after)
                 mask &= completed > after
+
             if self.completed_before:
                 before = pd.to_datetime(self.completed_before)
                 mask &= completed < before
@@ -178,6 +194,7 @@ class FilterSpec:
         # -----------------------
         if self.min_score is not None:
             mask &= df["item_score"].notna() & (df["item_score"] >= self.min_score)
+
         if self.max_score is not None:
             mask &= df["item_score"].notna() & (df["item_score"] <= self.max_score)
 

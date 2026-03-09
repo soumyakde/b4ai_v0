@@ -1,4 +1,5 @@
 """
+streamlit_app/app.py
 Basics4AI — Minimal Authentication Portal
 Login → Student / Teacher / Admin dashboards
 

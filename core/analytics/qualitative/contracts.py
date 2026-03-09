@@ -1,5 +1,5 @@
 """
-contracts.py
+core/analytics/qualitative/contracts.py
 -------------------------------------------------------
 Qualitative Layer Contracts for BasicsB4AI
 

@@ -40,33 +40,22 @@ def get_all_users():
 
     return rows
 
-# ---------------------------------------------------------
-# COHORT FETCH
-# ---------------------------------------------------------
-def get_all_cohorts():
-    import sqlite3
-    conn = sqlite3.connect("users.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT cohort_id FROM cohorts ORDER BY cohort_id")
-    cohorts = [row[0] for row in cursor.fetchall()]
-    conn.close()
-    return cohorts
-
 
 # ---------------------------------------------------------
 # CREATE USER
 # ---------------------------------------------------------
 
-def create_user(admin_user, username, role, password, cohort_id=None):
+def create_user(admin_user, username, role, password):
+
     conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute(
         """
-        INSERT INTO users (username, password, role, cohort_id)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO users (username, password, role)
+        VALUES (?, ?, ?)
         """,
-        (username, password, role, cohort_id)
+        (username, password, role)
     )
 
     conn.commit()
@@ -75,7 +64,7 @@ def create_user(admin_user, username, role, password, cohort_id=None):
     log_admin_action(
         admin_user,
         AdminAction.CREATE_USER,
-        f"username={username}, role={role}, cohort_id={cohort_id}"
+        f"username={username}, role={role}"
     )
 
 
@@ -128,33 +117,4 @@ def change_role(admin_user, username, new_role):
         admin_user,
         AdminAction.CHANGE_ROLE,
         f"username={username}, new_role={new_role}"
-    )
-# ---------------------------------------------------------
-# UPDATE USER COHORT
-# ---------------------------------------------------------
-
-def update_user_cohort(admin_user, username, new_cohort_id):
-    """
-    Assign or reassign a user to a cohort.
-    If new_cohort_id is None, the user's cohort is cleared.
-    """
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        UPDATE users
-        SET cohort_id = ?
-        WHERE username = ?
-        """,
-        (new_cohort_id, username)
-    )
-
-    conn.commit()
-    conn.close()
-
-    log_admin_action(
-        admin_user,
-        AdminAction.CHANGE_ROLE,  # you could define a separate action if preferred
-        f"username={username}, new_cohort_id={new_cohort_id}"
     )

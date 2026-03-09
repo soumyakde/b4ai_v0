@@ -1,3 +1,4 @@
+##modules/registry/module_registry.py
 from typing import Dict, Any, List
 
 class ModuleRegistry:

@@ -1,4 +1,5 @@
 """
+streamlit_app/dashboards/teacher_dashboard.py
 Teacher Dashboard — Analytics (Architecturally Aligned)
 """
 
@@ -151,6 +152,9 @@ def show_teacher_dashboard(username: str):
         st.info("No response data available yet.")
         return
 
+    # --------------------------------------------------
+    # Load survey YAML configs
+    # --------------------------------------------------
     instruments_dict, scoring_dict = load_yaml_directory(Path("streamlit_app/surveys"))
 
     builder = DatasetBuilder(
@@ -162,6 +166,23 @@ def show_teacher_dashboard(username: str):
     )
 
     canonical_df = builder.build().convert_dtypes()
+
+
+    # --------------------------------------------------
+    # COHORT FILTER
+    # --------------------------------------------------
+    if "cohort_id" in canonical_df.columns:
+        
+        cohort_list = sorted(canonical_df["cohort_id"].dropna().unique())
+        cohort_list.insert(0, "All Cohorts")
+        
+        selected_cohort = st.selectbox("Select Cohort", cohort_list)
+
+        if selected_cohort != "All Cohorts":
+
+            canonical_df = canonical_df[
+                canonical_df["cohort_id"] == selected_cohort
+            ]
 
     # ---------- dtype stabilization ----------
     for col in canonical_df.columns:
@@ -505,6 +526,7 @@ def show_teacher_dashboard(username: str):
         report_engine = LearningReportEngine(
             cpi_df=cpi_df,
             hybrid_df=hybrid_df,
+            cohort_filter=selected_cohort if selected_cohort != "All Cohorts" else None
         )
 
         st.session_state["learning_report"] = report_engine.build()

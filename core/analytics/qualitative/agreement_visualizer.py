@@ -1,5 +1,5 @@
 """
-agreement_visualizer.py
+core/analytics/qualitative/agreement_visualizer.py
 -------------------------------------------------------
 Visualization layer for Agreement Analytics
 

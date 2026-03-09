@@ -1,4 +1,5 @@
 """
+streamlit_app/app.py
 Basics4AI — Minimal Authentication Portal
 Login → Student / Teacher / Admin dashboards
 
@@ -30,8 +31,12 @@ import streamlit as st
 
 from modules.registry.register_modules import register_all_modules
 from modules.registry.module_registry import module_registry
-
+from core.admin import user_service, data_service, research_service, system_service, diagnostics_service
 from core.db_utils import init_db as init_app_db
+from dashboards.student_dashboard import show_student_dashboard
+from dashboards.teacher_dashboard import show_teacher_dashboard
+from dashboards.admin_dashboard import show_admin_dashboard
+
 
 from auth.user_manager import (
     init_db as init_auth_db,
@@ -39,10 +44,6 @@ from auth.user_manager import (
     authenticate_user,
     get_user_role,
 )
-
-from dashboards.student_dashboard import show_student_dashboard
-from dashboards.teacher_dashboard import show_teacher_dashboard
-from dashboards.admin_dashboard import show_admin_dashboard
 
 
 # ----------------------------------------------------------
@@ -74,6 +75,18 @@ def show_registration():
     confirm = st.text_input("Confirm Password", type="password")
     role = st.selectbox("Role", ["student", "teacher", "admin"])
 
+    cohort_id = None
+    current_user_role = st.session_state.get("username") and get_user_role(st.session_state.get("username"))
+
+    # Fetch cohort list once
+    cohort_list = user_service.get_all_cohorts()
+
+    if current_user_role in ("admin", "teacher") or current_user_role is None:
+        selected_cohort = st.selectbox(
+            "Assign Cohort (optional)", ["None"] + cohort_list
+        )
+        cohort_id = None if selected_cohort == "None" else selected_cohort
+
     if st.button("Register"):
 
         if not username or not password:
@@ -85,7 +98,12 @@ def show_registration():
             return
 
         try:
-            register_user(username.strip(), password, role=role)
+            register_user(
+                username.strip(),
+                password,
+                role=role,
+                cohort_id=cohort_id
+            )
             st.success("Registration successful. Please login.")
             st.session_state.mode = "login"
 

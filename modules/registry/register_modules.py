@@ -1,3 +1,4 @@
+#modules/registry/register_modules.py
 import sys
 from pathlib import Path
 

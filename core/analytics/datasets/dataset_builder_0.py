@@ -7,8 +7,6 @@ import json
 from core.analytics.filters.filter_spec import FilterSpec
 
 
-
-
 CANONICAL_COLUMNS: List[str] = [
     "user_id",
     "module_id",
@@ -323,28 +321,22 @@ class DatasetBuilder:
     # --------------------------------------------------
     # BUILD CANONICAL DATASET
     # --------------------------------------------------
-    def build(self) -> pd.DataFrame:
-        df = self._normalize_schema(self.responses_df.copy())
-        # ---------------------------------------
-        # Attach cohort information
-        # ---------------------------------------
-        from auth.user_manager import get_user_cohort_map
-    
-        user_cohort_map = get_user_cohort_map()
 
-        if "user_id" in df.columns:
-            df["cohort_id"] = df["user_id"].map(user_cohort_map)
-        
-        # Attach instrument metadata
+    def build(self) -> pd.DataFrame:
+
+        df = self._normalize_schema(self.responses_df.copy())
+
+        # Attach metadata first
         df = self._attach_metadata(df)
 
-        # Apply deterministic scoring
+        # Deterministic scoring
         df["item_score"] = self._apply_scoring(df)
 
-        # Attach demographics (grade)
+        # Attach demographics
         if self.demographics_df is not None:
             if "user_id" not in self.demographics_df.columns:
                 raise ValueError("demographics_df missing user_id column.")
+
             df = df.merge(
                 self.demographics_df[["user_id", "grade"]],
                 on="user_id",
@@ -353,21 +345,9 @@ class DatasetBuilder:
         else:
             df["grade"] = None
 
-        # Ensure completed_at exists
+        # Ensure completed_at
         if "completed_at" not in df.columns:
             df["completed_at"] = None
-
-        # --------------------------------------------------
-        # Attach cohort_id automatically from auth/user_manager
-        # --------------------------------------------------
-        try:
-            from auth.user_manager import get_user_cohort_map
-
-            user_cohort_map: dict[str, str] = get_user_cohort_map()
-            df["cohort_id"] = df["user_id"].map(user_cohort_map)
-        except Exception:
-            # fallback if import or mapping fails
-            df["cohort_id"] = None
 
         # Apply FilterSpec AFTER canonicalization
         if self.filter_spec:
@@ -377,21 +357,20 @@ class DatasetBuilder:
             mask = self.filter_spec.as_mask(df)
             df = df[mask].copy()
 
-        # --------------------------------------------------
-        # Enforce canonical column ordering, including cohort_id
-        # --------------------------------------------------
-        canonical_cols_with_cohort = CANONICAL_COLUMNS + ["cohort_id"]
-        for col in canonical_cols_with_cohort:
+        # Enforce canonical column ordering
+        for col in CANONICAL_COLUMNS:
             if col not in df.columns:
                 df[col] = None
 
-        canonical_df = df[canonical_cols_with_cohort].copy()
+        canonical_df = df[CANONICAL_COLUMNS].copy()
 
-        # Compute deterministic dataset hash
+        # Deterministic dataset hash
         dataset_hash = self._compute_hash(canonical_df)
         canonical_df.attrs["dataset_hash"] = dataset_hash
 
         if self.filter_spec:
-            canonical_df.attrs["filter_hash"] = self.filter_spec.filter_hash()
+            canonical_df.attrs["filter_hash"] = (
+                self.filter_spec.filter_hash()
+            )
 
         return canonical_df
