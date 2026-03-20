@@ -4,17 +4,35 @@ import sqlite3
 from pathlib import Path
 from datetime import datetime
 
+# Default database path
 DB_PATH = Path("responses.db")
 
 
-def get_connection():
-    conn = sqlite3.connect(DB_PATH)
+def get_connection(db_path: Path = None):
+    """
+    Get a connection to the SQLite database.
+
+    Args:
+        db_path (Path, optional): Path to the SQLite DB file.
+                                  Defaults to global DB_PATH.
+    """
+    if db_path is None:
+        db_path = DB_PATH
+
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
 
 
-def init_db():
-    conn = get_connection()
+def init_db(db_path: Path = None):
+    """
+    Initialize the database and create tables if they do not exist.
+
+    Args:
+        db_path (Path, optional): Path to the SQLite DB file.
+                                  Defaults to global DB_PATH.
+    """
+    conn = get_connection(db_path)
     cur = conn.cursor()
 
     # -----------------------------
@@ -91,8 +109,8 @@ def init_db():
 # COMPLETION HELPERS (Unlock-critical — DO NOT MODIFY)
 # =====================================================
 
-def mark_instrument_complete(user_id: str, module_id: str, instrument_key: str):
-    conn = get_connection()
+def mark_instrument_complete(user_id: str, module_id: str, instrument_key: str, db_path: Path = None):
+    conn = get_connection(db_path)
     cur = conn.cursor()
 
     cur.execute("""
@@ -105,8 +123,8 @@ def mark_instrument_complete(user_id: str, module_id: str, instrument_key: str):
     conn.close()
 
 
-def get_completed_instruments(user_id: str, module_id: str):
-    conn = get_connection()
+def get_completed_instruments(user_id: str, module_id: str, db_path: Path = None):
+    conn = get_connection(db_path)
     cur = conn.cursor()
 
     cur.execute("""
@@ -120,8 +138,8 @@ def get_completed_instruments(user_id: str, module_id: str):
     return results
 
 
-def is_instrument_complete(user_id: str, module_id: str, instrument_key: str):
-    conn = get_connection()
+def is_instrument_complete(user_id: str, module_id: str, instrument_key: str, db_path: Path = None):
+    conn = get_connection(db_path)
     cur = conn.cursor()
 
     cur.execute("""

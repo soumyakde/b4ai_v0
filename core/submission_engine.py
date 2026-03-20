@@ -54,6 +54,18 @@ def submit_instrument(
     # --------------------------------------------------
     # 2️⃣ Store individual responses
     # --------------------------------------------------
+    # Build a module-scoped name for the responses table only.
+    # MCQ keys are already prefixed (e.g. "module1_content_mcq_assessment"),
+    # so guard with the compact prefix ("module_1" -> "module1") to avoid
+    # double-prefixing. Everything else — completions, progress_engine,
+    # registry — continues to use the original instrument_key unchanged.
+    module_prefix = module_id.replace("_", "")   # "module_1" -> "module1"
+    stored_name = (
+        instrument_key
+        if instrument_key.startswith(module_prefix)
+        else f"{module_prefix}_{instrument_key}"
+    )
+
     for question_id, response_value in responses.items():
         cur.execute("""
             INSERT INTO responses
@@ -61,7 +73,7 @@ def submit_instrument(
             VALUES (?, ?, ?, ?, ?)
         """, (
             user_id,
-            instrument_key,
+            stored_name,
             question_id,
             str(response_value),
             timestamp

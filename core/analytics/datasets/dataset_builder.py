@@ -5,6 +5,7 @@ import hashlib
 import json
 
 from core.analytics.filters.filter_spec import FilterSpec
+from utils.module_normalizer import normalize_module_id
 
 
 
@@ -189,9 +190,6 @@ class DatasetBuilder:
     # --------------------------------------------------
     def _attach_metadata(self, df: pd.DataFrame) -> pd.DataFrame:
 
-        print("Loaded instrument keys:", list(self.instruments_dict.keys()))
-        print("Instrument keys in DB:", df["instrument_key"].unique())
-
         # ---- NORMALIZE QUESTION ID FORMAT ----
         df["question_id"] = df["question_id"].astype(str).str.strip()
         df["instrument_key"] = df["instrument_key"].astype(str).str.strip()
@@ -211,17 +209,35 @@ class DatasetBuilder:
             if instrument_key in self.instruments_dict:
 
                 instrument_meta = self.instruments_dict[instrument_key]
-                module_id = instrument_meta.get("module_id") or instrument_meta.get("scope")
+                raw_module_id = instrument_meta.get("module_id") or instrument_meta.get("scope")
 
-                if not module_id:
+                if not raw_module_id:
                     raise ValueError(f"Instrument '{instrument_key}' missing module_id/scope.")
 
-                # Build mapping from YAML
+                module_id = normalize_module_id(raw_module_id)
+
+                # Build qid -> construct mapping from YAML structure.
+                # Surveys use a "sections" key; legacy instruments use
+                # a flat "questions" key. Both handled below.
+                # Construct names normalized to lowercase_snake_case to
+                # match construct_definitions.yaml canonical keys. (B6)
                 yaml_qids = {}
 
-                if "questions" in instrument_meta:
+                if "sections" in instrument_meta:
+                    # Survey YAML: sections list, each has name + questions
+                    for section in instrument_meta["sections"]:
+                        construct = section.get("name", "").lower()
+                        for question in section.get("questions", []):
+                            qid = str(question.get("id")).strip()
+                            yaml_qids[qid] = construct
+
+                elif "questions" in instrument_meta:
+                    # Legacy block format: questions list, each block
+                    # has name + questions sub-list
                     for block in instrument_meta["questions"]:
                         construct = block.get("name")
+                        if construct:
+                            construct = construct.lower()
                         for question in block.get("questions", []):
                             qid = str(question.get("id")).strip()
                             yaml_qids[qid] = construct
@@ -246,15 +262,19 @@ class DatasetBuilder:
             # -------------------------
             else:
 
-                # Infer module_id heuristically
+                # Infer module_id heuristically, then normalize to
+                # ontology-compatible key via normalize_module_id (B4).
+                # e.g. "module1" -> "module_1"
                 if instrument_key.startswith("module") and "_content_mcq" in instrument_key:
-                    module_id = instrument_key.split("_")[0]
+                    raw_module_id = instrument_key.split("_")[0]
                 elif instrument_key == "module_reflections":
-                    module_id = "reflection"
+                    raw_module_id = "reflection"
                 elif instrument_key == "demographics_survey":
-                    module_id = "demographics"
+                    raw_module_id = "demographics"
                 else:
-                    module_id = "survey"
+                    raw_module_id = "survey"
+
+                module_id = normalize_module_id(raw_module_id)
 
                 for qid in question_ids:
                     meta_rows.append({
@@ -325,16 +345,7 @@ class DatasetBuilder:
     # --------------------------------------------------
     def build(self) -> pd.DataFrame:
         df = self._normalize_schema(self.responses_df.copy())
-        # ---------------------------------------
-        # Attach cohort information
-        # ---------------------------------------
-        from auth.user_manager import get_user_cohort_map
-    
-        user_cohort_map = get_user_cohort_map()
 
-        if "user_id" in df.columns:
-            df["cohort_id"] = df["user_id"].map(user_cohort_map)
-        
         # Attach instrument metadata
         df = self._attach_metadata(df)
 

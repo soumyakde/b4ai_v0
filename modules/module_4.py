@@ -302,6 +302,8 @@ def render_yaml_survey(survey_key, username):
 
     responses = {}
 
+    q_num = 0  # global counter across all sections
+
     with st.form(f"form_{survey_key}"):
 
         for section in sections:
@@ -310,22 +312,24 @@ def render_yaml_survey(survey_key, username):
 
             for q in section.get("questions", []):
 
+                q_num += 1
                 q_id = q.get("id")
                 q_text = q.get("text")
                 q_type = q.get("type")
                 options = q.get("options", [])
 
                 widget_key = f"{survey_key}_{q_id}"
+                labeled_text = f"{q_num} ({q_id}) {q_text}"
 
                 if q_type == "text":
                     responses[q_id] = st.text_input(
-                        q_text,
+                        labeled_text,
                         key=widget_key
                     )
 
                 elif q_type == "select":
                     responses[q_id] = st.radio(
-                        q_text,
+                        labeled_text,
                         options,
                         key=widget_key
                     )

@@ -43,26 +43,48 @@ def show_student_dashboard(username: str):
         # ----------------------------------------
 
         if complete:
+            # Green (colorblind-safe: also use check pattern + text)
+            badge_color = "#009E73"   # teal-green — safe for deuteranopia
+            badge_bg    = "#E6F7F1"
             status_icon = "✅"
             status_text = "Completed"
+            btn_label   = None
         elif unlocked:
+            # Blue — universally distinguishable
+            badge_color = "#0077BB"
+            badge_bg    = "#E6F3FB"
             status_icon = "🔓"
             status_text = "Available"
+            btn_label   = f"▶ Open {title}"
         else:
+            # Gray — locked
+            badge_color = "#888888"
+            badge_bg    = "#F0F0F0"
             status_icon = "🔒"
             status_text = "Locked"
+            btn_label   = None
 
-        st.markdown(f"### {status_icon} {title} ({status_text})")
+        st.markdown(
+            f"<div style='"
+            f"background:{badge_bg};"
+            f"border-left:5px solid {badge_color};"
+            f"border-radius:6px;"
+            f"padding:0.6rem 1rem 0.4rem 1rem;"
+            f"margin-bottom:0.5rem;'>"
+            f"<span style='font-size:1.15rem;font-weight:700;"
+            f"color:{badge_color};'>{status_icon} {title}</span>"
+            f"<span style='font-size:0.85rem;color:{badge_color};"
+            f"margin-left:0.6rem;font-weight:600;'>[{status_text}]</span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
         if description:
             st.caption(description)
 
-        # ----------------------------------------
-        # Navigation
-        # ----------------------------------------
-
         if unlocked and not complete:
-            if st.button(f"Open {title}", key=module_id):
+            if st.button(btn_label, key=module_id,
+                         type="primary" if unlocked else "secondary"):
                 st.session_state.view = module_id
                 st.rerun()
 

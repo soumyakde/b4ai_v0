@@ -9,6 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from core.admin.audit_logger import log_admin_action, AdminAction
+from auth.user_manager import hash_password, generate_password
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 DB_PATH = BASE_DIR / "users.db"
@@ -29,16 +30,18 @@ def get_all_users():
 
     cursor.execute(
         """
-        SELECT id, username, role
+        SELECT id, username, role, cohort_id
         FROM users
-        ORDER BY username
+        ORDER BY role, username
         """
     )
-
     rows = cursor.fetchall()
     conn.close()
 
-    return rows
+    import pandas as pd
+    return pd.DataFrame(
+        rows, columns=["id", "username", "role", "cohort_id"]
+    )
 
 # ---------------------------------------------------------
 # COHORT FETCH
@@ -57,7 +60,18 @@ def get_all_cohorts():
 # CREATE USER
 # ---------------------------------------------------------
 
-def create_user(admin_user, username, role, password, cohort_id=None):
+def create_user(admin_user, username, role, cohort_id=None):
+    """
+    Create a new user with a randomly generated, hashed password.
+
+    Returns
+    -------
+    str
+        The plaintext generated password — show this once to the admin.
+    """
+    plaintext_pw = generate_password()
+    hashed_pw    = hash_password(plaintext_pw)
+
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -66,7 +80,7 @@ def create_user(admin_user, username, role, password, cohort_id=None):
         INSERT INTO users (username, password, role, cohort_id)
         VALUES (?, ?, ?, ?)
         """,
-        (username, password, role, cohort_id)
+        (username, hashed_pw, role, cohort_id)
     )
 
     conn.commit()
@@ -77,6 +91,8 @@ def create_user(admin_user, username, role, password, cohort_id=None):
         AdminAction.CREATE_USER,
         f"username={username}, role={role}, cohort_id={cohort_id}"
     )
+
+    return plaintext_pw
 
 
 # ---------------------------------------------------------
@@ -155,6 +171,6 @@ def update_user_cohort(admin_user, username, new_cohort_id):
 
     log_admin_action(
         admin_user,
-        AdminAction.CHANGE_ROLE,  # you could define a separate action if preferred
+        AdminAction.UPDATE_COHORT,
         f"username={username}, new_cohort_id={new_cohort_id}"
     )

@@ -7,7 +7,7 @@ module_id: global
 scope: pre
 title: pre_ai_misconceptions_scoring
 description: Scoring key for pre_ai_misconceptions assessment
-type: binary
+scoring_type: binary
 
 correct_answers:
   Q3_1: "False"
