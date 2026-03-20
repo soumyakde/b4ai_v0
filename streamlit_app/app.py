@@ -22,9 +22,13 @@ root = Path(__file__).resolve().parents[1]
 if str(root) not in sys.path:
     sys.path.insert(0, str(root))
 
-# 3. INITIALIZE R (Do this before Streamlit)
-from rpy2.robjects import r
-from core.analytics.r_utils import to_r, to_pd
+# 3. IMPORT R (optional — not available on Streamlit Cloud)
+try:
+    from rpy2.robjects import r
+    from core.analytics.r_utils import to_r, to_pd
+except Exception:
+    r = None
+    to_r = to_pd = None
 
 # 4. STREAMLIT & OTHER IMPORTS
 import streamlit as st
