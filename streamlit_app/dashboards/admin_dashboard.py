@@ -91,7 +91,7 @@ def show_admin_dashboard(username: str):
                         cohort_id=cohort_to_pass
                     )
                     st.success("User created")
-                    st.experimental_rerun()
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Error creating user: {e}")
 
@@ -119,7 +119,7 @@ def show_admin_dashboard(username: str):
                     user_service.update_user_cohort(admin_user=username, username=target_user, new_cohort_id=cohort_to_pass)
 
                     st.success("Role and cohort updated")
-                    st.experimental_rerun()
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Error updating role/cohort: {e}")
 
@@ -131,7 +131,7 @@ def show_admin_dashboard(username: str):
                 try:
                     user_service.delete_user(username, delete_user)
                     st.warning("User deleted")
-                    st.experimental_rerun()
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Error deleting user: {e}")
 
@@ -178,181 +178,14 @@ def show_admin_dashboard(username: str):
                     st.error(f"Error resetting student data: {e}")
 
         st.divider()
-        st.subheader("Scoped Instrument Reset")
-        st.caption(
-            "Delete responses for a specific instrument, optionally scoped to "
-            "one cohort. Always preview before confirming. "
-            "This cannot be undone."
-        )
-
-        import sqlite3 as _sq_rst
-        from pathlib import Path as _P_rst
-
-        # Find responses.db
-        _db_rst = next(
-            (p / "responses.db" for p in _P_rst(__file__).resolve().parents
-             if (p / "responses.db").exists()), None
-        )
-
-        if _db_rst:
-            # Get available instrument names and cohorts for selectors
-            # Instruments from responses.db
-            _conn_rst = _sq_rst.connect(_db_rst)
-            _instruments = [
-                r[0] for r in _conn_rst.execute(
-                    "SELECT DISTINCT instrument_name FROM responses "
-                    "ORDER BY instrument_name"
-                ).fetchall()
-            ]
-            _conn_rst.close()
-
-            # Cohorts from users.db (responses table has no cohort_id column)
-            _db_users = next(
-                (p / "users.db" for p in _P_rst(__file__).resolve().parents
-                 if (p / "users.db").exists()), None
-            )
-            _cohorts = []
-            if _db_users:
-                _conn_u = _sq_rst.connect(_db_users)
-                _cohorts = [
-                    r[0] for r in _conn_u.execute(
-                        "SELECT DISTINCT cohort_id FROM users "
-                        "WHERE cohort_id IS NOT NULL ORDER BY cohort_id"
-                    ).fetchall()
-                ]
-                _conn_u.close()
-
-            col_i, col_c = st.columns(2)
-            with col_i:
-                _sel_instrument = st.selectbox(
-                    "Instrument to reset",
-                    options=["(select)"] + _instruments,
-                    key="rst_instrument",
-                )
-            with col_c:
-                _sel_cohort = st.selectbox(
-                    "Restrict to cohort (optional)",
-                    options=["All cohorts"] + _cohorts,
-                    key="rst_cohort",
-                )
-
-            if _sel_instrument != "(select)":
-                # Build user_id list for the selected cohort
-                _cohort_users = None
-                if _sel_cohort != "All cohorts" and _db_users:
-                    _conn_u2 = _sq_rst.connect(_db_users)
-                    _cohort_users = [
-                        r[0] for r in _conn_u2.execute(
-                            "SELECT username FROM users WHERE cohort_id=?",
-                            (_sel_cohort,)
-                        ).fetchall()
-                    ]
-                    _conn_u2.close()
-
-                # Preview count
-                _conn_rst2 = _sq_rst.connect(_db_rst)
-                if _cohort_users is not None:
-                    _placeholders = ",".join("?" * len(_cohort_users))
-                    _preview_n = _conn_rst2.execute(
-                        f"SELECT COUNT(*) FROM responses "
-                        f"WHERE instrument_name=? AND user_id IN ({_placeholders})",
-                        [_sel_instrument] + _cohort_users
-                    ).fetchone()[0]
-                    _preview_users_n = _conn_rst2.execute(
-                        f"SELECT COUNT(DISTINCT user_id) FROM responses "
-                        f"WHERE instrument_name=? AND user_id IN ({_placeholders})",
-                        [_sel_instrument] + _cohort_users
-                    ).fetchone()[0]
-                    _sample = _conn_rst2.execute(
-                        f"SELECT user_id, instrument_name, question_id, response_value "
-                        f"FROM responses WHERE instrument_name=? "
-                        f"AND user_id IN ({_placeholders}) LIMIT 5",
-                        [_sel_instrument] + _cohort_users
-                    ).fetchall()
-                else:
-                    _preview_n = _conn_rst2.execute(
-                        "SELECT COUNT(*) FROM responses WHERE instrument_name=?",
-                        (_sel_instrument,)
-                    ).fetchone()[0]
-                    _preview_users_n = _conn_rst2.execute(
-                        "SELECT COUNT(DISTINCT user_id) FROM responses "
-                        "WHERE instrument_name=?",
-                        (_sel_instrument,)
-                    ).fetchone()[0]
-                    _sample = _conn_rst2.execute(
-                        "SELECT user_id, instrument_name, question_id, response_value "
-                        "FROM responses WHERE instrument_name=? LIMIT 5",
-                        (_sel_instrument,)
-                    ).fetchall()
-                _conn_rst2.close()
-
-                cohort_label = (
-                    f" in cohort **{_sel_cohort}**"
-                    if _sel_cohort != "All cohorts" else ""
-                )
-                st.info(
-                    f"This will delete **{_preview_n} rows** across "
-                    f"**{_preview_users_n} student(s)**{cohort_label}."
-                )
-
-                with st.expander("Preview rows to be deleted (first 5)",
-                                 expanded=True):
-                    import pandas as _pd_rst
-                    st.dataframe(
-                        _pd_rst.DataFrame(
-                            _sample,
-                            columns=["user_id","instrument_name",
-                                     "question_id","response_value"]
-                        ),
-                        hide_index=True, width="stretch"
-                    )
-                    if _cohort_users is not None:
-                        st.caption(
-                            f"Cohort '{_sel_cohort}' contains "
-                            f"{len(_cohort_users)} student(s): "
-                            f"{', '.join(_cohort_users)}"
-                        )
-
-                _confirm_del = st.text_input(
-                    f"Type DELETE to confirm removing {_preview_n} rows",
-                    key="rst_confirm",
-                )
-                if st.button("⚠️ Delete Selected Responses",
-                             key="rst_go", type="primary"):
-                    if _confirm_del == "DELETE":
-                        if _preview_n == 0:
-                            st.warning("No rows match — nothing to delete.")
-                        else:
-                            try:
-                                _conn_del = _sq_rst.connect(_db_rst)
-                                if _cohort_users is not None:
-                                    _ph2 = ",".join("?" * len(_cohort_users))
-                                    _conn_del.execute(
-                                        f"DELETE FROM responses "
-                                        f"WHERE instrument_name=? "
-                                        f"AND user_id IN ({_ph2})",
-                                        [_sel_instrument] + _cohort_users
-                                    )
-                                else:
-                                    _conn_del.execute(
-                                        "DELETE FROM responses "
-                                        "WHERE instrument_name=?",
-                                        (_sel_instrument,)
-                                    )
-                                _conn_del.commit()
-                                _conn_del.close()
-                                st.success(
-                                    f"Deleted {_preview_n} rows for "
-                                    f"'{_sel_instrument}'"
-                                    f"{cohort_label.replace('**','')}"
-                                    f". Refresh the page to confirm."
-                                )
-                            except Exception as _e_del:
-                                st.error(f"Delete failed: {_e_del}")
-                    else:
-                        st.warning("Type DELETE exactly to confirm.")
-        else:
-            st.error("responses.db not found.")
+        instrument_reset = st.text_input("Instrument ID")
+        if st.button("Reset Instrument Data"):
+            if instrument_reset:
+                try:
+                    data_service.reset_instrument(username, instrument_reset)
+                    st.success("Instrument data cleared")
+                except Exception as e:
+                    st.error(f"Error resetting instrument data: {e}")
 
         st.divider()
         confirm = st.text_input("Type RESET to clear all study data")

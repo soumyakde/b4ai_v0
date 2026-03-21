@@ -1,36 +1,75 @@
 # core/db_utils.py
+"""
+Database abstraction layer — Phase B.
 
+Supports SQLite (default) and PostgreSQL via environment variable:
+    DB_TYPE=sqlite   → uses SQLITE_PATH (default: responses.db)
+    DB_TYPE=postgres → uses DB_HOST, DB_NAME, DB_USER, DB_PASSWORD
+
+Switch by setting DB_TYPE in .env — no code changes needed.
+"""
+
+import os
 import sqlite3
 from pathlib import Path
 from datetime import datetime
 
-# Default database path
-DB_PATH = Path("responses.db")
+# ── Backend selection ─────────────────────────────────────────────────────────
+DB_TYPE = os.getenv("DB_TYPE", "sqlite").lower()
+
+# ── SQLite path resolution ────────────────────────────────────────────────────
+# Priority: SQLITE_PATH env var → default "responses.db" relative to project root
+_ENV_SQLITE_PATH = os.getenv("SQLITE_PATH")
+if _ENV_SQLITE_PATH:
+    DB_PATH = Path(_ENV_SQLITE_PATH)
+else:
+    # Fall back to path relative to this file (works both locally and in Docker)
+    DB_PATH = Path(__file__).resolve().parents[2] / "responses.db"
 
 
 def get_connection(db_path: Path = None):
     """
-    Get a connection to the SQLite database.
+    Return a database connection.
+
+    SQLite:    returns sqlite3.Connection with row_factory set
+    PostgreSQL: returns psycopg2 connection (Phase C)
 
     Args:
-        db_path (Path, optional): Path to the SQLite DB file.
-                                  Defaults to global DB_PATH.
+        db_path: Override path for SQLite only. Ignored for PostgreSQL.
     """
-    if db_path is None:
-        db_path = DB_PATH
+    if DB_TYPE == "postgres":
+        try:
+            import psycopg2
+            import psycopg2.extras
+            conn = psycopg2.connect(
+                host=os.getenv("DB_HOST", "localhost"),
+                port=int(os.getenv("DB_PORT", "5432")),
+                dbname=os.getenv("DB_NAME", "b4ai"),
+                user=os.getenv("DB_USER", "b4ai"),
+                password=os.getenv("DB_PASSWORD", ""),
+            )
+            return conn
+        except ImportError:
+            raise RuntimeError(
+                "DB_TYPE=postgres but psycopg2 is not installed. "
+                "Add psycopg2-binary to requirements.txt."
+            )
+    else:
+        # SQLite (default)
+        path = db_path or DB_PATH
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        return conn
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
+
+def _placeholder() -> str:
+    """Return the correct SQL placeholder for the active backend."""
+    return "%s" if DB_TYPE == "postgres" else "?"
 
 
 def init_db(db_path: Path = None):
     """
     Initialize the database and create tables if they do not exist.
-
-    Args:
-        db_path (Path, optional): Path to the SQLite DB file.
-                                  Defaults to global DB_PATH.
     """
     conn = get_connection(db_path)
     cur = conn.cursor()
@@ -109,42 +148,60 @@ def init_db(db_path: Path = None):
 # COMPLETION HELPERS (Unlock-critical — DO NOT MODIFY)
 # =====================================================
 
-def mark_instrument_complete(user_id: str, module_id: str, instrument_key: str, db_path: Path = None):
+def mark_instrument_complete(
+    user_id: str,
+    module_id: str,
+    instrument_key: str,
+    db_path: Path = None,
+):
     conn = get_connection(db_path)
-    cur = conn.cursor()
+    cur  = conn.cursor()
+    p    = _placeholder()
 
-    cur.execute("""
+    cur.execute(f"""
         INSERT OR IGNORE INTO completions
         (user_id, module_id, instrument_key, completed_at)
-        VALUES (?, ?, ?, ?)
+        VALUES ({p}, {p}, {p}, {p})
     """, (user_id, module_id, instrument_key, datetime.utcnow().isoformat()))
 
     conn.commit()
     conn.close()
 
 
-def get_completed_instruments(user_id: str, module_id: str, db_path: Path = None):
+def get_completed_instruments(
+    user_id: str,
+    module_id: str,
+    db_path: Path = None,
+):
     conn = get_connection(db_path)
-    cur = conn.cursor()
+    cur  = conn.cursor()
+    p    = _placeholder()
 
-    cur.execute("""
+    cur.execute(f"""
         SELECT instrument_key
         FROM completions
-        WHERE user_id = ? AND module_id = ?
+        WHERE user_id = {p} AND module_id = {p}
     """, (user_id, module_id))
 
-    results = [row["instrument_key"] for row in cur.fetchall()]
+    results = [row["instrument_key"] if hasattr(row, '__getitem__')
+               else row[0] for row in cur.fetchall()]
     conn.close()
     return results
 
 
-def is_instrument_complete(user_id: str, module_id: str, instrument_key: str, db_path: Path = None):
+def is_instrument_complete(
+    user_id: str,
+    module_id: str,
+    instrument_key: str,
+    db_path: Path = None,
+) -> bool:
     conn = get_connection(db_path)
-    cur = conn.cursor()
+    cur  = conn.cursor()
+    p    = _placeholder()
 
-    cur.execute("""
+    cur.execute(f"""
         SELECT 1 FROM completions
-        WHERE user_id = ? AND module_id = ? AND instrument_key = ?
+        WHERE user_id = {p} AND module_id = {p} AND instrument_key = {p}
     """, (user_id, module_id, instrument_key))
 
     exists = cur.fetchone() is not None

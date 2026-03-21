@@ -550,7 +550,7 @@ def _render_assessment_scores(canonical_df: pd.DataFrame) -> None:
                 xaxis_title="Question Item",
                 yaxis_title="% Students Correct",
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         else:
             st.bar_chart(pct_by_q.set_index("question_id")[["pct_correct"]])
 
@@ -978,7 +978,7 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
                     xaxis_title="Question Item",
                     yaxis_title="Mean Score (1–4 Likert)",
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             else:
                 st.bar_chart(item_means.set_index("question_id")["mean_score"])
 
@@ -1259,19 +1259,18 @@ def _render_result_card(result: dict, score_label: str = "% Correct") -> None:
             _MS_err   = round(_SS_err  / _df_err,  3) if _SS_err  and _df_err  else None
             _F_val    = round(_MS_cond / _MS_err,  3) if _MS_cond and _MS_err and _MS_err != 0 else None
 
+            # All columns must be same type for Arrow — use strings throughout
+            def _fmt(v):
+                return f"{v:.3f}" if v is not None else "—"
             _rm_table = pd.DataFrame([
                 {"Source": "Conditions (Time)",
-                 "SS": _SS_cond if _SS_cond is not None else "—",
-                 "df": _df_cond,
-                 "MS": _MS_cond if _MS_cond is not None else "—",
-                 "F":  _F_val   if _F_val   is not None else "—"},
+                 "SS": _fmt(_SS_cond), "df": str(_df_cond),
+                 "MS": _fmt(_MS_cond), "F":  _fmt(_F_val)},
                 {"Source": "Subjects",
-                 "SS": "—", "df": _df_subj, "MS": "—", "F": "—"},
+                 "SS": "—", "df": str(_df_subj), "MS": "—", "F": "—"},
                 {"Source": "Error",
-                 "SS": _SS_err  if _SS_err  is not None else "—",
-                 "df": _df_err,
-                 "MS": _MS_err  if _MS_err  is not None else "—",
-                 "F":  ""},
+                 "SS": _fmt(_SS_err),  "df": str(_df_err),
+                 "MS": _fmt(_MS_err),  "F": ""},
             ])
             with st.expander("📊 RM ANOVA-style source table", expanded=False):
                 st.dataframe(
@@ -2037,7 +2036,7 @@ def _render_irt_result(
             fig.update_layout(height=280, margin=dict(t=40,b=10,l=10,r=10))
             fig.update_xaxes(title="Ability (θ)")
             fig.update_yaxes(title="Count")
-            st.plotly_chart(fig, use_container_width=False)
+            st.plotly_chart(fig, width='content')
 
     # Wright Map
     st.divider()
@@ -2074,7 +2073,7 @@ def _render_irt_result(
             height=320,
             margin=dict(t=40, b=10, l=10, r=10),
         )
-        st.plotly_chart(fig, use_container_width=False)
+        st.plotly_chart(fig, width='content')
     elif wm["persons"].empty:
         st.caption("Wright Map unavailable — item parameters could not be extracted.")
 
@@ -2100,7 +2099,7 @@ def _render_irt_result(
             color_discrete_sequence=px.colors.qualitative.Set2,
         )
         fig.update_layout(height=320, margin=dict(t=40,b=10,l=10,r=10))
-        st.plotly_chart(fig, use_container_width=False)
+        st.plotly_chart(fig, width='content')
     elif icc_df.empty:
         st.caption(
             "ICC data unavailable. This may occur with mirt versions "
@@ -3090,7 +3089,7 @@ def _render_dta_heatmap(df: pd.DataFrame) -> None:
                     color_continuous_scale="Blues", aspect="auto")
     fig.update_layout(height=max(300, len(pivot)*30+100),
                       margin=dict(t=50,b=10,l=10,r=10), xaxis_tickangle=-45)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 
 def _render_dta_participant_profiles(df: pd.DataFrame) -> None:
@@ -3207,7 +3206,7 @@ def _render_dta_lo_panel(username: str) -> None:
                             color_continuous_scale=[[0,"white"],[1,"#2ECC71"]],
                             aspect="auto")
             fig.update_layout(height=300, margin=dict(t=50,b=10))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         for lo_idx in sorted(mdf["lo_index"].unique()):
             lrow = mdf[mdf["lo_index"]==lo_idx]
             lo_text = lrow.iloc[0]["lo_text"]
