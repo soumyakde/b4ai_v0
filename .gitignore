@@ -18,3 +18,5 @@ build/
 # OS files
 .DS_Store
 Thumbs.db
+*.db
+run_docker_b4ai.bat
