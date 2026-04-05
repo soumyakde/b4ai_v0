@@ -179,20 +179,7 @@ def _init_schema(db_path: Optional[Path] = None) -> None:
 # Fixed system prompt — Basics4AI curriculum context
 # -----------------------------------------------------------------------
 
-SYSTEM_PROMPT = """You are a qualitative research assistant supporting \
-an inductive thematic analysis of data from the Basics4AI programme — \
-a 7-module curriculum teaching AI literacy to young people aged 10–14 \
-years in informal learning settings (after-school programs, community \
-centres, libraries). The curriculum uses plugged and unplugged games \
-and activities grounded in cognitive- and context-based learning \
-approaches. Modules cover: what AI is, how AI learns, AI ethics and \
-fairness, recommendation systems, computer vision, natural language \
-processing, and AI in society. Data sources include semi-structured \
-interviews and end-of-module reflection notes collected from \
-participants aged 10–14 years. You are performing inductive thematic \
-analysis following Braun and Clarke (2006) without any pre-existing \
-coding framework. All codes and themes must be grounded strictly in \
-the data provided. Do not introduce concepts not present in the data. Note: Research with this age group commonly finds that young people hold misconceptions about AI — for example, conflating AI with robots, attributing human-like emotions or consciousness to AI, or believing AI learns entirely on its own without human input. You are not directed to code for these specifically, but this contextual awareness may help you interpret ambiguous participant language accurately."""
+SYSTEM_PROMPT = """You are a qualitative research assistant supporting an inductive thematic analysis of data from the Basics4AI programme — a 7-module curriculum teaching AI literacy to young people aged 10–14 years in informal learning settings (after-school programs, community centres, libraries). The curriculum uses plugged and unplugged games and activities grounded in cognitive- and context-based learning approaches. Modules cover: what AI is, how AI learns, how AI works, goal-based problem-solving, natural vs. artificial agents' problem-solving processes, real-world problem-solving with constraints and uncertainties, natural language processing, and AI in society. Data sources include semi-structured interviews and end-of-module reflection notes collected from participants aged 10–14 years. You are performing inductive thematic analysis following Braun and Clarke (2006) without any pre-existing coding framework. All codes and themes must be grounded strictly in the data provided. Ensure all sources for codes generated are saved for the ability to traceback to the usernames to whom the quotes are to be attributed to, for transparency purposes. Do not introduce concepts not present in the data. Note: Research with this age group commonly finds that young people hold misconceptions about AI — for example, conflating AI with robots, attributing human-like emotions or consciousness to AI, or believing AI learns entirely on its own without human input. You are not directed to code for these specifically, but this contextual awareness may help you interpret ambiguous participant language accurately."""
 
 
 # -----------------------------------------------------------------------
@@ -330,12 +317,13 @@ def _make_chunk(
 
 _PHASE2_PROMPT = """\
 Read the following interview/reflection excerpt carefully.
+This excerpt is from participant: {participant_id}
 
 Identify exactly {n_codes} of the most relevant codes in the text.
 For each code:
 1. Provide a name in no more than 3 words
-2. Provide a description of exactly 4 lines capturing the meaning
-3. Include one meaningful quote from the text, no longer than 2 sentences
+2. Provide a meaningful description in no more than 4 sentences, written as a single paragraph with no line breaks
+3. Include one meaningful quote from the text, no longer than 2 sentences — the quote must be attributed to the participant identified above
 
 The excerpt index is: {chunk_index}
 
@@ -344,8 +332,9 @@ Format your response as valid JSON only, with this exact structure:
   "codes": [
     {{
       "name": "code name here",
-      "description": "4 line description here",
-      "quote": "quote from text here",
+      "description": "description here",
+      "quote": "verbatim quote from text here",
+      "participant_id": "{participant_id}",
       "chunk_index": {chunk_index}
     }}
   ]
@@ -411,6 +400,7 @@ def run_phase2(
         prompt = _PHASE2_PROMPT.format(
             n_codes=n_codes,
             chunk_index=chunk["chunk_index"],
+            participant_id=chunk.get("participant_id", "unknown"),
             text=chunk["content"],
         )
 
@@ -418,7 +408,7 @@ def run_phase2(
             model, prompt,
             system=SYSTEM_PROMPT,
             temperature=temperature,
-            max_tokens=1500,
+            max_tokens=3000,   # raised from 1500 — Llama verbosity requires headroom
         )
 
         if response["error"]:
@@ -481,16 +471,31 @@ def run_phase2_dedup(
         "core.analytics.llm.deduplicator", "deduplicate_codes"
     )
 
-    n_before    = len(codes)
-    deduped     = deduplicate_codes(codes, threshold=threshold)
-    n_after     = len(deduped)
+    n_before = len(codes)
+    deduped  = deduplicate_codes(codes, threshold=threshold)
+    n_after  = len(deduped)
+
+    # Compute removed codes so the dashboard can display them.
+    # A code is "removed" if its (chunk_index, name) key is not in the
+    # deduplicated set.  chunk_index alone is not unique (multiple codes
+    # per chunk), but (chunk_index, name) is stable across serialisation.
+    kept_keys = {
+        (c.get("chunk_index"), c.get("name", "").strip().lower())
+        for c in deduped
+    }
+    removed_codes = [
+        c for c in codes
+        if (c.get("chunk_index"), c.get("name", "").strip().lower())
+        not in kept_keys
+    ]
 
     return {
-        "codes_dedup": deduped,
-        "n_before":    n_before,
-        "n_after":     n_after,
-        "n_removed":   n_before - n_after,
-        "threshold":   threshold,
+        "codes_dedup":   deduped,
+        "removed_codes": removed_codes,   # NEW — list of removed code dicts
+        "n_before":      n_before,
+        "n_after":       n_after,
+        "n_removed":     n_before - n_after,
+        "threshold":     threshold,
     }
 
 
@@ -498,16 +503,38 @@ def run_phase2_dedup(
 # Phase 3: Search for themes
 # -----------------------------------------------------------------------
 
-_PHASE3_PROMPT = """\
-Below is a list of codes identified from interview and reflection data.
-Each code has a number (its index), a name, and a description.
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 3 prompt — maps to De Paoli (2024) Phase 4 ("group topics into themes")
+#
+# De Paoli methodology note
+# ─────────────────────────
+# De Paoli's Phase 3 asks the LLM to identify UNIQUE topics from a flat list
+# (deduplication at the code level). In this implementation, deduplication is
+# handled upstream in Phase 2b using sentence-transformers cosine similarity
+# (threshold=0.85 by default), which is more reliable than asking an LLM to
+# judge uniqueness.  Phase 3 here therefore begins directly from De Paoli's
+# Phase 4: grouping the deduplicated codes into themes.
+#
+# Traceability
+# ────────────
+# Each theme returns code_indices (chunk-level indices linking back to the
+# original transcript chunks) and quotes (verbatim participant text) so every
+# theme can be traced to source data — fulfilling De Paoli's anti-hallucination
+# requirement.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_PHASE3_PROMPT = """Below is a list of codes identified from interview and reflection data.
+Each code has a number (its index), a name, a description, a supporting quote, and the participant username the quote is attributed to.
 
 Your task:
-Determine how all the codes can be grouped into exactly {n_themes} \
-significant themes.
+Determine how all the codes can be grouped into exactly {n_themes} significant themes.
 A code may belong to more than one group.
-Group all codes and provide a name (maximum 5 words) and a clear \
-description (2–3 sentences) for each group.
+For each group provide:
+  - a name (maximum 5 words)
+  - a clear description (2-3 sentences, single paragraph, no line breaks)
+  - the list of code indices that belong to this group
+  - up to 3 representative attributed quotes drawn directly from the codes in the group,
+    each with the participant_id of the person who said it
 
 Format your response as valid JSON only:
 {{
@@ -515,13 +542,18 @@ Format your response as valid JSON only:
     {{
       "name": "theme name here",
       "description": "theme description here",
-      "code_indices": [0, 3, 7]
+      "code_indices": [0, 3, 7],
+      "attributed_quotes": [
+        {{"participant_id": "username_here", "quote": "verbatim participant quote"}}
+      ]
     }}
   ]
 }}
 
 Do not include any text before or after the JSON.
 Do not use markdown code fences.
+Quotes must be taken verbatim from the participant quotes listed below — do not paraphrase or invent quotes.
+participant_id values must be copied exactly from the codes list below — do not guess or invent usernames.
 
 Codes:
 {codes_list}"""
@@ -579,13 +611,18 @@ def run_phase3(
         result["error"] = "No codes provided to Phase 3."
         return result
 
-    # Build codes list string with index for anti-hallucination
+    # Build codes list string with index + participant_id + quote for attribution
     codes_lines = []
     for code in codes:
-        idx  = code.get("chunk_index", 0)
-        name = code.get("name", "")
-        desc = code.get("description", "")
-        codes_lines.append(f"{idx}: '{name}': {desc}")
+        idx   = code.get("chunk_index", 0)
+        name  = code.get("name", "")
+        desc  = code.get("description", "")
+        quote = code.get("quote", "")
+        pid   = code.get("participant_id", "unknown")
+        line  = f"{idx}: '{name}': {desc}  [participant: {pid}]"
+        if quote:
+            line += f'  [Quote: "{quote}"]'
+        codes_lines.append(line)
     codes_list = "\n".join(codes_lines)
 
     prompt = _PHASE3_PROMPT.format(
@@ -659,7 +696,10 @@ def run_phase4(
     Same structure as run_phase3(), with phase=4.
     """
     if n_themes is None:
-        # Default: same range as Phase 3
+        # Data-driven default: scale with the number of codes, bounded 5–13.
+        # De Paoli (2024) uses 11 as a fixed reference; this formula adapts
+        # to smaller or larger code lists. The UI slider lets researchers
+        # override to any target value, including De Paoli's recommended 11.
         n_themes = max(5, min(13, len(codes) // 3))
 
     result = run_phase3(
@@ -1068,14 +1108,54 @@ def list_runs(
 # Internal helpers
 # -----------------------------------------------------------------------
 
+def _sanitise_json_strings(text: str) -> str:
+    """
+    Replace literal newlines and carriage returns inside JSON string values
+    with a single space.
+
+    Llama 3.x interprets prompt instructions like "4 lines" literally and
+    embeds real \n characters inside JSON string values. Python's json.loads
+    correctly rejects these as invalid control characters (RFC 8259 §7).
+    The truncation-repair code also fails on them because the string-tracking
+    loop loses sync at the bare newline.
+
+    This sanitiser runs before any parse attempt and is a no-op on clean JSON.
+    """
+    result  = []
+    in_str  = False
+    escaped = False
+    for ch in text:
+        if escaped:
+            escaped = False
+            result.append(ch)
+            continue
+        if ch == "\\" and in_str:
+            escaped = True
+            result.append(ch)
+            continue
+        if ch == '"':
+            in_str = not in_str
+            result.append(ch)
+            continue
+        if in_str and ch in ("\n", "\r"):
+            result.append(" ")   # strip literal newline — keep string on one line
+            continue
+        result.append(ch)
+    return "".join(result)
+
+
 def _parse_json_response(text: str) -> Optional[Dict]:
     """
     Parse JSON from LLM response text.
     Handles markdown code fences, leading/trailing text,
     and truncated responses (model hit max_tokens mid-JSON).
+    Also handles literal newlines inside string values (Llama quirk).
     """
     if not text:
         return None
+
+    # Pre-process: remove literal newlines inside JSON strings (Llama 3.x quirk)
+    text = _sanitise_json_strings(text)
 
     # Strip markdown fences
     text = re.sub(r"```(?:json)?\s*", "", text)

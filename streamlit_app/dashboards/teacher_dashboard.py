@@ -42,6 +42,7 @@ from core.analytics.inferential.inferential_tests import (
     run_paired_comparison,
     run_between_groups,
     run_repeated_measures,
+    run_bland_altman,           # ← NEW
 )
 try:
     from core.analytics.irt.irt_runner import (
@@ -81,6 +82,7 @@ try:
         list_runs   as _ita_list_runs,
         SYSTEM_PROMPT as _ITA_SYSTEM_PROMPT,
         _PHASE2_PROMPT,
+        _PHASE3_PROMPT,
     )
     from core.analytics.llm.theme_comparator import (
         compare_runs as _compare_runs,
@@ -95,8 +97,9 @@ try:
         create_dta_run       as _dta_create_run,
         save_dta_results, load_dta_results,
         list_dta_runs        as _dta_list_runs,
-        _DTA_PHASE2_PROMPT, _parse_dta_json,
-        _detect_matched_indicators,
+        _DTA_PHASE2_PROMPT, _DTA_LO_PROMPT, _DTA_PHASE5_PROMPT,
+        DTA_SYSTEM_PROMPT,
+        _parse_dta_json, _detect_matched_indicators,
     )
     _LLM_AVAILABLE = True
     _LLM_ERR = ""
@@ -130,6 +133,19 @@ _MODULE_LABELS: Dict[str, str] = {
     "demographics": "Demographics",
 }
 
+# Maps pre-instrument key → matching post-instrument key.
+# Used by Bland-Altman expanders in both the Basic Statistics and
+# Inferential Statistics tabs.
+_PREPOST_PAIRS: dict[str, str] = {
+    "precourse_pre_ai_misconceptions_assessment":
+        "postcourse_post_ai_misconceptions_assessment",
+    "precourse_pre_aici_assessment":
+        "postcourse_post_aici_assessment",
+}
+# Reverse map: post → pre (for lookups when a post instrument is selected)
+_PREPOST_PAIRS_REVERSE: dict[str, str] = {
+    v: k for k, v in _PREPOST_PAIRS.items()
+}
 
 # -----------------------------------------------------------------------
 # Cached data loader — TTL 5 minutes
@@ -424,42 +440,160 @@ def _stat_row(row: pd.Series, score_col: str, unit: str = "") -> None:
     c4.metric("N",      int(n) if n is not None else "—")
 
 
-_QUESTION_MAP = {
-    'Q10_1': ('SCCCES', 'Culture', 'While going through this module, I thought about whether the topic conflicts with my culture (for example, religion or family values).'),
-    'Q10_2': ('SCCCES', 'Culture', 'While going through this module, I thought about whether I agreed with the topic conflicts based on my culture (for example, religion or family values).'),
-    'Q11_1': ('SCCCES', 'Personal Relevance', 'While going through this module, I thought about how this topic relates to things I like or care about.'),
-    'Q11_2': ('SCCCES', 'Personal Relevance', 'While going through this module, I thought about how the information could be useful to me.'),
-    'Q11_3': ('SCCCES', 'Personal Relevance', 'While going through this module, I thought about how the activities would be helpful to my personal goals.'),
-    'Q2_1': ('SCCCES', 'Engagement With Task', 'I was engaged with the topic at hand.'),
-    'Q2_2': ('SIMS', 'Intrinsic Motivation', 'Because I like doing this activity'),
-    'Q2_3': ('SIMS', 'Intrinsic Motivation', 'Because I feel good when doing this activity'),
-    'Q3_1': ('SCCCES', 'Effort And Persistence', 'I put in a lot of effort.'),
-    'Q3_2': ('SCCCES', 'Effort And Persistence', 'I wish we could still continue with the work for a while.'),
-    'Q3_3': ('SIMS', 'Identified Regulation', 'Because this activity will help me later'),
-    'Q4_1': ('SCCCES', 'Experience Of Flow', 'I was so involved that I forgot everything around me.'),
-    'Q4_2': ('SIMS', 'External Regulation', 'Because I have no choice'),
-    'Q4_3': ('SIMS', 'External Regulation', 'Because I do not want to get in trouble'),
-    'Q4_4': ('SIMS', 'External Regulation', 'Because I feel I have to do it'),
-    'Q5_1': ('SCCCES', 'Coherency Of Messaging', 'While going through this module, I thought about whether the information was well organized.'),
-    'Q5_2': ('SCCCES', 'Coherency Of Messaging', 'While going through this module, I considered whether the information was easy to understand.'),
-    'Q5_3': ('SCCCES', 'Coherency Of Messaging', 'While going through this module, I thought about whether the information flowed well.'),
-    'Q6_1': ('SCCCES', 'Plausibility Of Messaging', 'While going through this module, I thought about whether the information was believable.'),
-    'Q6_2': ('SCCCES', 'Plausibility Of Messaging', 'While going through this module, I thought about whether the information was reasonable.'),
-    'Q7_1': ('SCCCES', 'Credibility Of Messaging', 'While going through this module, I thought about whether the source of the information was trustworthy.'),
-    'Q7_2': ('SCCCES', 'Credibility Of Messaging', 'While going through this module, I thought about whether the source of the information was believable.'),
-    'Q8_1': ('SCCCES', 'Comprehensibility Of Messaging', 'While going through this module, I thought about whether the information presented was easy to follow.'),
-    'Q8_2': ('SCCCES', 'Comprehensibility Of Messaging', 'While going through this module, I thought about whether the information was clear.'),
-    'Q9_1': ('SCCCES', 'Attention', 'I was having trouble paying attention during the module.'),
-    'Q9_2': ('SCCCES', 'Attention', 'I was distracted by other thoughts during the module.'),
+# -----------------------------------------------------------------------
+# Survey question maps — per-instrument to avoid Q-ID key collisions
+# (SCCCES and SIMS share question IDs like Q4_1, Q5_1–Q5_3 for different items)
+#
+# Tuple: (construct, question_text, item_reverse_coded)
+#
+# item_reverse_coded=True  — the item is negatively worded; the raw score
+#   is flipped (5 − x) before the construct mean is computed.
+#
+# IMPORTANT distinction:
+#   • item_reverse_coded=True  → individual item score is flipped       (SCCCES Q9_1/Q9_2, Q10_1/Q10_2)
+#   • construct reverse_coded=True in _CONSTRUCT_DEFINITIONS            (SIMS External Regulation, Amotivation)
+#     → construct mean is interpreted in reverse (higher = worse)
+#     → the individual items are NOT flipped; they are forward-coded
+# -----------------------------------------------------------------------
+
+# ── SCCCES ──────────────────────────────────────────────────────────────
+_SCCCES_QUESTION_MAP = {
+    "Q2_1":  ("Engagement With Task",           "I was engaged with the topic at hand.",                                                                                                         False),
+    "Q3_1":  ("Effort And Persistence",          "I put in a lot of effort.",                                                                                                                     False),
+    "Q3_2":  ("Effort And Persistence",          "I wish we could still continue with the work for a while.",                                                                                     False),
+    "Q4_1":  ("Experience Of Flow",              "I was so involved that I forgot everything around me.",                                                                                         False),
+    "Q5_1":  ("Coherency Of Messaging",          "While going through this module, I thought about whether the information was well organized.",                                                   False),
+    "Q5_2":  ("Coherency Of Messaging",          "While going through this module, I considered whether the information was easy to understand.",                                                  False),
+    "Q5_3":  ("Coherency Of Messaging",          "While going through this module, I thought about whether the information flowed well.",                                                          False),
+    "Q6_1":  ("Plausibility Of Messaging",       "While going through this module, I thought about whether the information was believable.",                                                       False),
+    "Q6_2":  ("Plausibility Of Messaging",       "While going through this module, I thought about whether the information was reasonable.",                                                       False),
+    "Q7_1":  ("Credibility Of Messaging",        "While going through this module, I thought about whether the source of the information was trustworthy.",                                        False),
+    "Q7_2":  ("Credibility Of Messaging",        "While going through this module, I thought about whether the source of the information was believable.",                                         False),
+    "Q8_1":  ("Comprehensibility Of Messaging",  "While going through this module, I thought about whether the information presented was easy to follow.",                                         False),
+    "Q8_2":  ("Comprehensibility Of Messaging",  "While going through this module, I thought about whether the information was clear.",                                                            False),
+    # ⚠️ item-reverse-coded — negatively worded; raw score flipped (5−x) before construct mean
+    "Q9_1":  ("Attention",                       "I was having trouble paying attention during the module.",                                                                                      True),
+    "Q9_2":  ("Attention",                       "I was distracted by other thoughts during the module.",                                                                                         True),
+    # ⚠️ item-reverse-coded — framed as cultural conflict; flip so higher = more cultural alignment
+    "Q10_1": ("Culture",                         "While going through this module, I thought about whether the topic conflicts with my culture (for example, religion or family values).",        True),
+    "Q10_2": ("Culture",                         "While going through this module, I thought about whether I agreed with the topic conflicts based on my culture (for example, religion or family values).", True),
+    "Q11_1": ("Personal Relevance",              "While going through this module, I thought about how this topic relates to things I like or care about.",                                       False),
+    "Q11_2": ("Personal Relevance",              "While going through this module, I thought about how the information could be useful to me.",                                                    False),
+    "Q11_3": ("Personal Relevance",              "While going through this module, I thought about how the activities would be helpful to my personal goals.",                                     False),
 }
 
-# Reverse map: instrument -> sorted list of (qid, construct, text) for guide
+# ── SIMS ────────────────────────────────────────────────────────────────
+# SIMS scoring rationale (De Charms & Muir 1978 / Deci & Ryan 1985 SDT):
+# Q4_1–Q4_4 (External Regulation) and Q5_1–Q5_3 (Amotivation) are item-reverse-coded.
+# Reason: Agree with "Because I have no choice" is a BAD outcome; after reversal (5−x)
+# the scored mean is HIGH when the learner is NOT externally regulated or amotivated.
+# This makes ALL four SIMS constructs point in the same positive direction:
+#   HIGH score on any SIMS construct = BETTER outcome for the learner.
+# The scoring YAML (b4ai_sims_scoring.yaml) lists Q4_1–Q4_4 and Q5_1–Q5_3
+# under reverse_questions, which DatasetBuilder applies as 5−raw_score.
+_SIMS_QUESTION_MAP = {
+    "Q2_1":  ("Intrinsic Motivation",   "Because I think that this activity is interesting.",                                                         False),
+    "Q2_2":  ("Intrinsic Motivation",   "Because I like doing this activity.",                                                                         False),
+    "Q2_3":  ("Intrinsic Motivation",   "Because I feel good when doing this activity.",                                                               False),
+    "Q3_1":  ("Identified Regulation",  "Because I think that this activity is good for me.",                                                          False),
+    "Q3_2":  ("Identified Regulation",  "Because I think that this activity is important for me.",                                                     False),
+    "Q3_3":  ("Identified Regulation",  "Because this activity will help me later.",                                                                   False),
+    # ⚠️ Q4_1–Q4_4: External Regulation — item-reverse-coded
+    #   Raw: Agree=3 means externally pressured (bad). Reversed: Agree→2, so
+    #   higher score = LESS external regulation = GOOD. Same direction as intrinsic/identified.
+    "Q4_1":  ("External Regulation",    "Because I am supposed to do it.",                                                                             True),
+    "Q4_2":  ("External Regulation",    "Because I have no choice.",                                                                                   True),
+    "Q4_3":  ("External Regulation",    "Because I do not want to get in trouble.",                                                                    True),
+    "Q4_4":  ("External Regulation",    "Because I feel I have to do it.",                                                                             True),
+    # ⚠️ Q5_1–Q5_3: Amotivation — item-reverse-coded
+    #   Raw: Agree=3 means amotivated (bad). Reversed: Agree→2, so
+    #   higher score = LESS amotivation = GOOD. Consistent direction across all SIMS constructs.
+    "Q5_1":  ("Amotivation",            "There may be good reasons to do this activity, but personally, I do not see any.",                           True),
+    "Q5_2":  ("Amotivation",            "I am doing this activity, but I am not sure if it is worth it.",                                             True),
+    "Q5_3":  ("Amotivation",            "I am doing this activity, but I am not sure it is a good thing to pursue it.",                               True),
+}
+
+# Merged view for backward-compat lookup (instrument+qid → tuple)
+# Keys are (instrument, qid) to avoid the Q4_1 / Q5_x collisions
+_QUESTION_MAP_BY_INST = {
+    ("SCCCES", qid): val for qid, val in _SCCCES_QUESTION_MAP.items()
+}
+_QUESTION_MAP_BY_INST.update({
+    ("SIMS", qid): val for qid, val in _SIMS_QUESTION_MAP.items()
+})
+
+# Per-instrument reverse-coded item sets (used for ⚠️ column in tables)
+_SCCCES_REVERSE_ITEMS: set = {qid for qid, v in _SCCCES_QUESTION_MAP.items() if v[2]}
+_SIMS_REVERSE_ITEMS:   set = {qid for qid, v in _SIMS_QUESTION_MAP.items()   if v[2]}
+_REVERSE_CODED_ITEMS = _SCCCES_REVERSE_ITEMS  # backward compat for SCCCES-only code
+
+
+def _get_reverse_items_for_survey(survey_base: str) -> set:
+    """Return the set of item-reverse-coded question IDs for a survey."""
+    if "sims" in survey_base.lower():
+        return _SIMS_REVERSE_ITEMS
+    return _SCCCES_REVERSE_ITEMS
+
+
 def _build_question_guide(instrument: str) -> list:
+    """Build question guide rows for SCCCES or SIMS, with ⚠️ on item-reverse-coded items."""
+    qmap = _SCCCES_QUESTION_MAP if instrument == "SCCCES" else _SIMS_QUESTION_MAP
     rows = []
-    for qid, (inst, con, txt) in sorted(_QUESTION_MAP.items()):
-        if inst == instrument:
-            rows.append({"Question ID": qid, "Construct": con, "Question Text": txt})
+    for qid, (con, txt, rev) in sorted(qmap.items()):
+        rows.append({
+            "Question ID":    f"⚠️ {qid}" if rev else qid,
+            "Construct":      con,
+            "Question Text":  txt,
+            "Item-reverse-coded": "⚠️ Yes" if rev else "No",
+        })
     return rows
+
+
+# -----------------------------------------------------------------------
+# Assessment question maps — AI Misconceptions (AIM-F) and AICI
+# Verify question text against your instrument YAMLs if it differs.
+# -----------------------------------------------------------------------
+# AIM-F question text — sourced from pre_ai_misconceptions_assessment.yaml (v1.0)
+# Question IDs match the DB question_id values from that instrument.
+_AIM_QUESTION_MAP = {
+    "Q3_1": "AI systems learn and understand what they are doing on their own.",
+    "Q3_2": "I always identify a machine to be an AI machine if it imitates human characteristics like voice, movements, and appearance.",
+    "Q3_3": "AI systems have emotions and intuitions.",
+    "Q3_4": "AI methods work similar to the brain.",
+    "Q3_5": "Any software that uses a database is AI.",
+    "Q3_6": "Recommendation systems in games, social media, or search engines are all examples of AI.",
+    "Q3_7": "Can something be called AI if it does not involve technology?",
+    "Q3_8": "Would you consider AI as a machine with pre-installed knowledge or intelligence?",
+}
+
+# AICI question map intentionally omitted — items include images and multi-part
+# scenarios that cannot be meaningfully represented in a plain text table.
+# See the published AI-CI instrument (Appendix 1, IJAIED) for the full scale.
+
+# Map instrument key keywords → question map
+# Only AIM-F is mapped; AICI shows a PDF reference note instead.
+_ASSESSMENT_Q_MAPS = {
+    "misconception": _AIM_QUESTION_MAP,
+    "aim":           _AIM_QUESTION_MAP,
+}
+
+# AICI instruments that should show a PDF reference note instead of question text
+_AICI_INSTRUMENT_KEYS = {"aici", "conceptual"}
+
+
+def _get_assessment_q_map(instrument_key: str) -> dict:
+    """Return the AIM-F question text map, or {} if not applicable."""
+    key_lower = instrument_key.lower()
+    for kw, qmap in _ASSESSMENT_Q_MAPS.items():
+        if kw in key_lower:
+            return qmap
+    return {}
+
+
+def _is_aici_instrument(instrument_key: str) -> bool:
+    """Return True if this is an AI Conceptual Inventory instrument."""
+    key_lower = instrument_key.lower()
+    return any(kw in key_lower for kw in _AICI_INSTRUMENT_KEYS)
 
 
 def _render_assessment_scores(canonical_df: pd.DataFrame) -> None:
@@ -561,15 +695,77 @@ def _render_assessment_scores(canonical_df: pd.DataFrame) -> None:
 
         with st.expander("Item difficulty table"):
             pct_by_q["pct_correct"] = pct_by_q["pct_correct"].round(1)
-            pct_by_q.columns = ["Question", "% Correct", "N Students"]
+            _diff_display = pct_by_q.copy()
+            _diff_display.columns = ["Question", "% Correct", "N Students"]
             st.dataframe(
-                pct_by_q, hide_index=True, width="stretch",
+                _diff_display, hide_index=True, width="stretch",
                 column_config={
                     "Question":   st.column_config.TextColumn("Question",  width="small"),
                     "% Correct":  st.column_config.NumberColumn("% Correct", format="%.1f", width="small"),
                     "N Students": st.column_config.NumberColumn("N Students", format="%d",   width="small"),
                 }
             )
+
+        # ── Question # → Question Text (AIM-F only) or PDF note (AICI) ───────
+        _aq_map = _get_assessment_q_map(selected_key)
+        if _aq_map:
+            with st.expander("📋 Question # → Question Text (AI Misconceptions)", expanded=False):
+                st.caption(
+                    "Question IDs match the DB question_id values. "
+                    "Text sourced from pre_ai_misconceptions_assessment.yaml."
+                )
+                import pandas as _aqpd
+                _aq_rows = [
+                    {"Question #": qnum, "Question Text": qtxt}
+                    for qnum, qtxt in sorted(
+                        _aq_map.items(),
+                        key=lambda x: int("".join(filter(str.isdigit, x[0])) or 0)
+                    )
+                ]
+                st.dataframe(
+                    _aqpd.DataFrame(_aq_rows),
+                    hide_index=True, width="stretch",
+                    column_config={
+                        "Question #":    st.column_config.TextColumn("Question #",    width="small"),
+                        "Question Text": st.column_config.TextColumn("Question Text", width="large"),
+                    }
+                )
+        elif _is_aici_instrument(selected_key):
+            with st.expander("📋 AI Conceptual Inventory (AICI) — Item Reference", expanded=False):
+                st.caption(
+                    "The AI-CI is a 20-item instrument. Items include images, decision-tree "
+                    "diagrams, and multi-part scenarios that cannot be meaningfully represented "
+                    "in a plain text table."
+                )
+                st.info(
+                    "📄 **Full item listing:** See Appendix 1 of the published AI-CI instrument "
+                    "(International Journal of Artificial Intelligence in Education). "
+                    "Item codes: CI2, CI4, CI9, CI12, CI13, CI14, CI15, CI16, CI17, CI18, "
+                    "CI19, CI22, CI23, CI24, CI26, CI28, CI29, CI30, CI31, CI32."
+                )
+
+        # ── Bland-Altman method agreement (pre/post pairs only) ───────────
+        # Determine if selected instrument has a known pre/post counterpart.
+        # Works whether a pre OR post instrument is currently selected.
+        _ba_pre_key  = None
+        _ba_post_key = None
+        if selected_key in _PREPOST_PAIRS:
+            _ba_pre_key  = selected_key
+            _ba_post_key = _PREPOST_PAIRS[selected_key]
+        elif selected_key in _PREPOST_PAIRS_REVERSE:
+            _ba_pre_key  = _PREPOST_PAIRS_REVERSE[selected_key]
+            _ba_post_key = selected_key
+
+        if _ba_pre_key and _ba_post_key:
+            with st.spinner("Computing method agreement…"):
+                _ba_result = run_bland_altman(
+                    canonical_df,
+                    pre_instrument=_ba_pre_key,
+                    post_instrument=_ba_post_key,
+                    use_pct=True,
+                )
+            _render_bland_altman_expander(_ba_result, score_label="% Correct")
+        # ─────────────────────────────────────────────────────────────────
 
     else:
         # Per-student: distribution of total % correct
@@ -638,6 +834,7 @@ _CONSTRUCT_DEFINITIONS = {
         "scale_mid":  "Learners maintained attention for some but not all of the activity.",
         "scale_high": "Learners reported being fully absorbed and attentive throughout.",
         "reverse_coded": False,
+        "item_reverse_note": "⚠️ Items Q9_1 and Q9_2 are negatively worded — raw scores are flipped (5−x) before the construct mean is computed. A resulting mean ≤ 2.5 indicates attention problems warrant follow-up.",
     },
     "personal_relevance": {
         "label": "Personal Relevance",
@@ -656,6 +853,7 @@ _CONSTRUCT_DEFINITIONS = {
         "scale_mid":  "Learners found partial cultural alignment but some examples felt unfamiliar.",
         "scale_high": "Learners found the content culturally accessible and consistent with their background.",
         "reverse_coded": False,
+        "item_reverse_note": "⚠️ Items Q10_1 and Q10_2 are negatively framed (cultural conflict) — raw scores are flipped (5−x) before the construct mean is computed, so higher means = greater cultural alignment.",
     },
     # Cognitive Engagement (SCES)
     "engagement_with_task": {
@@ -708,21 +906,21 @@ _CONSTRUCT_DEFINITIONS = {
         "label": "External Regulation",
         "definition": "Doing the activity because of external pressure, rules, or to avoid consequences.",
         "analytic_focus": ["rewards", "pressure", "compliance"],
-        "scale_low":  "Learners reported no external pressure — they chose the activity freely.",
+        "scale_low":  "Learners felt strongly externally pressured — they felt they had no choice or feared consequences.",
         "scale_mid":  "Learners felt some external pressure but also had some personal buy-in.",
-        "scale_high": "Learners reported doing the activity primarily because they had to, not by choice.",
-        "reverse_coded": True,
-        "reverse_note": "⚠️ Reverse-coded construct: higher scores indicate more externally controlled (less self-determined) motivation. A mean above 2.5 warrants attention.",
+        "scale_high": "Learners were NOT externally pressured — they chose to participate freely.",
+        "reverse_coded": False,
+        "item_reverse_note": "⚠️ Items Q4_1–Q4_4 are item-reverse-coded (5−x) so that HIGH scores indicate LESS external regulation. A low mean (≤ 2.5) warrants attention — it means learners felt coerced rather than freely choosing to participate.",
     },
     "amotivation": {
         "label": "Amotivation",
         "definition": "A lack of motivation — feeling no reason to do the activity and disconnected from outcomes.",
         "analytic_focus": ["disengagement", "helplessness", "lack of purpose"],
-        "scale_low":  "Learners showed no signs of disengagement — they had clear reasons for participating.",
+        "scale_low":  "Learners were amotivated — they could see no reason to participate and felt disconnected.",
         "scale_mid":  "Learners showed some motivational uncertainty or occasional disengagement.",
-        "scale_high": "Learners felt disconnected from the activity, saw no purpose, and showed signs of helplessness.",
-        "reverse_coded": True,
-        "reverse_note": "⚠️ Reverse-coded construct: higher scores indicate greater disengagement and lack of motivation. A mean above 2.0 is a concern worth investigating.",
+        "scale_high": "Learners were NOT amotivated — they had clear reasons to participate and felt engaged.",
+        "reverse_coded": False,
+        "item_reverse_note": "⚠️ Items Q5_1–Q5_3 are item-reverse-coded (5−x) so that HIGH scores indicate LESS amotivation. A low mean (≤ 2.0) is a concern — it means learners saw little point in the activity.",
     },
 }
 
@@ -796,6 +994,91 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
             cm_display = cm_survey[cm_survey["module_id"] == selected_mod_id]
         module_col = "module_id"
 
+        # ── Cross-module trajectory chart (Per module mode only) ──────────────
+        # Show how each construct's mean score varies across all 7 modules
+        if not cm_survey.empty and "module_id" in cm_survey.columns:
+            st.markdown("#### 📈 Construct means across modules")
+            st.caption(
+                "Mean score per construct per module (averaged across all students). "
+                "Each line traces how a construct evolves through the programme."
+            )
+            # Compute mean score per construct × module
+            _traj = (
+                cm_survey.groupby(["module_id", "construct"])["mean_score"]
+                .mean()
+                .reset_index()
+            )
+            _traj["module_id"] = _traj["module_id"].apply(
+                lambda m: _MODULE_LABELS.get(m, m)
+            )
+            _traj["mean_score"] = _traj["mean_score"].round(3)
+            _traj["construct_label"] = _traj["construct"].apply(
+                lambda c: _CONSTRUCT_DEFINITIONS.get(c, {}).get("label", c.replace("_"," ").title())
+            )
+
+            # Sort by module number
+            import re as _re_traj
+            def _mod_sort(m):
+                _mn = _re_traj.search(r"(\d+)", str(m))
+                return int(_mn.group(1)) if _mn else 0
+
+            _traj = _traj.sort_values(
+                "module_id", key=lambda s: s.map(_mod_sort)
+            )
+
+            if _HAS_PLOTLY:
+                import plotly.express as px
+                _fig_traj = px.line(
+                    _traj,
+                    x="module_id",
+                    y="mean_score",
+                    color="construct_label",
+                    markers=True,
+                    title=f"Construct Trajectory Across Modules — {selected_survey_label}",
+                    labels={
+                        "module_id":      "Module",
+                        "mean_score":     "Mean Score (1–4)",
+                        "construct_label":"Construct",
+                    },
+                    range_y=[1, 4],
+                    color_discrete_sequence=px.colors.qualitative.Safe,
+                )
+                _fig_traj.add_hline(
+                    y=3.0,
+                    line_dash="dot",
+                    line_color="gray",
+                    annotation_text="3.0 (positive threshold)",
+                    annotation_position="right",
+                )
+                _fig_traj.add_hline(
+                    y=2.5,
+                    line_dash="dash",
+                    line_color="orange",
+                    annotation_text="2.5 (attention threshold)",
+                    annotation_position="right",
+                )
+                _fig_traj.update_layout(
+                    height=480,
+                    margin=dict(t=50, b=10, l=10, r=120),
+                    xaxis_title="Module",
+                    yaxis_title="Mean Score (1–4 Likert)",
+                    legend_title="Construct",
+                )
+                st.plotly_chart(_fig_traj, width="stretch")
+            else:
+                # Fallback: pivot and use st.line_chart
+                _pivot = _traj.pivot(
+                    index="module_id", columns="construct_label", values="mean_score"
+                )
+                st.line_chart(_pivot)
+
+            st.caption(
+                "Dotted line = 3.0 (positive engagement threshold). "
+                "Dashed line = 2.5 (attention warranted). "
+                "Scale: 1 = Strongly disagree → 4 = Strongly agree."
+            )
+            st.divider()
+
     if cm_display.empty:
         st.info("No data for the selected combination.")
         return
@@ -856,7 +1139,7 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
             }
         )
 
-        # Reverse-coding alert for any selected construct
+        # Reverse-coding alerts: construct-level (External Reg, Amotivation)
         rev_coded = [c for c in selected_constructs
                      if _CONSTRUCT_DEFINITIONS.get(c, {}).get("reverse_coded")]
         if rev_coded:
@@ -864,6 +1147,12 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
                 note = _CONSTRUCT_DEFINITIONS[rc].get("reverse_note", "")
                 if note:
                     st.warning(note)
+        # Item-level reverse-coding alerts (Attention, Culture)
+        item_rev = [c for c in selected_constructs
+                    if _CONSTRUCT_DEFINITIONS.get(c, {}).get("item_reverse_note")]
+        if item_rev:
+            for ir in item_rev:
+                st.info(_CONSTRUCT_DEFINITIONS[ir]["item_reverse_note"])
 
         # Per-construct interpretation guide
         with st.expander("📖 How to interpret these scores", expanded=False):
@@ -909,6 +1198,8 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
                             ", ".join(cdef["analytic_focus"]))
                 if cdef.get("reverse_coded") and cdef.get("reverse_note"):
                     st.caption(cdef["reverse_note"])
+                if cdef.get("item_reverse_note"):
+                    st.caption(cdef["item_reverse_note"])
                 st.divider()
 
     # View toggle: per-question or per-student
@@ -988,39 +1279,65 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
             )
 
             with st.expander("Item means table"):
-                # Rename by name (not position) to avoid order-dependent bugs
+                # Build display table with ⚠️ flag for reverse-coded items
                 display_items = item_means[
                     ["question_id", "construct", "mean_score", "n_students"]
-                ].copy().rename(columns={
+                ].copy()
+                _rev_set = _get_reverse_items_for_survey(selected_survey_base)
+                display_items["Item-reverse-coded"] = display_items["question_id"].apply(
+                    lambda q: "⚠️ Yes" if q in _rev_set else "No"
+                )
+                display_items = display_items.rename(columns={
                     "question_id": "Question",
                     "construct":   "Construct",
                     "mean_score":  "Mean Score",
                     "n_students":  "N Students",
                 })
-                import streamlit as _st2
+                # Put ⚠️ column right after Question
+                display_items = display_items[
+                    ["Question", "Item-reverse-coded", "Construct", "Mean Score", "N Students"]
+                ]
                 st.dataframe(
                     display_items.reset_index(drop=True),
                     hide_index=True,
                     width="stretch",
                     column_config={
-                        "Question":   st.column_config.TextColumn("Question",  width="small"),
-                        "Construct":  st.column_config.TextColumn("Construct", width="medium"),
-                        "Mean Score": st.column_config.NumberColumn("Mean Score", format="%.2f", width="small"),
-                        "N Students": st.column_config.NumberColumn("N Students", format="%d",   width="small"),
+                        "Question":      st.column_config.TextColumn("Question",      width="small"),
+                        "Item-reverse-coded": st.column_config.TextColumn("Item-reverse-coded", width="small"),
+                        "Construct":     st.column_config.TextColumn("Construct",     width="medium"),
+                        "Mean Score":    st.column_config.NumberColumn("Mean Score",  format="%.2f", width="small"),
+                        "N Students":    st.column_config.NumberColumn("N Students",  format="%d",   width="small"),
                     }
                 )
-                # ─── Question guide ───────────────────────────────────────────
+                _n_rev = (display_items["Item-reverse-coded"] == "⚠️ Yes").sum()
+                if _n_rev:
+                    st.caption(
+                        f"⚠️ {_n_rev} item(s) in this view are item-reverse-coded — "
+                        "negatively worded items whose raw scores are flipped "
+                        "(5 − raw score) before the construct mean is computed. "
+                        "This is separate from construct-level reverse interpretation "
+                        "(External Regulation, Amotivation) where items are forward-coded "
+                        "but a high mean indicates a worse outcome."
+                    )
+
+                # ─── Question ID → full question text guide ──────────────────
                 _inst_key = "SIMS" if "sims" in selected_survey_base else "SCCCES"
                 _guide_rows = _build_question_guide(_inst_key)
                 if _guide_rows:
                     import pandas as _gpd
-                    with st.expander(f"📋 Question ID guide ({_inst_key})", expanded=False):
+                    with st.expander(f"📋 Question ID → Question Text ({_inst_key})", expanded=False):
+                        st.caption(
+                            "Questions marked ⚠️ are reverse-coded — "
+                            "negatively worded items whose raw scores are flipped "
+                            "before computing construct means."
+                        )
                         st.dataframe(
                             _gpd.DataFrame(_guide_rows),
                             hide_index=True, width="stretch",
                             column_config={
-                                "Question ID": st.column_config.TextColumn("Question ID", width="small"),
-                                "Construct":   st.column_config.TextColumn("Construct",   width="medium"),
+                                "Question ID":   st.column_config.TextColumn("Question ID",   width="small"),
+                                "Item-reverse-coded": st.column_config.TextColumn("Item-reverse-coded", width="small"),
+                                "Construct":     st.column_config.TextColumn("Construct",     width="medium"),
                                 "Question Text": st.column_config.TextColumn("Question Text", width="large"),
                             }
                         )
@@ -1205,103 +1522,328 @@ _IRT_HELP = {
     ),
 }
 
+def _render_bland_altman_expander(
+    ba: dict,
+    score_label: str = "% Correct",
+) -> None:
+    '''Render a collapsible Bland-Altman method agreement expander.
+    Displays:
+      - Summary table: N, bias (d-bar), SD(diff), lower LoA, upper LoA
+      - Per-participant difference table (inner expander)
+      - Proportional bias note when p < 0.05
+      - Full citation
+
+    Parameters
+    ----------
+    ba : dict
+        Output of run_bland_altman().
+    score_label : str
+        Unit label shown in column headers (e.g. "% Correct").
+    '''
+    if ba.get("error"):
+        with st.expander("📐 Method agreement — Bland-Altman limits of agreement",
+                         expanded=False):
+            st.warning(f"Could not compute: {ba['error']}")
+        return
+
+    with st.expander(
+        "📐 Method agreement — Bland-Altman limits of agreement",
+        expanded=False,
+    ):
+        n      = ba["n_pairs"]
+        d_bar  = ba["mean_diff"]
+        s      = ba["sd_diff"]
+        lo     = ba["loa_lower"]
+        hi     = ba["loa_upper"]
+
+        # ── Summary statistics table ──────────────────────────────────
+        summary_df = pd.DataFrame([{
+            "N pairs":      n,
+            f"Bias d̄ ({score_label})":  f"{d_bar:+.3f}",
+            f"SD(diff)":                f"{s:.3f}",
+            f"LoA lower (d̄−2s)":       f"{lo:+.3f}",
+            f"LoA upper (d̄+2s)":       f"{hi:+.3f}",
+        }])
+        st.dataframe(summary_df, hide_index=True, width="stretch")
+
+        # ── Interpretation ────────────────────────────────────────────
+        bias_dir = (
+            "Pre scores exceeded post on average (improvement post-intervention)."
+            if d_bar > 0 else
+            "Post scores exceeded pre on average (gain post-intervention)."
+            if d_bar < 0 else
+            "No average systematic difference between pre and post."
+        )
+        st.caption(
+            f"{bias_dir}  "
+            f"~95% of individual pre-post differences lie between "
+            f"{lo:+.2f} and {hi:+.2f} {score_label}. "
+            "Whether this range is acceptable for educational decision-making "
+            "is a pedagogical judgment, not a statistical one."
+        )
+
+        # ── Proportional bias note ────────────────────────────────────
+        r_val = ba.get("proportional_bias_r")
+        r_p   = ba.get("proportional_bias_p")
+        if ba.get("proportional_bias"):
+            st.warning(
+                f"**Proportional bias detected** (r = {r_val:.3f}, p = {r_p:.4f}). "
+                "The size of the difference between pre and post scores grows "
+                "with the magnitude of the scores. "
+                "Consider applying a log transformation to raw scores before "
+                "re-running the analysis."
+            )
+        elif r_val is not None:
+            st.caption(
+                f"No proportional bias (r = {r_val:.3f}, p = {r_p:.4f}). "
+                "The limits of agreement apply uniformly across the score range."
+            )
+
+        if ba.get("low_n_warning"):
+            st.caption(
+                f"⚠️ n = {n} < {30}. Limits of agreement are wide estimates "
+                "at this sample size. Effect sizes are more informative than "
+                "the absolute LoA bounds."
+            )
+
+        # ── Per-participant difference table (collapsible) ────────────
+        per_pair_df = ba.get("per_pair_df")
+        if per_pair_df is not None and not per_pair_df.empty:
+            with st.expander(
+                f"Individual differences ({n} participants)", expanded=False
+            ):
+                display = per_pair_df.copy()
+                display.columns = [
+                    "Participant",
+                    f"Pre ({score_label})",
+                    f"Post ({score_label})",
+                    "Diff (Pre−Post)",
+                    "Mean (Pre+Post)/2",
+                ]
+                st.dataframe(display, hide_index=True, width="stretch")
+
+        # ── Citation ──────────────────────────────────────────────────
+        st.caption(
+            "Method: Bland, J. M., & Altman, D. G. (1990). A note on the use "
+            "of the intraclass correlation coefficient in the evaluation of "
+            "agreement between two methods of measurement. "
+            "*Computers in Biology and Medicine, 20*(5), 337–340. "
+            "https://doi.org/10.1016/0010-4825(90)90013-F"
+        )
+
 def _render_result_card(result: dict, score_label: str = "% Correct") -> None:
-    """Render a single test result as a clean card."""
+    """Render a single test result as a clean card with source table and means."""
     if result.get("error"):
         st.error(f"Could not compute: {result['error']}")
         return
 
-    sig   = result.get("significant", False)
-    alpha = result.get("alpha", 0.05)
+    sig       = result.get("significant", False)
+    alpha     = result.get("alpha", 0.05)
     sig_badge = "✅ Significant" if sig else "— Not significant"
 
-    # Main stats row
-    cols = st.columns(4)
+    def _fmt(v, decimals=3):
+        return f"{v:.{decimals}f}" if v is not None else "—"
+
+    # ================================================================
+    # PAIRED t (Pre vs Post) — TC25
+    # ================================================================
     if "pre_mean" in result:
-        cols[0].metric(f"Pre mean",  f"{result['pre_mean']:.1f}")
-        cols[1].metric(f"Post mean", f"{result['post_mean']:.1f}",
-                       delta=f"{result['mean_diff']:+.1f}")
+        cols = st.columns(4)
+        cols[0].metric("Pre mean",   f"{result['pre_mean']:.2f}")
+        cols[1].metric("Post mean",  f"{result['post_mean']:.2f}",
+                       delta=f"{result['mean_diff']:+.2f}")
         cols[2].metric("Cohen's d",
                        f"{result['cohens_d']:.3f} ({result['effect_size_label']})")
         cols[3].metric("Paired t p-value",
                        f"{result['t_p_value']:.4f}  {sig_badge}")
+
+        # ── Means by time-point table ─────────────────────────────────
+        n_p = result.get("n_pairs", 0)
+        with st.expander("📈 Means by time-point", expanded=False):
+            _tp_df = pd.DataFrame([
+                {"Time-point": "Pre",  "N": str(n_p),
+                 f"Mean {score_label}": _fmt(result["pre_mean"],  2)},
+                {"Time-point": "Post", "N": str(n_p),
+                 f"Mean {score_label}": _fmt(result["post_mean"], 2)},
+                {"Time-point": "Change (Post − Pre)", "N": "—",
+                 f"Mean {score_label}": _fmt(result["mean_diff"], 2)},
+            ])
+            st.dataframe(_tp_df, hide_index=True, width="stretch")
+
+        # ── RM ANOVA-style source table for paired t ──────────────────
+        # For a paired design: t = d·√n, so F = t² = d²·n
+        # SS_time = F·MS_error;  std_diff = mean_diff/d;  MS_error = std_diff²
+        import math as _math
+        _d  = abs(result.get("cohens_d", 0) or 0)
+        _md = abs(result.get("mean_diff", 0) or 0)
+        # Accept multiple key names for n — some result dicts use n_subjects or n
+        n_p = (result.get("n_pairs") or result.get("n_subjects")
+               or result.get("n") or 0)
+        # Recompute t² from d and n if t_stat not stored
+        _t_raw = result.get("t_stat") or result.get("t_statistic") or result.get("t_value")
+        if _t_raw is not None:
+            _t2 = float(_t_raw) ** 2
+        elif _d > 0 and n_p > 0:
+            _t2 = (_d ** 2) * n_p
+        else:
+            _t2 = None
+        # Show table whenever we have d and n — mean_diff not required.
+        # F = d²·n is exact for a paired design regardless of mean_diff.
+        # If mean_diff=0 exactly (no change), d=0 too, so _d>0 guards correctly.
+        if _d > 0 and n_p > 0:
+            _df_time  = 1
+            _df_err   = max(int(n_p) - 1, 1)
+            _F_pt     = _t2 if _t2 else ((_d ** 2) * n_p)
+            # std_diff only needed for MS_error; derive from mean_diff/d if available
+            if _md > 0:
+                _std_diff = _md / _d
+                _MS_err   = _std_diff ** 2
+                _SS_err   = _df_err * _MS_err
+                _SS_time  = _F_pt * _MS_err
+                _MS_time  = _SS_time
+            else:
+                # mean_diff=0 ⟹ d=0 normally, but guard above passed so d>0.
+                # Derive MS_error from F and df: MS_error = SS_total/(n-1)
+                # Use approximation: MS_error = 1 (unit variance) when unavailable.
+                _SS_err  = None
+                _MS_err  = None
+                _SS_time = None
+                _MS_time = None
+            with st.expander("📊 RM ANOVA-style source table", expanded=False):
+                _src = pd.DataFrame([
+                    {"Source": "Time (Pre→Post)", "SS": _fmt(_SS_time),
+                     "df": str(_df_time), "MS": _fmt(_MS_time), "F": _fmt(_F_pt)},
+                    {"Source": "Subjects (error)", "SS": _fmt(_SS_err),
+                     "df": str(_df_err),  "MS": _fmt(_MS_err),  "F": "—"},
+                ])
+                st.dataframe(_src, hide_index=True, width="stretch",
+                    column_config={c: st.column_config.Column(c, width="small")
+                                   for c in _src.columns})
+                st.caption(
+                    "Derived from Cohen's d and n (paired design): F = d²·n = t². "
+                    "SS and MS are exact under normality. "
+                    "Treat as indicative with small samples — effect size (Cohen's d) "
+                    "is more informative than the F ratio at low n."
+                )
+
+    # ================================================================
+    # ONE-WAY ANOVA (Between Groups) — TC26
+    # ================================================================
     elif "f_stat" in result:
-        cols[0].metric("F statistic",  f"{result['f_stat']:.4f}")
-        cols[1].metric("ANOVA p-value",f"{result['anova_p']:.4f}  {sig_badge}")
+        cols = st.columns(4)
+        cols[0].metric("F statistic",   f"{result['f_stat']:.4f}")
+        cols[1].metric("ANOVA p-value", f"{result['anova_p']:.4f}  {sig_badge}")
         cols[2].metric("η² (eta²)",
                        f"{result['eta_squared']:.4f} ({result['effect_size_label']})")
         cols[3].metric("Kruskal-Wallis p", f"{result['kruskal_p']:.4f}")
+
+        # ── Means by group ────────────────────────────────────────────
+        gm = result.get("group_means", {})
+        ng = result.get("n_per_group", {})
+        gs = result.get("group_stds",  {})
+        if gm:
+            with st.expander("📈 Means by group", expanded=False):
+                _gdf = pd.DataFrame([
+                    {"Group": g, "N": str(ng.get(g, "—")),
+                     f"Mean {score_label}": _fmt(m, 2),
+                     "SD": _fmt(gs.get(g, 0), 2)}
+                    for g, m in gm.items()
+                ])
+                st.dataframe(_gdf, hide_index=True, width="stretch")
+
+        # ── ANOVA source table (computed from group stats) ────────────
+        if gm and ng and gs and len(gm) >= 2:
+            import numpy as np
+            _N_total  = sum(ng.values())
+            _k        = len(gm)
+            _grand    = sum(ng[g]*gm[g] for g in gm) / _N_total
+            _SS_btwn  = sum(ng[g] * (gm[g] - _grand)**2  for g in gm)
+            _SS_with  = sum((ng[g] - 1) * (gs[g]**2)     for g in gm)
+            _df_btwn  = _k - 1
+            _df_with  = _N_total - _k
+            _MS_btwn  = _SS_btwn / _df_btwn if _df_btwn > 0 else None
+            _MS_with  = _SS_with / _df_with  if _df_with  > 0 else None
+            _F_bg     = (_MS_btwn / _MS_with) if (_MS_btwn and _MS_with and _MS_with != 0) else None
+            with st.expander("📊 ANOVA source table", expanded=False):
+                _src_bg = pd.DataFrame([
+                    {"Source": "Between groups", "SS": _fmt(_SS_btwn),
+                     "df": str(_df_btwn), "MS": _fmt(_MS_btwn), "F": _fmt(_F_bg)},
+                    {"Source": "Within groups (error)", "SS": _fmt(_SS_with),
+                     "df": str(_df_with), "MS": _fmt(_MS_with), "F": "—"},
+                    {"Source": "Total",
+                     "SS": _fmt(_SS_btwn + _SS_with) if _SS_btwn and _SS_with else "—",
+                     "df": str(_N_total - 1), "MS": "—", "F": ""},
+                ])
+                st.dataframe(_src_bg, hide_index=True, width="stretch",
+                    column_config={c: st.column_config.Column(c, width="small")
+                                   for c in _src_bg.columns})
+                st.caption(
+                    "SS computed directly from group means, n, and SDs. "
+                    "F here matches the ANOVA F above (minor rounding aside). "
+                    "η² = SS_between / SS_total."
+                )
+
+    # ================================================================
+    # FRIEDMAN (Across Modules / RM) — TC27 already complete
+    # ================================================================
     elif "friedman_stat" in result:
-        cols[0].metric("Friedman χ²",  f"{result['friedman_stat']:.4f}")
-        cols[1].metric("p-value",      f"{result['p_value']:.4f}  {sig_badge}")
+        cols = st.columns(4)
+        cols[0].metric("Friedman χ²", f"{result['friedman_stat']:.4f}")
+        cols[1].metric("p-value",     f"{result['p_value']:.4f}  {sig_badge}")
         cols[2].metric("Kendall's W",
                        f"{result['kendalls_w']:.4f} ({result['effect_size_label']})")
-        cols[3].metric("N subjects",   str(result.get("n_subjects","")))
+        cols[3].metric("N subjects",  str(result.get("n_subjects", "")))
 
-        # ── RM ANOVA-style SS/df/MS/F table ──────────────────────────────────
-        # Reconstruct from Friedman χ² and Kendall's W
-        # χ² = k(n-1)W  →  SS_conditions = χ²·MS_error (approx)
-        # Using the relationship: F ≈ χ²/(k-1) / ((n·k - χ² - k)/(k-1)(n-1))
-        _n  = result.get("n_subjects", 0)
-        _tp = result.get("time_points", [])
-        _k  = len(_tp) if _tp else 1
-        _W  = result.get("kendalls_w", 0)
+        # ── RM ANOVA-style source table ───────────────────────────────
+        _n   = result.get("n_subjects", 0)
+        _tp  = result.get("time_points", [])
+        _k   = len(_tp) if _tp else 1
+        _W   = result.get("kendalls_w",    0)
         _chi = result.get("friedman_stat", 0)
         if _n > 1 and _k > 1:
-            _df_cond  = _k - 1
-            _df_subj  = _n - 1
-            _df_err   = (_k - 1) * (_n - 1)
-            # SS from Kendall's W: SS_conditions = 12*n*W*SS_ranks/(k(k²-1))
-            # Simpler approximation from χ²:
-            _SS_cond  = round(_chi * (_k - 1) / _k, 3) if _k > 0 else None
-            _SS_err   = round((_n * _k * (_k + 1) / 12) - _chi / (_k - 1), 3) if _k > 1 else None
-            _MS_cond  = round(_SS_cond / _df_cond, 3) if _SS_cond and _df_cond else None
-            _MS_err   = round(_SS_err  / _df_err,  3) if _SS_err  and _df_err  else None
-            _F_val    = round(_MS_cond / _MS_err,  3) if _MS_cond and _MS_err and _MS_err != 0 else None
-
-            # All columns must be same type for Arrow — use strings throughout
-            def _fmt(v):
-                return f"{v:.3f}" if v is not None else "—"
-            _rm_table = pd.DataFrame([
-                {"Source": "Conditions (Time)",
-                 "SS": _fmt(_SS_cond), "df": str(_df_cond),
-                 "MS": _fmt(_MS_cond), "F":  _fmt(_F_val)},
-                {"Source": "Subjects",
-                 "SS": "—", "df": str(_df_subj), "MS": "—", "F": "—"},
-                {"Source": "Error",
-                 "SS": _fmt(_SS_err),  "df": str(_df_err),
-                 "MS": _fmt(_MS_err),  "F": ""},
-            ])
+            _df_cond = _k - 1
+            _df_subj = _n - 1
+            _df_err  = (_k - 1) * (_n - 1)
+            _SS_cond = round(_chi * (_k - 1) / _k, 3) if _k > 0 else None
+            _SS_err  = round((_n * _k * (_k + 1) / 12) - _chi / (_k - 1), 3) if _k > 1 else None
+            _MS_cond = round(_SS_cond / _df_cond, 3) if _SS_cond and _df_cond else None
+            _MS_err  = round(_SS_err  / _df_err,  3) if _SS_err  and _df_err  else None
+            _F_val   = round(_MS_cond / _MS_err,  3) if _MS_cond and _MS_err and _MS_err != 0 else None
             with st.expander("📊 RM ANOVA-style source table", expanded=False):
-                st.dataframe(
-                    _rm_table,
-                    hide_index=True,
-                    width="stretch",
-                    column_config={
-                        c: st.column_config.Column(c, width="small")
-                        for c in _rm_table.columns
-                    }
-                )
+                _rm_tbl = pd.DataFrame([
+                    {"Source": "Conditions (modules/time)",
+                     "SS": _fmt(_SS_cond), "df": str(_df_cond),
+                     "MS": _fmt(_MS_cond), "F":  _fmt(_F_val)},
+                    {"Source": "Subjects",
+                     "SS": "—", "df": str(_df_subj), "MS": "—", "F": "—"},
+                    {"Source": "Error",
+                     "SS": _fmt(_SS_err), "df": str(_df_err),
+                     "MS": _fmt(_MS_err), "F": ""},
+                ])
+                st.dataframe(_rm_tbl, hide_index=True, width="stretch",
+                    column_config={c: st.column_config.Column(c, width="small")
+                                   for c in _rm_tbl.columns})
                 st.caption(
                     "SS and MS are approximated from Friedman χ² and Kendall's W. "
-                    "The Friedman test is non-parametric and does not produce exact "
-                    "SS values — treat these as indicative, not exact ANOVA decomposition."
+                    "The Friedman test is non-parametric — treat these as indicative."
                 )
 
-        # ── Means by time point ───────────────────────────────────────────────
+        # ── Means by module / time-point ──────────────────────────────
         mbt = result.get("means_by_time", {})
         sbt = result.get("stds_by_time",  {})
         if mbt:
-            _means_df = pd.DataFrame([
-                {"Module": tp,
-                 "Mean":   round(mbt[tp], 3) if tp in mbt else "—",
-                 "SD":     round(sbt[tp], 3) if tp in sbt else "—"}
-                for tp in sorted(mbt.keys())
-            ])
-            with st.expander("📈 Means by module / time point", expanded=False):
-                st.dataframe(_means_df, hide_index=True, width="stretch")
+            with st.expander("📈 Means by module / time-point", expanded=False):
+                _mbt_df = pd.DataFrame([
+                    {"Module / Time-point": tp,
+                     f"Mean {score_label}": _fmt(mbt[tp], 3),
+                     "SD":                  _fmt(sbt.get(tp, 0), 3)}
+                    for tp in sorted(mbt.keys())
+                ])
+                st.dataframe(_mbt_df, hide_index=True, width="stretch")
 
-    # Plain-language interpretation
+    # ================================================================
+    # Plain-language interpretation (all test types)
+    # ================================================================
     with st.expander("ℹ️ What do these numbers mean?", expanded=False):
         if "pre_mean" in result:
             st.markdown(_STAT_HELP["cohens_d"])
@@ -1318,7 +1860,7 @@ def _render_result_card(result: dict, score_label: str = "% Correct") -> None:
         st.divider()
         st.markdown(_STAT_HELP["p_value"])
 
-    # Wilcoxon row (if present)
+    # Wilcoxon supplementary row
     if result.get("wilcoxon_stat") is not None:
         st.caption(
             f"Wilcoxon signed-rank: W={result['wilcoxon_stat']}, "
@@ -1327,11 +1869,9 @@ def _render_result_card(result: dict, score_label: str = "% Correct") -> None:
         with st.expander("ℹ️ What is the Wilcoxon test?", expanded=False):
             st.markdown(_STAT_HELP["wilcoxon"])
 
-    # Power panel
+    # Low-N power warning
     if result.get("low_n_warning"):
-        with st.expander(
-            "⚠️  Low-N Warning + Sample Size Guidance", expanded=True
-        ):
+        with st.expander("⚠️  Low-N Warning + Sample Size Guidance", expanded=True):
             n_shown = result.get("n_pairs") or result.get("n_subjects") or "?"
             st.warning(
                 f"**n = {n_shown} students** — results have limited statistical "
@@ -1346,88 +1886,49 @@ def _render_result_card(result: dict, score_label: str = "% Correct") -> None:
                 "unrealistically low (Lakens, 2022; Gelman & Carlin, 2014)."
             )
             st.markdown("**Prospective sample size requirements (α = 0.05)**")
-            is_paired = "pre_mean" in result
+            is_paired   = "pre_mean"      in result
             is_repeated = "friedman_stat" in result
             if is_paired:
                 pwr_df = pd.DataFrame([
-                    {"Cohen's d": "Small (0.2)",
-                     "Practical meaning": "Subtle",
-                     "N for 80% power": 199,
-                     "N for 95% power": 327},
-                    {"Cohen's d": "Medium (0.5)",
-                     "Practical meaning": "Moderate — recommended minimum",
-                     "N for 80% power": 34,
-                     "N for 95% power": 55},
-                    {"Cohen's d": "Large (0.8)",
-                     "Practical meaning": "Substantial",
-                     "N for 80% power": 15,
-                     "N for 95% power": 24},
+                    {"Cohen's d": "Small (0.2)",  "Practical meaning": "Subtle",
+                     "N for 80% power": 199, "N for 95% power": 327},
+                    {"Cohen's d": "Medium (0.5)", "Practical meaning": "Moderate — recommended minimum",
+                     "N for 80% power": 34,  "N for 95% power": 55},
+                    {"Cohen's d": "Large (0.8)",  "Practical meaning": "Substantial",
+                     "N for 80% power": 15,  "N for 95% power": 24},
                 ])
             elif is_repeated:
                 pwr_df = pd.DataFrame([
-                    {"Kendall's W": "Small (0.1)",
-                     "Practical meaning": "Weak consistency",
-                     "N for 80% power": ">200",
-                     "N for 95% power": ">300"},
-                    {"Kendall's W": "Medium (0.3)",
-                     "Practical meaning": "Moderate — recommended minimum",
-                     "N for 80% power": "~52",
-                     "N for 95% power": "~85"},
-                    {"Kendall's W": "Large (0.5)",
-                     "Practical meaning": "Strong consistency",
-                     "N for 80% power": "~21",
-                     "N for 95% power": "~34"},
+                    {"Kendall's W": "Small (0.1)",  "Practical meaning": "Weak consistency",
+                     "N for 80% power": ">200", "N for 95% power": ">300"},
+                    {"Kendall's W": "Medium (0.3)", "Practical meaning": "Moderate — recommended minimum",
+                     "N for 80% power": "~52",  "N for 95% power": "~85"},
+                    {"Kendall's W": "Large (0.5)",  "Practical meaning": "Strong consistency",
+                     "N for 80% power": "~21",  "N for 95% power": "~34"},
                 ])
             else:
                 pwr_df = pd.DataFrame([
-                    {"Cohen's f": "Small (0.10)",
-                     "η²": "≈0.01",
-                     "Practical meaning": "Subtle",
-                     "N per group (80%)": 322,
-                     "N per group (95%)": 527},
-                    {"Cohen's f": "Medium (0.25)",
-                     "η²": "≈0.06",
-                     "Practical meaning": "Moderate — recommended minimum",
-                     "N per group (80%)": 52,
-                     "N per group (95%)": 85},
-                    {"Cohen's f": "Large (0.40)",
-                     "η²": "≈0.14",
-                     "Practical meaning": "Substantial",
-                     "N per group (80%)": 21,
-                     "N per group (95%)": 34},
+                    {"Cohen's f": "Small (0.10)",  "η²": "≈0.01", "Practical meaning": "Subtle",
+                     "N per group (80%)": 322, "N per group (95%)": 527},
+                    {"Cohen's f": "Medium (0.25)", "η²": "≈0.06", "Practical meaning": "Moderate — recommended minimum",
+                     "N per group (80%)": 52,  "N per group (95%)": 85},
+                    {"Cohen's f": "Large (0.40)",  "η²": "≈0.14", "Practical meaning": "Substantial",
+                     "N per group (80%)": 21,  "N per group (95%)": 34},
                 ])
             st.dataframe(pwr_df, hide_index=True, width="stretch")
+            power_val = result.get("power_achieved")
+            n_shown_p = result.get("n_pairs") or result.get("n_subjects") or "?"
             st.caption(
                 f"With your planned n ≈ 90, you will have adequate power to "
                 f"detect medium-to-large effects. The observed post-hoc power "
-                f"at n = {n_shown} is shown below for reference only — "
+                f"at n = {n_shown_p} is shown below for reference only — "
                 f"it should not be used to justify your sample size."
             )
-            power_val = result.get("power_achieved")
             if power_val is not None:
                 st.caption(
                     f"Observed post-hoc power (reference only): "
-                    f"**{power_val*100:.1f}%** at n = {n_shown}"
+                    f"**{power_val*100:.1f}%** at n = {n_shown_p}"
                 )
-    # Group means table for between-groups
-    if "group_means" in result:
-        rows = [
-            {"Group": g,
-             "N": result["n_per_group"][g],
-             f"Mean {score_label}": f"{m:.2f}",
-             "SD": f"{result['group_stds'].get(g, 0):.2f}"}
-            for g, m in result["group_means"].items()
-        ]
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch')
-
-    # Means-by-time table for repeated measures
-    if "means_by_time" in result:
-        rows = [
-            {"Module": t, f"Mean {score_label}": f"{m:.4f}",
-             "SD": f"{result['stds_by_time'].get(t,0):.4f}"}
-            for t, m in result["means_by_time"].items()
-        ]
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch')
 
 
 def _render_inferential_tab(
@@ -1506,6 +2007,14 @@ def _render_inferential_tab(
                 use_pct=True,
             )
         _render_result_card(r, score_label="% Correct")
+
+        # ── Bland-Altman method agreement ─────────────────────────────────
+        with st.spinner("Computing method agreement…"):
+            _ba = run_bland_altman(
+                canonical_df, pre_key, post_key, use_pct=True
+            )
+        _render_bland_altman_expander(_ba, score_label="% Correct")
+        # ─────────────────────────────────────────────────────────────────
 
     # ================================================================
     # Section B: Between Groups
@@ -1630,7 +2139,502 @@ def _render_inferential_tab(
 
 
 # -----------------------------------------------------------------------
-# Placeholder tabs (Phases 2–5)
+# Tab 4 — Competency Progression (CPI)
+# -----------------------------------------------------------------------
+
+def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
+    """
+    Tab 4 — Competency Progression Index (CPI).
+
+    CPI_quant: MCQ performance [0, 1]
+      - CTT: proportion correct (Crocker & Algina 1986)
+      - IRT: sigmoid-normalized EAP theta (Baker 1985)
+
+    CPI_qual: Reflection quality [0, 1]
+      - LLM-as-judge, 3 dimensions x 1-4 scale (Zheng et al. 2023)
+
+    CPI+ = w1 * CPI_quant + w2 * CPI_qual
+    """
+    try:
+        from core.analytics.cpi.cpi_engine import (
+            compute_cpi_quant_ctt,
+            compute_cpi_quant_irt,
+            get_reflection_texts,
+            score_reflection_llm,
+            compute_cpi_qual_from_scores,
+            compute_cpi_combined,
+            cpi_summary_stats,
+        )
+        from core.analytics.cpi.cpi_store import (
+            create_cpi_run,
+            save_cpi_qual_result,
+            save_cpi_summary,
+            load_cpi_summary,
+            list_cpi_runs,
+            update_cpi_run_status,
+        )
+        from core.analytics.llm.llm_clients import call_model, get_available_models
+        _CPI_AVAILABLE = True
+    except ImportError as _cpi_imp_err:
+        st.error(
+            f"CPI module not fully installed: {_cpi_imp_err}. "
+            "Ensure core/analytics/cpi/ is present."
+        )
+        return
+
+    st.subheader("📉 Competency Progression Index (CPI)")
+    st.caption(
+        "CPI combines quantitative MCQ performance (CPI_quant) and "
+        "qualitative reflection quality (CPI_qual) into a composite "
+        "index per student per module."
+    )
+
+    with st.expander("ℹ️ CPI methodology", expanded=False):
+        st.markdown(
+            "**CPI_quant — Quantitative Task Performance**\n\n"
+            "- *CTT approach*: proportion of MCQ items answered correctly "
+            "(Crocker & Algina, 1986).\n"
+            "- *IRT approach*: EAP ability estimate (θ) normalized via sigmoid "
+            "to [0, 1]. Accounts for item difficulty and discrimination "
+            "(Baker, 1985).\n\n"
+            "**CPI_qual — Qualitative Reflection Quality**\n\n"
+            "An LLM scores each student's module reflection on three dimensions "
+            "(1–4 scale, calibrated for ages 10–14):\n"
+            "- Depth of insight\n"
+            "- Conceptual grounding\n"
+            "- Personal connection\n\n"
+            "CPI_qual = sum(dimension scores) / max possible score. "
+            "Method: Zheng et al. (2023) LLM-as-judge framework.\n\n"
+            "**CPI+ = w₁ × CPI_quant + w₂ × CPI_qual**\n\n"
+            "Default weights: w₁ = w₂ = 0.5. Adjust below."
+        )
+
+    st.divider()
+
+    # ── Step 1: Configuration ──────────────────────────────────────────────
+    st.markdown("### Step 1 — Configure")
+
+    col_mod, col_inst = st.columns(2)
+    with col_mod:
+        _module_opts = {
+            f"Module {n}": f"module_{n}" for n in range(1, 8)
+        }
+        _module_label = st.selectbox(
+            "Module", options=list(_module_opts.keys()), key="cpi_module_sel"
+        )
+        _module_id = _module_opts[_module_label]
+
+    with col_inst:
+        _inst_key = f"module{_module_id.split('_')[1]}_content_mcq_assessment"
+        st.text_input(
+            "MCQ instrument key", value=_inst_key,
+            key="cpi_inst_key", disabled=True
+        )
+
+    col_q, col_irt = st.columns(2)
+    with col_q:
+        _quant_method = st.radio(
+            "CPI_quant method",
+            options=["CTT (proportion correct)", "IRT (Rasch)", "IRT (2PL, n≥50)",
+                     "Both — show side by side"],
+            horizontal=False,
+            key="cpi_quant_method",
+        )
+    with col_irt:
+        _w1 = st.slider("Weight w₁ (CPI_quant)", 0.0, 1.0, 0.5, 0.05, key="cpi_w1")
+        _w2 = round(1.0 - _w1, 2)
+        st.caption(f"Weight w₂ (CPI_qual) = {_w2:.2f}  (w₁ + w₂ = 1.0)")
+
+    st.divider()
+
+    # ── Step 2: CPI_quant (immediate, no LLM needed) ──────────────────────
+    st.markdown("### Step 2 — CPI_quant (MCQ performance)")
+
+    if st.button("Compute CPI_quant", key="cpi_compute_quant", type="primary"):
+        with st.spinner("Computing MCQ performance scores…"):
+            _ctt_df = compute_cpi_quant_ctt(canonical_df, _inst_key)
+
+            _irt_rasch = None
+            _irt_2pl   = None
+            _run_rasch = _quant_method in (
+                "IRT (Rasch)", "Both — show side by side"
+            )
+            _run_2pl   = _quant_method in (
+                "IRT (2PL, n≥50)", "Both — show side by side"
+            )
+
+            if _run_rasch:
+                _irt_rasch = compute_cpi_quant_irt(
+                    canonical_df, _inst_key, irt_model="rasch"
+                )
+            if _run_2pl:
+                _irt_2pl = compute_cpi_quant_irt(
+                    canonical_df, _inst_key, irt_model="2pl"
+                )
+
+        st.session_state["_cpi_ctt_df"]    = _ctt_df
+        st.session_state["_cpi_irt_rasch"] = _irt_rasch
+        st.session_state["_cpi_irt_2pl"]   = _irt_2pl
+        st.session_state["_cpi_inst_key"]  = _inst_key
+        st.session_state["_cpi_module_id"] = _module_id
+
+    _ctt_df    = st.session_state.get("_cpi_ctt_df")
+    _irt_rasch = st.session_state.get("_cpi_irt_rasch")
+    _irt_2pl   = st.session_state.get("_cpi_irt_2pl")
+
+    if _ctt_df is not None and not _ctt_df.empty:
+
+        # CTT display
+        with st.expander("CTT — proportion correct per student", expanded=True):
+            _n_ctt = len(_ctt_df)
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Students (CTT)", _n_ctt)
+            col2.metric("Mean CPI_quant (CTT)",
+                        f"{_ctt_df['cpi_quant_ctt'].mean():.3f}")
+            col3.metric("SD",
+                        f"{_ctt_df['cpi_quant_ctt'].std(ddof=1):.3f}"
+                        if _n_ctt > 1 else "—")
+            _display_ctt = _ctt_df.copy()
+            _display_ctt.columns = [
+                "Student", "CPI_quant (CTT)", "Items answered", "Method"
+            ]
+            st.dataframe(
+                _display_ctt.sort_values("CPI_quant (CTT)", ascending=False),
+                hide_index=True, width="stretch",
+            )
+
+        # IRT Rasch display
+        if _irt_rasch is not None:
+            if _irt_rasch.get("error"):
+                st.warning(f"IRT (Rasch): {_irt_rasch['error']}")
+            else:
+                with st.expander(
+                    f"IRT (Rasch) — θ→sigmoid per student "
+                    f"(n={_irt_rasch['n_persons']})", expanded=False
+                ):
+                    if _irt_rasch.get("low_n_warning"):
+                        st.caption(
+                            f"⚠️ n < 100. Rasch estimates are exploratory "
+                            f"at this sample size."
+                        )
+                    _pp = _irt_rasch["person_df"]
+                    _pp_disp = _pp[
+                        ["user_id", "theta", "theta_se", "cpi_quant_irt"]
+                    ].copy()
+                    _pp_disp.columns = [
+                        "Student", "θ (logit)", "θ SE", "CPI_quant (IRT)"
+                    ]
+                    st.dataframe(
+                        _pp_disp.sort_values("CPI_quant (IRT)", ascending=False),
+                        hide_index=True, width="stretch",
+                    )
+
+        # IRT 2PL display
+        if _irt_2pl is not None:
+            if _irt_2pl.get("error"):
+                st.warning(f"IRT (2PL): {_irt_2pl['error']}")
+            else:
+                with st.expander(
+                    f"IRT (2PL) — θ→sigmoid per student "
+                    f"(n={_irt_2pl['n_persons']})", expanded=False
+                ):
+                    _pp2 = _irt_2pl["person_df"]
+                    _pp2_disp = _pp2[
+                        ["user_id", "theta", "theta_se", "cpi_quant_irt"]
+                    ].copy()
+                    _pp2_disp.columns = [
+                        "Student", "θ (logit)", "θ SE", "CPI_quant (IRT)"
+                    ]
+                    st.dataframe(
+                        _pp2_disp.sort_values("CPI_quant (IRT)", ascending=False),
+                        hide_index=True, width="stretch",
+                    )
+
+    st.divider()
+
+    # ── Step 3: CPI_qual (LLM scoring) ────────────────────────────────────
+    st.markdown("### Step 3 — CPI_qual (reflection quality via LLM)")
+
+    _avail_models = get_available_models(check_keys=True)
+    _model_opts   = [m for m, avail in _avail_models.items() if avail]
+
+    if not _model_opts:
+        st.warning(
+            "No LLM API keys configured. Add at least one of "
+            "ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or "
+            "GROQ_API_KEY to .env to enable CPI_qual scoring."
+        )
+    else:
+        col_m, col_t = st.columns(2)
+        with col_m:
+            _cpi_model = st.selectbox(
+                "LLM for scoring",
+                options=_model_opts,
+                key="cpi_qual_model",
+            )
+        with col_t:
+            _cpi_temp = st.slider(
+                "Temperature", 0.0, 0.5, 0.0, 0.1,
+                key="cpi_qual_temp",
+                help="0.0 = fully deterministic scoring (recommended).",
+            )
+
+        _refl_df = get_reflection_texts(canonical_df, module_id=_module_id)
+        n_refl   = len(_refl_df["user_id"].unique()) if not _refl_df.empty else 0
+
+        if _refl_df.empty:
+            st.info(
+                f"No reflection responses found for {_module_label}. "
+                "Reflections must be submitted by students before "
+                "CPI_qual can be computed."
+            )
+        else:
+            n_resp = len(_refl_df)
+            st.caption(
+                f"Found {n_resp} reflection response(s) from "
+                f"{n_refl} student(s) in {_module_label}."
+            )
+
+            if st.button(
+                f"Score {n_resp} reflection(s) with {_cpi_model.upper()}",
+                key="cpi_score_btn",
+                type="primary",
+            ):
+                _run_id = create_cpi_run(
+                    created_by=username,
+                    model=_cpi_model,
+                    module_id=st.session_state.get(
+                        "_cpi_module_id", _module_id
+                    ),
+                    instrument_key=st.session_state.get(
+                        "_cpi_inst_key", _inst_key
+                    ),
+                    temperature=_cpi_temp,
+                    w1=_w1,
+                    w2=_w2,
+                )
+                update_cpi_run_status(_run_id, "scoring")
+
+                _scored_list = []
+                _errors      = []
+                _progress    = st.progress(0)
+                _status_txt  = st.empty()
+
+                for i, row in enumerate(_refl_df.itertuples(), 1):
+                    _status_txt.caption(
+                        f"Scoring {i}/{n_resp}: "
+                        f"{row.user_id} / {row.question_id}…"
+                    )
+                    _s = score_reflection_llm(
+                        participant_id=row.user_id,
+                        question_id=row.question_id,
+                        text=row.text,
+                        module_id=row.module_id,
+                        model=_cpi_model,
+                        call_fn=call_model,
+                        temperature=_cpi_temp,
+                    )
+                    _scored_list.append(_s)
+                    save_cpi_qual_result(_run_id, _s)
+                    if _s.get("error"):
+                        _errors.append(
+                            f"{row.user_id}/{row.question_id}: {_s['error']}"
+                        )
+                    _progress.progress(i / n_resp)
+
+                _status_txt.empty()
+                _progress.empty()
+                update_cpi_run_status(_run_id, "done")
+
+                # Aggregate CPI_qual
+                _qual_df = compute_cpi_qual_from_scores(_scored_list)
+                st.session_state["_cpi_run_id"]  = _run_id
+                st.session_state["_cpi_qual_df"] = _qual_df
+
+                if _errors:
+                    st.warning(
+                        f"{len(_errors)} scoring error(s):\\n" +
+                        "\\n".join(_errors[:5])
+                    )
+                else:
+                    st.success(
+                        f"Scored {n_resp} reflections. "
+                        f"Run ID: {_run_id[:8]}…"
+                    )
+                st.rerun()
+
+    # ── Past runs selector ────────────────────────────────────────────────
+    _past_runs = [
+        r for r in list_cpi_runs()
+        if r["module_id"] == _module_id
+    ]
+    if _past_runs:
+        st.divider()
+        with st.expander(
+            f"Load past CPI_qual run ({len(_past_runs)} available)",
+            expanded=False
+        ):
+            _run_labels = {
+                f"{r['created_at'][:16]}  {r['model'].upper()}  "
+                f"[{r['status']}]  {r['run_id'][:8]}": r["run_id"]
+                for r in _past_runs
+            }
+            _sel_label = st.selectbox(
+                "Select run",
+                options=list(_run_labels.keys()),
+                key="cpi_past_run_sel",
+            )
+            if st.button("Load this run", key="cpi_load_run"):
+                _run_id  = _run_labels[_sel_label]
+                _raw     = load_cpi_qual_results(_run_id)
+                if not _raw.empty:
+                    # Reconstruct scored_list format for aggregation
+                    _grp = (
+                        _raw.groupby(["participant_id", "question_id"])
+                        .apply(lambda g: {
+                            "participant_id": g["participant_id"].iloc[0],
+                            "question_id":    g["question_id"].iloc[0],
+                            "scores": dict(zip(g["dimension"], g["score"])),
+                            "error":  None,
+                        })
+                        .tolist()
+                    )
+                    _qual_df = compute_cpi_qual_from_scores(_grp)
+                    st.session_state["_cpi_run_id"]  = _run_id
+                    st.session_state["_cpi_qual_df"] = _qual_df
+                    st.rerun()
+
+    st.divider()
+
+    # ── Step 4: CPI+ combined ─────────────────────────────────────────────
+    st.markdown("### Step 4 — CPI+ (combined index)")
+
+    _ctt_df_stored  = st.session_state.get("_cpi_ctt_df")
+    _irt_r_stored   = st.session_state.get("_cpi_irt_rasch")
+    _qual_df_stored = st.session_state.get("_cpi_qual_df")
+
+    if _ctt_df_stored is None:
+        st.info("Complete Step 2 first to compute CPI_quant.")
+    elif _qual_df_stored is None:
+        st.info("Complete Step 3 first to compute CPI_qual.")
+    else:
+        # Choose quant source
+        if _quant_method.startswith("IRT (Rasch)") and _irt_r_stored and not _irt_r_stored.get("error"):
+            _quant_src = _irt_r_stored["person_df"][["user_id", "cpi_quant_irt"]].rename(
+                columns={"cpi_quant_irt": "cpi_quant_ctt"}
+            )
+            _quant_label = "IRT (Rasch)"
+        else:
+            _quant_src   = _ctt_df_stored
+            _quant_label = "CTT"
+
+        _combined = compute_cpi_combined(
+            _quant_src, _qual_df_stored,
+            quant_col="cpi_quant_ctt",
+            w1=_w1, w2=_w2,
+        )
+
+        if not _combined.empty:
+            _stats = cpi_summary_stats(_combined)
+            st.markdown(f"**CPI+ = {_w1} × CPI_quant ({_quant_label}) + {_w2} × CPI_qual**")
+
+            # Summary metrics
+            _cols = st.columns(3)
+            for i, col_name in enumerate(["cpi_quant", "cpi_qual", "cpi_plus"]):
+                if col_name in _stats:
+                    _s = _stats[col_name]
+                    _cols[i].metric(
+                        col_name.replace("_", " ").upper(),
+                        f"{_s['mean']:.3f}",
+                        delta=f"SD {_s['sd']:.3f}",
+                    )
+
+            # Full table
+            with st.expander("Per-student CPI+ table", expanded=True):
+                _disp = _combined.copy()
+                _disp.columns = [
+                    "Student",
+                    f"CPI_quant ({_quant_label})",
+                    "CPI_qual",
+                    "CPI+",
+                    "w₁",
+                    "w₂",
+                ]
+                st.dataframe(
+                    _disp.sort_values("CPI+", ascending=False),
+                    hide_index=True, width="stretch",
+                    column_config={
+                        "CPI+": st.column_config.ProgressColumn(
+                            "CPI+", min_value=0, max_value=1, format="%.3f"
+                        ),
+                    },
+                )
+
+                # Save to store
+                _run_id_store = st.session_state.get("_cpi_run_id", "")
+                if _run_id_store:
+                    _ctt_lookup = (
+                        _ctt_df_stored.set_index("user_id")["cpi_quant_ctt"]
+                        .to_dict() if _ctt_df_stored is not None else {}
+                    )
+                    _irt_lookup: dict = {}
+                    if _irt_r_stored and not _irt_r_stored.get("error"):
+                        _irt_lookup = (
+                            _irt_r_stored["person_df"]
+                            .set_index("user_id")["cpi_quant_irt"]
+                            .to_dict()
+                        )
+                    _theta_lookup:    dict = {}
+                    _theta_se_lookup: dict = {}
+                    if _irt_r_stored and not _irt_r_stored.get("error"):
+                        _theta_lookup = (
+                            _irt_r_stored["person_df"]
+                            .set_index("user_id")["theta"].to_dict()
+                        )
+                        if "theta_se" in _irt_r_stored["person_df"].columns:
+                            _theta_se_lookup = (
+                                _irt_r_stored["person_df"]
+                                .set_index("user_id")["theta_se"].to_dict()
+                            )
+
+                    for _, row in _combined.iterrows():
+                        uid = row["user_id"]
+                        save_cpi_summary(
+                            run_id=_run_id_store,
+                            participant_id=uid,
+                            module_id=st.session_state.get("_cpi_module_id", _module_id),
+                            instrument_key=st.session_state.get("_cpi_inst_key", _inst_key),
+                            cpi_quant_ctt=_ctt_lookup.get(uid),
+                            cpi_quant_irt=_irt_lookup.get(uid),
+                            cpi_quant=row.get("cpi_quant"),
+                            cpi_qual=row.get("cpi_qual"),
+                            cpi_plus=row.get("cpi_plus"),
+                            n_mcq_items=int(
+                                _ctt_df_stored.set_index("user_id")
+                                .get("n_items", pd.Series(dtype=int))
+                                .get(uid, 0)
+                            ) if _ctt_df_stored is not None else 0,
+                            theta=_theta_lookup.get(uid),
+                            theta_se=_theta_se_lookup.get(uid),
+                            quant_method=_quant_label,
+                            w1=_w1,
+                            w2=_w2,
+                        )
+
+    st.divider()
+    st.caption(
+        "References: "
+        "Crocker & Algina (1986). *Introduction to Classical and Modern Test Theory*. "
+        "Holt, Rinehart and Winston. — "
+        "Baker (1985). *The Basics of Item Response Theory*. Heinemann. — "
+        "Zheng et al. (2023). Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena. "
+        "arXiv. https://doi.org/10.48550/ARXIV.2306.05685"
+    )
+
+
+
+# -----------------------------------------------------------------------
+# Placeholder helper (for future tabs)
 # -----------------------------------------------------------------------
 
 def _render_placeholder(title: str, phase: int, bullets: list) -> None:
@@ -1639,6 +2643,129 @@ def _render_placeholder(title: str, phase: int, bullets: list) -> None:
     st.markdown("**Planned capabilities:**")
     for b in bullets:
         st.markdown(f"- {b}")
+
+
+# -----------------------------------------------------------------------
+# v. Competency Progression PDF Report
+# -----------------------------------------------------------------------
+
+def _report_cpi(canonical_df: pd.DataFrame) -> None:
+    st.markdown("### v. Competency Progression Report")
+    st.caption("Generates a PDF of CPI+ scores per student with component breakdown.")
+
+    st.session_state.setdefault("rpt_cpi_include_chart", True)
+    st.multiselect(
+        "Include in report:",
+        options=["Per-student CPI+ table", "Component interpretation", "Methodology note"],
+        default=["Per-student CPI+ table", "Component interpretation", "Methodology note"],
+        key="rpt_cpi_multiselect",
+    )
+
+    if st.button("📄 Generate CPI+ Report (PDF)", key="rpt_cpi_gen", type="primary"):
+        selected = st.session_state.get(
+            "rpt_cpi_multiselect",
+            ["Per-student CPI+ table", "Component interpretation", "Methodology note"]
+        )
+        with st.spinner("Loading CPI data and building PDF…"):
+            # Try to load saved CPI summaries from cpi_store
+            cpi_df = None
+            try:
+                from core.analytics.cpi.cpi_store import list_cpi_runs, load_cpi_summary
+                from core.analytics.cpi.cpi_engine import cpi_summary_stats
+                runs = list_cpi_runs()
+                if runs:
+                    latest = runs[0]
+                    cpi_df = load_cpi_summary(latest["run_id"])
+            except Exception:
+                pass
+
+            # Fall back to cpi_engine compute if no stored run
+            if cpi_df is None or (hasattr(cpi_df, 'empty') and cpi_df.empty):
+                try:
+                    from core.analytics.cpi.cpi_engine import compute_cpi_plus, cpi_band
+                    cpi_df = compute_cpi_plus(canonical_df)
+                    _band_fn = cpi_band
+                except ImportError:
+                    st.error("CPI modules not found. Run CPI analysis first.")
+                    return
+                except Exception as e:
+                    st.error(f"CPI computation error: {e}")
+                    return
+            else:
+                try:
+                    from core.analytics.cpi.cpi_engine import cpi_band as _band_fn
+                except ImportError:
+                    _band_fn = lambda x: "—"
+
+            sections = [{"heading": "Competency Progression Index (CPI+) Report", "body": ""}]
+
+            if cpi_df is not None and not cpi_df.empty:
+                # Detect column names (cpi_store uses cpi_plus, compute_cpi_plus also uses cpi_plus)
+                cpi_col = "cpi_plus" if "cpi_plus" in cpi_df.columns else cpi_df.columns[-1]
+                mean_cpi = cpi_df[cpi_col].mean()
+                std_cpi  = cpi_df[cpi_col].std()
+                sections.append({
+                    "heading": "Group Summary",
+                    "body":    (
+                        f"N = {len(cpi_df)}  |  "
+                        f"Mean CPI+ = {mean_cpi:.3f}  |  SD = {std_cpi:.3f}"
+                        if not pd.isna(mean_cpi) else f"N = {len(cpi_df)}"
+                    ),
+                })
+
+            if "Per-student CPI+ table" in selected and cpi_df is not None and not cpi_df.empty:
+                # Select available columns
+                avail = [c for c in ["user_id","participant_id","cpi_quant","cpi_qual",
+                                     "cpi_plus","module_id"] if c in cpi_df.columns]
+                disp = cpi_df[avail].copy()
+                if "cpi_plus" in disp.columns:
+                    disp["Band"] = disp["cpi_plus"].apply(_band_fn)
+                for c in [col for col in disp.columns
+                          if col not in ("user_id","participant_id","module_id","Band")]:
+                    disp[c] = disp[c].apply(
+                        lambda x: f"{x:.3f}" if x is not None and not pd.isna(x) else "—"
+                    )
+                sections.append({
+                    "heading": "Per-Student CPI+ Scores",
+                    "table":   disp,
+                    "caption": "CPI+ = w₁ × CPI_quant + w₂ × CPI_qual",
+                })
+
+            if "Component interpretation" in selected:
+                sections.append({
+                    "heading": "Score Band Interpretation",
+                    "body":    (
+                        "High (≥0.75): Strong performance across all components.\n"
+                        "Moderate (0.50–0.74): Solid progress; targeted review of weaker components.\n"
+                        "Developing (0.25–0.49): Early stage; structured support recommended.\n"
+                        "Emerging (<0.25): Significant gaps; immediate intervention warranted."
+                    ),
+                })
+
+            if "Methodology note" in selected:
+                sections.append({
+                    "heading": "Methodology",
+                    "body":    (
+                        "CPI_quant: MCQ performance via CTT (proportion correct) or "
+                        "IRT (Rasch/2PL sigmoid-normalised θ). "
+                        "References: Crocker & Algina (1986); Baker (1985).\n\n"
+                        "CPI_qual: LLM-as-judge scores on reflection quality "
+                        "(depth of insight, conceptual grounding, personal connection, 1–4 scale). "
+                        "Reference: Zheng et al. (2023).\n\n"
+                        "CPI+ = w₁ × CPI_quant + w₂ × CPI_qual. "
+                        "Default equal weights justified for small samples (Dawes, 1979)."
+                    ),
+                })
+
+            pdf_bytes = _build_pdf(sections, "Competency Progression Index Report")
+            st.download_button(
+                "⬇️ Download CPI+ Report (PDF)",
+                data=pdf_bytes,
+                file_name="b4ai_cpi_report.pdf",
+                mime="application/pdf",
+                key="rpt_cpi_dl",
+            )
+            st.success("PDF ready.")
 
 
 # -----------------------------------------------------------------------
@@ -1704,7 +2831,7 @@ def show_teacher_dashboard(username: str) -> None:
         "📈 Inferential Statistics": ("#EE7733", "#FFF3E6"),
         "🔬 IRT Analysis":           ("#009E73", "#E6F7F1"),
         "🤖 LLM Analysis":           ("#CC79A7", "#F9EEF5"),
-        "📉 Competency Progression": ("#888888", "#F0F0F0"),
+        "📉 Competency Progression": ("#534AB7", "#EEEDFE"),
         "📄 Report Generation":      ("#888888", "#F0F0F0"),
     }
     _tc, _tbg = _TAB_COLORS.get(active_tab, ("#333", "#F8F8F8"))
@@ -1733,15 +2860,7 @@ def show_teacher_dashboard(username: str) -> None:
         _render_llm_tab(username, filtered_canonical)
 
     elif active_tab == "📉 Competency Progression":
-        _render_placeholder(
-            "Competency Progression Index", phase=5,
-            bullets=[
-                "Composite index: misconception improvement + conceptual gain + MCQ score",
-                "Per-student progression trajectory across modules",
-                "Cohort-level CPI distribution and benchmarks",
-                "Customizable construct weights",
-            ]
-        )
+        _render_cpi_tab(username, filtered_canonical)
 
     elif active_tab == "📄 Report Generation":
         _render_report_tab(username, filtered_canonical, filtered_demographics, cohort_map)
@@ -1946,6 +3065,71 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
                 result = run_grm_model(lmatrix, litem_ids)
             _render_irt_result(result, litem_ids, lmatrix)
 
+        # ── Multi-construct CR summary ─────────────────────────────────────
+        st.divider()
+        with st.expander(
+            f"📋 All-construct CR summary — {survey_choice}",
+            expanded=False,
+        ):
+            st.caption(
+                "Compute Construct Reliability (CR), AVE, and Cronbach α for "
+                f"every {survey_choice} construct in one table. "
+                "Requires Rasch model (fast). "
+                "Reference: Rosli et al. (2021)."
+            )
+            if st.button(f"▶ Compute CR for all {survey_choice} constructs",
+                         key="irt_cr_all"):
+                try:
+                    from core.analytics.irt.reliability_analysis import (
+                        compute_reliability_report, build_reliability_summary_df
+                    )
+                    _all_constructs = (
+                        sccces_constructs if survey_choice == "SCCCES"
+                        else sims_constructs
+                    )
+                    _all_reports = []
+                    _cr_progress = st.progress(0)
+                    for _ci, _con in enumerate(_all_constructs):
+                        _cr_progress.progress((_ci + 1) / len(_all_constructs))
+                        try:
+                            _lmat, _lids = build_likert_response_matrix(
+                                canonical_df, survey_key, _con
+                            )
+                            if len(_lmat) < 3:
+                                continue
+                            _rr = run_grm_model(_lmat, _lids)
+                            _rep = compute_reliability_report(
+                                irt_result=_rr,
+                                response_matrix=_lmat,
+                                construct_name=_con.replace("_", " ").title(),
+                                model_type="GRM",
+                            )
+                        except Exception as _e:
+                            _rep = {
+                                "construct": _con.replace("_"," ").title(),
+                                "n_items": 0, "n_persons": 0, "model_type": "GRM",
+                                "cr": float("nan"), "cr_badge": "—",
+                                "ave": float("nan"), "ave_badge": "—",
+                                "omega": float("nan"),
+                                "cronbach_alpha": float("nan"), "alpha_badge": "—",
+                                "loadings": [], "error": str(_e),
+                            }
+                        _all_reports.append(_rep)
+                    _cr_progress.empty()
+                    if _all_reports:
+                        _summ_df = build_reliability_summary_df(_all_reports)
+                        st.dataframe(
+                            _summ_df, hide_index=True, width="stretch",
+                        )
+                        st.caption(
+                            "CR ≥ 0.70 acceptable, ≥ 0.80 good. "
+                            "AVE ≥ 0.50 = adequate convergent validity. "
+                            "α shown as legacy baseline only. "
+                            "Rosli et al. (2021); Libasin et al. (2025)."
+                        )
+                except ImportError:
+                    st.error("Deploy core/analytics/irt/reliability_analysis.py first.")
+
 
 def _render_irt_result(
     result: dict,
@@ -2038,7 +3222,99 @@ def _render_irt_result(
             fig.update_yaxes(title="Count")
             st.plotly_chart(fig, width='content')
 
-    # Wright Map
+    # ── Construct Reliability Panel ──────────────────────────────────────────
+    st.divider()
+    with st.expander(
+        "📐 Reliability Analysis — CR, AVE, Cronbach α (Rosli et al., 2021)",
+        expanded=False,
+    ):
+        try:
+            from core.analytics.irt.reliability_analysis import (
+                compute_reliability_report,
+                build_reliability_summary_df,
+            )
+            _rel = compute_reliability_report(
+                irt_result=result,
+                response_matrix=matrix,
+                construct_name=result.get("instrument_key", ""),
+                model_type=result.get("model_type", "Rasch"),
+            )
+            if _rel.get("error"):
+                st.warning(f"Reliability computation: {_rel['error']}")
+            else:
+                # Summary tiles
+                rc1, rc2, rc3, rc4 = st.columns(4)
+                rc1.metric(
+                    "Construct Reliability (CR)",
+                    f"{_rel['cr']:.3f}" if not (isinstance(_rel['cr'], float) and __import__('math').isnan(_rel['cr'])) else "—",
+                    help="CR ≥ 0.70 acceptable; ≥ 0.80 good (Rosli et al., 2021)",
+                )
+                rc2.metric(
+                    "AVE",
+                    f"{_rel['ave']:.3f}" if not (isinstance(_rel['ave'], float) and __import__('math').isnan(_rel['ave'])) else "—",
+                    help="Average Variance Extracted ≥ 0.50 = adequate convergent validity (Fornell & Larcker, 1981)",
+                )
+                rc3.metric(
+                    "Cronbach α",
+                    f"{_rel['cronbach_alpha']:.3f}" if not (isinstance(_rel['cronbach_alpha'], float) and __import__('math').isnan(_rel['cronbach_alpha'])) else "—",
+                    help="Legacy baseline. α ≥ 0.70 acceptable (Hair et al., 2014)",
+                )
+                rc4.metric(
+                    "McDonald ω",
+                    f"{_rel['omega']:.3f}" if not (isinstance(_rel['omega'], float) and __import__('math').isnan(_rel['omega'])) else "—",
+                    help="ω ≥ 0.70 acceptable; preferred over α for non-tau-equivalent items (Dunn et al., 2014)",
+                )
+
+                # Status banners
+                st.markdown(
+                    f"**CR status:** {_rel['cr_badge']}  |  "
+                    f"**AVE status:** {_rel['ave_badge']}  |  "
+                    f"**α status:** {_rel['alpha_badge']}"
+                )
+
+                # Factor loadings table
+                if _rel["loadings"]:
+                    _params = result.get("item_params", pd.DataFrame())
+                    _load_df = pd.DataFrame({
+                        "Item":    _params["item_id"].tolist() if "item_id" in _params.columns else [f"Item {i+1}" for i in range(len(_rel["loadings"]))],
+                        "λ (loading)": [f"{l:.4f}" for l in _rel["loadings"]],
+                        "Error var (1−λ²)": [f"{1-l**2:.4f}" for l in _rel["loadings"]],
+                    })
+                    if "a" in _params.columns:
+                        _load_df.insert(1, "a (discrimination)", _params["a"].round(3).tolist())
+                    st.markdown("**Item factor loadings (λ = a/√(1+a²))**")
+                    st.dataframe(_load_df, hide_index=True, width="stretch")
+
+                # Interpretation guide
+                st.divider()
+                st.markdown(
+                    "**Interpretation (Rosli et al., 2021; Libasin et al., 2025)**\n\n"
+                    "| Metric | Formula | Threshold | What it measures |\n"
+                    "|---|---|---|---|\n"
+                    "| **CR** | (Σλᵢ)² / [(Σλᵢ)² + Σ(1−λᵢ²)] | ≥ 0.70 acceptable, ≥ 0.80 good | Internal consistency accounting for actual item loadings |\n"
+                    "| **AVE** | Σλᵢ² / n | ≥ 0.50 | Convergent validity — proportion of variance captured by construct |\n"
+                    "| **ω** | Same as CR for unidimensional | ≥ 0.70 | More accurate than α when items have unequal loadings |\n"
+                    "| **α** | n/(n−1) × (1 − Σs²ᵢ/s²_T) | ≥ 0.70 | Legacy baseline; assumes tau-equivalence |\n\n"
+                    "Factor loadings derived from IRT discrimination parameters via λ = a/√(1+a²) "
+                    "(UIRT–FA equivalence, McDonald 1999). "
+                    "For Rasch (1PL) all a = 1.0 → λ = 0.707 by model constraint."
+                )
+                st.caption(
+                    "**Primary citation:** Rosli, M. S., Saleh, N. S., Alshammari, S. H., Ibrahim, M. M., "
+                    "Atan, A. S., & Atan, N. A. (2021). Improving Questionnaire Reliability using Construct "
+                    "Reliability for Researches in Educational Technology. *iJIM, 15*(04), 109. "
+                    "https://doi.org/10.3991/ijim.v15i04.20199 | "
+                    "**Also:** Libasin, Z., Ahmad, N., & Umar, N. (2025). Beyond Cronbach's Alpha. "
+                    "SIG e-Learning@CS. e-ISBN 978-629-98755-7-4."
+                )
+        except ImportError:
+            st.info(
+                "Deploy `core/analytics/irt/reliability_analysis.py` "
+                "to enable this panel."
+            )
+
+    
+        # Wright Map
     st.divider()
     with st.expander("ℹ️ How to read the Wright Map", expanded=False):
         st.markdown(_IRT_HELP["wright_map"])
@@ -2115,6 +3391,37 @@ def _render_irt_result(
 # -----------------------------------------------------------------------
 # Multi-source loader (shared by ITA and DTA)
 # -----------------------------------------------------------------------
+
+def _count_available_sources() -> dict:
+    """
+    Return available counts without loading full text content.
+    Returns {"reflections": int, "interviews": int}.
+    """
+    import sqlite3 as _sq
+    from pathlib import Path as _Pth
+    counts = {"reflections": 0, "interviews": 0}
+    # Reflections — count distinct users with reflection responses
+    db = next(
+        (p / "responses.db" for p in _Pth(__file__).resolve().parents
+         if (p / "responses.db").exists()), None
+    )
+    if db:
+        try:
+            with _sq.connect(db) as _c:
+                counts["reflections"] = _c.execute(
+                    "SELECT COUNT(DISTINCT user_id) FROM responses "
+                    "WHERE instrument_name LIKE '%module_reflections%' "
+                    "AND response_value IS NOT NULL"
+                ).fetchone()[0] or 0
+        except Exception:
+            pass
+    # Interviews — count persistent transcripts
+    try:
+        counts["interviews"] = get_transcript_count("interview") or 0
+    except Exception:
+        pass
+    return counts
+
 
 def _load_combined_transcripts(
     sources: list,
@@ -2256,20 +3563,8 @@ def _render_llm_tab(username: str, canonical_df: pd.DataFrame) -> None:
             " — Braun &amp; Clarke (2006) via De Paoli (2024)</div>",
             unsafe_allow_html=True,
         )
-        mode = st.radio("**Mode:**", ["🧭 Guided", "⚙️ Expert"],
-                        horizontal=True, key="llm_mode_radio")
-        _mc, _mbg = ("#CC79A7","#F9EEF5") if "Guided" in mode else ("#EE7733","#FFF3E6")
-        st.markdown(
-            f"<div style='background:{_mbg};border-left:4px solid {_mc};"
-            f"border-radius:5px;padding:0.3rem 0.8rem;margin:0.3rem 0;'>"
-            f"<strong style='color:{_mc};'>Mode: {mode}</strong></div>",
-            unsafe_allow_html=True,
-        )
         st.divider()
-        if "Guided" in mode:
-            _render_ita_guided(username, canonical_df)
-        else:
-            _render_ita_expert(username, canonical_df)
+        _render_ita_guided(username, canonical_df)
     else:
         st.markdown(
             "<div style='background:#FFF3E6;border-left:5px solid #EE7733;"
@@ -2283,24 +3578,107 @@ def _render_llm_tab(username: str, canonical_df: pd.DataFrame) -> None:
 
 
 # -----------------------------------------------------------------------
-# ITA — Guided mode
+# ITA / DTA cost estimation helpers
+# -----------------------------------------------------------------------
+
+# Per-model pricing (USD / 1K tokens): input, output
+_LLM_COST_PER_1K: dict = {
+    "groq":   (0.0,      0.0),       # free tier
+    "claude": (0.0008,   0.004),     # Haiku 3.5
+    "gemini": (0.000075, 0.0003),    # Flash
+    "gpt":    (0.00015,  0.0006),    # GPT-4o-mini
+}
+
+
+def _ita_cost_estimate(n_texts: int, models: list) -> list:
+    """Rough ITA cost: n_texts*2 chunks (Phase 2) + 4 calls (Phases 3-6)."""
+    lines = []
+    total_calls = max(n_texts * 2, 1) + 4
+    avg_in, avg_out = 700, 350
+    for m in models:
+        in_r, out_r = _LLM_COST_PER_1K.get(m, (0.0, 0.0))
+        if in_r == 0.0 and out_r == 0.0:
+            lines.append(f"**{m.title()}**: Free ✅")
+        else:
+            cost = total_calls * ((avg_in / 1000) * in_r + (avg_out / 1000) * out_r)
+            lines.append(f"**{m.title()}**: ~${cost:.4f}")
+    return lines
+
+
+def _dta_cost_estimate(n_texts: int, n_constructs: int, models: list) -> list:
+    """Rough DTA cost: n_texts * n_constructs Phase-2 calls + 2 summary calls."""
+    lines = []
+    total_calls = max(n_texts * n_constructs, 1) + 2
+    avg_in, avg_out = 800, 300
+    for m in models:
+        in_r, out_r = _LLM_COST_PER_1K.get(m, (0.0, 0.0))
+        if in_r == 0.0 and out_r == 0.0:
+            lines.append(f"**{m.title()}**: Free ✅")
+        else:
+            cost = total_calls * ((avg_in / 1000) * in_r + (avg_out / 1000) * out_r)
+            lines.append(f"**{m.title()}**: ~${cost:.4f}")
+    return lines
+
+
+# -----------------------------------------------------------------------
+# ITA — Unified mode  (Guided + Expert merged)
 # -----------------------------------------------------------------------
 
 def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
-    # Seed defaults on first load
+    # ── Session-state defaults (set only on first render) ──────────────
     _avail = get_available_models(check_keys=True)
-    for _k, _d in [
-        ("ita_g_claude", _avail.get("claude", False)),
-        ("ita_g_gemini", False), ("ita_g_gpt", False),
-        ("ita_g_temp", 0.0), ("ita_g_n_themes", 5),
-        ("ita_g_n_codes", 3), ("ita_g_dedup", 0.85),
-    ]:
+
+    # Build the default model selection: Groq if available, nothing otherwise.
+    # A single list key is used instead of 4 individual checkbox keys because
+    # Streamlit clears widget keys from session state when the widget is not
+    # rendered (e.g. when navigating between steps), causing selections to reset.
+    _default_models = ["groq"] if _avail.get("groq", False) else []
+
+    _defaults = {
+        # Models — single persistent list, not 4 individual checkbox keys
+        "ita_g_models":      _default_models,
+        # Analysis settings
+        "ita_g_temp":        0.0,
+        "ita_g_n_themes":    5,
+        "ita_g_n_codes":     3,
+        "ita_g_dedup":       0.85,
+        "ita_g_max_texts":   4,
+        # Editable prompts — live widget values (populated from defaults)
+        "ita_g_sys_prompt":  _ITA_SYSTEM_PROMPT,
+        "ita_g_p2_prompt":   _PHASE2_PROMPT,
+        "ita_g_p3_prompt":   _PHASE3_PROMPT,
+        # Saved copies — committed by the Save button
+        "ita_g_sys_saved":   _ITA_SYSTEM_PROMPT,
+        "ita_g_p2_saved":    _PHASE2_PROMPT,
+        "ita_g_p3_saved":    _PHASE3_PROMPT,
+    }
+    for _k, _d in _defaults.items():
         if _k not in st.session_state:
             st.session_state[_k] = _d
 
-    STEPS = ["1 — Data Source", "2 — Models & Temperature",
-             "3 — Theme Settings", "4 — Review Prompt",
-             "5 — Run Analysis", "6 — Results"]
+    # ── Reset-flag processing — MUST run before any widget is created ──
+    if st.session_state.pop("_ita_reset_sys", False):
+        st.session_state["ita_g_sys_prompt"] = _ITA_SYSTEM_PROMPT
+        st.session_state["ita_g_sys_saved"]  = _ITA_SYSTEM_PROMPT
+    if st.session_state.pop("_ita_reset_p2", False):
+        st.session_state["ita_g_p2_prompt"]  = _PHASE2_PROMPT
+        st.session_state["ita_g_p2_saved"]   = _PHASE2_PROMPT
+    if st.session_state.pop("_ita_reset_p3", False):
+        st.session_state["ita_g_p3_prompt"]  = _PHASE3_PROMPT
+        st.session_state["ita_g_p3_saved"]   = _PHASE3_PROMPT
+    # Navigation flag — set by pipeline on completion, applied here before
+    # the radio widget is instantiated (same pattern as prompt reset above)
+    if st.session_state.pop("_ita_goto_step6", False):
+        st.session_state["ita_guided_step"] = "6 — Results"
+
+    STEPS = [
+        "1 — Data Source",
+        "2 — Models & Temperature",
+        "3 — Theme Settings",
+        "4 — Review & Edit Prompt",
+        "5 — Run Analysis",
+        "6 — Results",
+    ]
     if "ita_guided_step" not in st.session_state:
         st.session_state["ita_guided_step"] = STEPS[0]
     step = st.radio("**Step:**", STEPS, horizontal=True, key="ita_guided_step")
@@ -2312,85 +3690,469 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
     )
     st.divider()
 
+    # ═══════════════════════════════════════════════════════════════════
+    # STEP 1 — DATA SOURCE
+    # ═══════════════════════════════════════════════════════════════════
     if step == STEPS[0]:
         st.markdown("### Step 1 — Select Data Source")
+        st.caption(
+            "Choose which data to include in the analysis. "
+            "**Reflections** are short written responses students submit after each module. "
+            "**Interviews** are longer semi-structured conversations uploaded by the teacher."
+        )
         sources, per_run_files = _source_checkboxes("ita_g")
+
+        # ── Persist source selections to stable (non-widget) keys ─────
+        # Checkbox widget keys are wiped by Streamlit when the widget is
+        # not rendered (i.e. when you navigate away from Step 1).
+        # Writing the values to separate plain keys here keeps them alive
+        # across step navigation so Step 5 can read them reliably.
+        st.session_state["ita_src_responses"]  = "responses"  in sources
+        st.session_state["ita_src_persistent"] = "persistent" in sources
+        st.session_state["ita_src_per_run"]    = "per_run"    in sources
+        if per_run_files:
+            st.session_state["ita_g_upload"] = per_run_files
+
         if not sources:
-            st.warning("Select at least one source.")
+            st.warning("Select at least one source above.")
         else:
-            n_ref = 0
+            st.divider()
             if "responses" in sources:
                 import sqlite3 as _sq2
                 from pathlib import Path as _P2
-                db2 = next((p / "responses.db" for p in _P2(__file__).resolve().parents
-                            if (p / "responses.db").exists()), None)
+                db2 = next(
+                    (p / "responses.db" for p in _P2(__file__).resolve().parents
+                     if (p / "responses.db").exists()), None
+                )
+                n_avail_ref = 0
                 if db2:
-                    conn2 = _sq2.connect(db2)
-                    n_ref = conn2.execute(
-                        "SELECT COUNT(DISTINCT user_id) FROM responses "
-                        "WHERE instrument_name LIKE '%module_reflections%'"
-                    ).fetchone()[0]
-                    conn2.close()
-            if "persistent" in sources:
-                n_int = get_transcript_count("interview")
-                st.metric("Interviews in store", n_int)
-            if "responses" in sources:
-                st.metric("Students with reflection notes", n_ref)
+                    with _sq2.connect(db2) as _c2:
+                        n_avail_ref = _c2.execute(
+                            "SELECT COUNT(DISTINCT user_id) FROM responses "
+                            "WHERE instrument_name LIKE '%module_reflections%'"
+                        ).fetchone()[0]
+                st.metric("Students with reflection notes", n_avail_ref)
 
+            if "persistent" in sources:
+                n_avail_int = get_transcript_count("interview")
+                st.metric("Interviews in store", n_avail_int)
+
+            st.info(
+                "✅ Sources confirmed. Proceed to Step 2 to select a model, "
+                "then set how many texts to include in Step 5."
+            )
+
+    # ═══════════════════════════════════════════════════════════════════
+    # STEP 2 — MODELS & TEMPERATURE
+    # ═══════════════════════════════════════════════════════════════════
     elif step == STEPS[1]:
         st.markdown("### Step 2 — Models & Temperature")
         _avail2 = get_available_models(check_keys=True)
-        st.markdown("**Select models:**")
-        c1, c2, c3 = st.columns(3)
-        c1.checkbox("Claude", value=_avail2.get("claude", False),
-                    disabled=not _avail2.get("claude", False), key="ita_g_claude")
-        c2.checkbox("Gemini", value=False,
-                    disabled=not _avail2.get("gemini", False), key="ita_g_gemini")
-        c3.checkbox("GPT",    value=False,
-                    disabled=not _avail2.get("gpt", False),    key="ita_g_gpt")
-        st.divider()
-        st.slider("Temperature (T)", 0.0, 2.0, 0.0, 0.1,
-                  key="ita_g_temp", format="%.1f")
 
+        st.markdown("**Select which AI model(s) to run:**")
+        st.caption(
+            "You can run multiple models on the same data and compare results — "
+            "useful for checking consistency across providers. "
+            "**Groq (Llama 3.3 70B) is always free** — no billing required. "
+            "Paid models appear in the list only when their API key is present in .env."
+        )
+
+        # Build options list — only show models whose keys are available
+        _model_options = {
+            "groq":   "Llama 3.3 70B (Groq — free ✅)",
+            "claude": "Claude (Anthropic)",
+            "gemini": "Gemini (Google)",
+            "gpt":    "GPT (OpenAI)",
+        }
+        _available_options = [k for k in _model_options if _avail2.get(k, False)]
+        _option_labels     = [_model_options[k] for k in _available_options]
+
+        # Filter saved selection to only available models
+        _current = [m for m in st.session_state.get("ita_g_models", [])
+                    if m in _available_options]
+
+        _selected_labels = st.multiselect(
+            "Models",
+            options=_option_labels,
+            default=[_model_options[m] for m in _current
+                     if m in _available_options],
+            key="ita_g_models_widget",
+            label_visibility="collapsed",
+            help="Select one or more. Groq is free; others require API keys in .env.",
+        )
+        # Map labels back to keys and persist in the stable list key
+        _label_to_key = {v: k for k, v in _model_options.items()}
+        st.session_state["ita_g_models"] = [
+            _label_to_key[lbl] for lbl in _selected_labels
+        ]
+
+        if not _selected_labels:
+            st.warning("Select at least one model to continue.")
+        else:
+            st.success(
+                "Selected: " + ", ".join(_selected_labels)
+            )
+
+        st.divider()
+        st.markdown("**Temperature**")
+        st.caption(
+            "Temperature controls how creative or predictable the AI's responses are. \n\n"
+            "- **0.0** — fully deterministic; the AI gives the same answer every time. "
+            "Best for reproducible research results.\n"
+            "- **0.3** — a small amount of variation; slightly different wording each run "
+            "but still focused. A good middle ground.\n"
+            "- **1.0** — noticeably varied responses; useful for exploring ideas or "
+            "checking whether themes are stable across runs.\n"
+            "- **2.0** — highly unpredictable; rarely useful for structured analysis.\n\n"
+            "**Recommended for thematic analysis: 0.0–0.3.**"
+        )
+        st.slider(
+            "Temperature (T)", 0.0, 2.0,
+            value=float(st.session_state.get("ita_g_temp", 0.0)),
+            step=0.1, format="%.1f", key="ita_g_temp",
+        )
+
+    # ═══════════════════════════════════════════════════════════════════
+    # STEP 3 — THEME SETTINGS
+    # ═══════════════════════════════════════════════════════════════════
     elif step == STEPS[2]:
         st.markdown("### Step 3 — Theme Settings")
-        st.slider("Number of themes (Phase 3)", 3, 15, 5, 1, key="ita_g_n_themes")
-        st.slider("Deduplication threshold", 0.70, 0.95, 0.85, 0.05,
-                  key="ita_g_dedup")
-        st.select_slider("Codes per chunk", [2, 3], value=3, key="ita_g_n_codes")
 
+        st.markdown("**Number of themes (Phase 3 & 4)**")
+        st.caption(
+            "This tells the AI how many broad themes to look for across all the text. "
+            "Think of a theme as a recurring idea that keeps coming up — for example, "
+            "*'curiosity about how AI thinks'* or *'worry about AI replacing humans'*. \n\n"
+            "- **3–5 themes** — good starting point for a small cohort (under 20 students). "
+            "Easier to interpret and discuss.\n"
+            "- **6–10 themes** — richer picture for larger datasets; may overlap more.\n"
+            "- **10+ themes** — very granular; usually only useful when comparing "
+            "across many modules or cohorts.\n\n"
+            "**Phase 4 note:** Phase 4 re-runs the same grouping task at Temperature = 1.0 "
+            "using the same target number of themes you set here. It is a *stability check* — "
+            "if Phase 4 produces very similar themes to Phase 3, the themes are robust. "
+            "De Paoli (2024) suggests 11 groups as a reference; this slider defaults to a "
+            "number scaled from your code list size, but you can set it manually to 11 if "
+            "you wish to follow De Paoli's specification exactly."
+        )
+        st.slider(
+            "Number of themes (Phase 3 & 4)", 3, 15,
+            value=int(st.session_state.get("ita_g_n_themes", 5)),
+            step=1, key="ita_g_n_themes",
+        )
+
+        st.divider()
+        st.markdown("**Deduplication threshold**")
+        st.caption(
+            "During Phase 2 the AI extracts many short labels called *codes* "
+            "(e.g. *'confusion about training data'*, *'uncertainty about AI decisions'*). "
+            "Different chunks often produce very similar codes. "
+            "Deduplication automatically merges near-duplicates so you end up with a "
+            "cleaner, non-redundant code list before themes are built. \n\n"
+            "- **0.70** — aggressive merging; fewer codes, risk of losing nuance.\n"
+            "- **0.85** (recommended) — balanced; removes clear duplicates, keeps "
+            "meaningfully different codes.\n"
+            "- **0.95** — conservative; keeps more codes but the list may still have "
+            "a lot of redundancy."
+        )
+        st.slider(
+            "Deduplication threshold", 0.70, 0.95,
+            value=float(st.session_state.get("ita_g_dedup", 0.85)),
+            step=0.05, key="ita_g_dedup",
+        )
+
+        st.divider()
+        st.markdown("**Codes per chunk**")
+        st.caption(
+            "The AI reads your text in sections called *chunks*. "
+            "This setting controls how many codes it extracts from each chunk. \n\n"
+            "- **2 codes per chunk** — conservative; cleaner output, less noise. "
+            "Good for short module reflections (a few sentences each).\n"
+            "- **3 codes per chunk** — captures more ideas per section. "
+            "Better for longer interview transcripts where students cover many topics."
+        )
+        st.select_slider(
+            "Codes per chunk", options=[2, 3],
+            value=int(st.session_state.get("ita_g_n_codes", 3)),
+            key="ita_g_n_codes",
+        )
+
+    # ═══════════════════════════════════════════════════════════════════
+    # STEP 4 — REVIEW & EDIT PROMPT
+    # ═══════════════════════════════════════════════════════════════════
     elif step == STEPS[3]:
-        st.markdown("### Step 4 — Review Prompt")
-        st.text_area("System prompt (fixed)", value=_ITA_SYSTEM_PROMPT,
-                     height=150, disabled=True)
-        st.text_area("Phase 2 prompt template",
-                     value=_PHASE2_PROMPT.replace("{text}", "[TRANSCRIPT CHUNK]"),
-                     height=200, disabled=True)
+        st.markdown("### Step 4 — Review & Edit Prompt")
+        st.caption(
+            "These are the instructions the AI receives before it reads your data. "
+            "The prompts are pre-filled with research-validated defaults. "
+            "You can edit them to better suit your cohort's age group, language, or "
+            "research focus — for example, simplifying the language for younger students "
+            "or asking the AI to pay attention to specific AI concepts. "
+            "**Save** stores your version for this session. "
+            "**Restore Original** puts the default text back."
+        )
 
+        # ── System prompt ─────────────────────────────────────────────
+        st.markdown("#### System prompt")
+        st.caption(
+            "Defines the AI's role and overall analysis approach — sent at the start "
+            "of every phase. The default instructs the AI to act as a qualitative "
+            "researcher analysing AI literacy responses from young learners."
+        )
+
+        # Show saved-vs-live status
+        _sys_modified = (
+            st.session_state.get("ita_g_sys_prompt", _ITA_SYSTEM_PROMPT)
+            != st.session_state.get("ita_g_sys_saved", _ITA_SYSTEM_PROMPT)
+        )
+        if _sys_modified:
+            st.info("✏️ Unsaved changes — click **Save** to apply to the next run.")
+
+        st.text_area(
+            "System prompt",
+            key="ita_g_sys_prompt",
+            height=180,
+            label_visibility="collapsed",
+        )
+
+        col_save_s, col_restore_s, _ = st.columns([1, 1.4, 4])
+        if col_save_s.button("💾 Save", key="ita_sys_save",
+                             help="Apply this version to the next ITA run"):
+            st.session_state["ita_g_sys_saved"] = st.session_state["ita_g_sys_prompt"]
+            st.success("System prompt saved.")
+        if col_restore_s.button("↺ Restore Original", key="ita_sys_restore",
+                                help="Reset to the default research prompt"):
+            # Set flag — actual write happens at top of next render cycle
+            st.session_state["_ita_reset_sys"] = True
+            st.rerun()
+
+        st.divider()
+
+        # ── Phase 2 prompt ────────────────────────────────────────────
+        st.markdown("#### Phase 2 prompt template")
+        st.caption(
+            "Sent to the AI once per text chunk during Phase 2 (code extraction). "
+            "`{text}` is automatically replaced with each participant's text at runtime — "
+            "**keep `{text}` in place** or the pipeline will fail. "
+            "You can adjust how many codes to extract or what to focus on."
+        )
+
+        _p2_modified = (
+            st.session_state.get("ita_g_p2_prompt", _PHASE2_PROMPT)
+            != st.session_state.get("ita_g_p2_saved", _PHASE2_PROMPT)
+        )
+        if _p2_modified:
+            st.info("✏️ Unsaved changes — click **Save** to apply to the next run.")
+
+        st.text_area(
+            "Phase 2 prompt template",
+            key="ita_g_p2_prompt",
+            height=220,
+            label_visibility="collapsed",
+        )
+
+        col_save_p, col_restore_p, _ = st.columns([1, 1.4, 4])
+        if col_save_p.button("💾 Save", key="ita_p2_save",
+                             help="Apply this version to the next ITA run"):
+            st.session_state["ita_g_p2_saved"] = st.session_state["ita_g_p2_prompt"]
+            st.success("Phase 2 prompt saved.")
+        if col_restore_p.button("↺ Restore Original", key="ita_p2_restore",
+                                help="Reset to the default Phase 2 prompt"):
+            st.session_state["_ita_reset_p2"] = True
+            st.rerun()
+
+        st.divider()
+
+        # ── Phase 3 / 4 prompt ────────────────────────────────────────
+        st.markdown("#### Phase 3 & 4 prompt template")
+        st.caption(
+            "Sent to the AI once in Phase 3 (theme search) and once in Phase 4 "
+            "(theme stability check at T=1.0). Both phases use the same prompt — "
+            "Phase 4 simply reruns it with higher temperature to test robustness. "
+            "\n\n"
+            "**Methodology note (De Paoli, 2024):** This prompt asks the model to "
+            "group codes into themes — corresponding to De Paoli's Phase 4 "
+            "('grouping topics'). Deduplication of redundant codes (De Paoli's "
+            "Phase 3) is handled automatically by the pipeline in Phase 2b using "
+            "embedding similarity, which is more reliable than asking an LLM to "
+            "judge uniqueness.\n\n"
+            "**Traceability:** The prompt requires the model to return `code_indices` "
+            "(linking each theme back to the original transcript chunks) and verbatim "
+            "`quotes` from participants — fulfilling De Paoli's anti-hallucination "
+            "requirement. **Do not remove** `{n_themes}` or `{codes_list}` placeholders "
+            "or the pipeline will fail."
+        )
+
+        _p3_modified = (
+            st.session_state.get("ita_g_p3_prompt", _PHASE3_PROMPT)
+            != st.session_state.get("ita_g_p3_saved", _PHASE3_PROMPT)
+        )
+        if _p3_modified:
+            st.info("✏️ Unsaved changes — click **Save** to apply to the next run.")
+
+        st.text_area(
+            "Phase 3 & 4 prompt template",
+            key="ita_g_p3_prompt",
+            height=280,
+            label_visibility="collapsed",
+        )
+
+        col_save_p3, col_restore_p3, _ = st.columns([1, 1.4, 4])
+        if col_save_p3.button("💾 Save", key="ita_p3_save",
+                              help="Apply this version to the next ITA run"):
+            st.session_state["ita_g_p3_saved"] = st.session_state["ita_g_p3_prompt"]
+            st.success("Phase 3 & 4 prompt saved.")
+        if col_restore_p3.button("↺ Restore Original", key="ita_p3_restore",
+                                 help="Reset to the default Phase 3 & 4 prompt"):
+            st.session_state["_ita_reset_p3"] = True
+            st.rerun()
+
+    # ═══════════════════════════════════════════════════════════════════
+    # STEP 5 — RUN ANALYSIS
+    # ═══════════════════════════════════════════════════════════════════
     elif step == STEPS[4]:
         st.markdown("### Step 5 — Run Analysis")
-        sources, per_run_files = _source_checkboxes("ita_s5")
 
-        models = [m for m, k in [("claude","ita_g_claude"),
-                                   ("gemini","ita_g_gemini"),
-                                   ("gpt","ita_g_gpt")]
-                  if st.session_state.get(k, False)]
+        # ── Read sources from stable keys written by Step 1 ──────────
+        # These survive step navigation; the widget keys (ita_g_src_*)
+        # are wiped by Streamlit when Step 1 is not rendered.
+        sources = []
+        if st.session_state.get("ita_src_responses",  True):  sources.append("responses")
+        if st.session_state.get("ita_src_persistent", False): sources.append("persistent")
+        if st.session_state.get("ita_src_per_run",    False): sources.append("per_run")
+        per_run_files = st.session_state.get("ita_g_upload")
+
+        _src_labels = {
+            "responses":  "Module reflections (DB)",
+            "persistent": "Interview transcripts (store)",
+            "per_run":    "Uploaded files (this run)",
+        }
+        if sources:
+            st.caption(
+                "**Sources from Step 1:** "
+                + "  ·  ".join(_src_labels.get(s, s) for s in sources)
+                + " — go back to Step 1 to change."
+            )
+        else:
+            st.warning("No data sources selected — go back to Step 1.")
+            return
+
+        models = st.session_state.get("ita_g_models", [])
+
         temperature = float(st.session_state.get("ita_g_temp", 0.0))
         n_themes    = int(st.session_state.get("ita_g_n_themes", 5))
         n_codes     = int(st.session_state.get("ita_g_n_codes", 3))
         dedup_thr   = float(st.session_state.get("ita_g_dedup", 0.85))
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Models", len(models) if models else "None")
-        c2.metric("Temperature", f"{temperature:.1f}")
-        c3.metric("Themes", n_themes)
-        c4.metric("Sources", len(sources) if sources else "None")
-
         if not models:
-            st.warning("No models selected — go to Step 2.")
+            st.warning("No models selected — go back to Step 2.")
             return
         if not sources:
-            st.warning("Select at least one data source.")
+            st.warning("Select at least one data source — go back to Step 1.")
+            return
+
+        # ── Available counts ──────────────────────────────────────────
+        st.divider()
+        st.markdown("**How many texts to include in this run?**")
+        st.caption(
+            "The counts below show what is currently available in the database. "
+            "Use a smaller number to keep costs low when testing a paid model — "
+            "for example, 2 reflections + 1 interview is enough to confirm the "
+            "full pipeline works end-to-end. Set to the full count for a production run."
+        )
+
+        _avail_counts = _count_available_sources()
+        n_avail_ref = _avail_counts["reflections"]
+        n_avail_int = _avail_counts["interviews"]
+
+        ca, cb = st.columns(2)
+        ca.metric("Reflections available", n_avail_ref)
+        cb.metric("Interviews available",  n_avail_int)
+
+        cc, cd = st.columns(2)
+        n_ref_use = cc.number_input(
+            "Reflections to include",
+            min_value=0,
+            max_value=max(n_avail_ref, 1),
+            value=min(int(st.session_state.get("ita_g_max_ref", 2)), n_avail_ref),
+            step=1,
+            key="ita_g_max_ref",
+            help=(
+                f"{n_avail_ref} available  ·  "
+                "0 = skip reflections entirely  ·  "
+                f"{n_avail_ref} = use all"
+            ),
+        )
+        n_int_use = cd.number_input(
+            "Interviews to include",
+            min_value=0,
+            max_value=max(n_avail_int, 1),
+            value=min(int(st.session_state.get("ita_g_max_int", 1)), max(n_avail_int, 1)),
+            step=1,
+            key="ita_g_max_int",
+            help=(
+                f"{n_avail_int} available  ·  "
+                "0 = skip interviews entirely  ·  "
+                f"{n_avail_int} = use all"
+            ),
+        )
+        n_total_texts = int(n_ref_use) + int(n_int_use)
+
+        # ── Source / count consistency check ─────────────────────────
+        # If the teacher asked for interviews but forgot to tick the interview
+        # source in Step 1 (or vice versa), auto-correct and notify clearly.
+        _src_auto_added = []
+        if int(n_int_use) > 0 and "persistent" not in sources:
+            sources.append("persistent")
+            _src_auto_added.append("Interview transcripts (store)")
+        if int(n_ref_use) > 0 and "responses" not in sources:
+            sources.append("responses")
+            _src_auto_added.append("Module reflections (DB)")
+        if int(n_ref_use) == 0 and "responses" in sources:
+            sources.remove("responses")
+        if int(n_int_use) == 0 and "persistent" in sources:
+            sources.remove("persistent")
+
+        if _src_auto_added:
+            st.info(
+                "ℹ️ **Source automatically added:** "
+                + ", ".join(_src_auto_added)
+                + " — you requested texts from this source but it was not "
+                "selected in Step 1. It has been added for this run. "
+                "Go back to Step 1 to make this permanent."
+            )
+
+        # ── Settings summary ──────────────────────────────────────────
+        st.divider()
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Models",       ", ".join(m.title() for m in models))
+        c2.metric("Temperature",  f"{temperature:.1f}")
+        c3.metric("Themes",       n_themes)
+        c4.metric("Reflections",  int(n_ref_use))
+        c5.metric("Interviews",   int(n_int_use))
+
+        # ── Cost estimate ─────────────────────────────────────────────
+        est_lines = _ita_cost_estimate(n_total_texts, models)
+        st.info(
+            f"💰 **Estimated cost** ({int(n_ref_use)} reflection(s) + "
+            f"{int(n_int_use)} interview(s) = {n_total_texts} text(s)): "
+            + "  ·  ".join(est_lines)
+        )
+
+        # Warn if Groq selected and estimated tokens approach free tier daily limit
+        if "groq" in models:
+            # Rough estimate: ~700 input + ~400 output tokens per chunk,
+            # ~2 chunks per text across 6 phases
+            _est_tokens = n_total_texts * 2 * 1100
+            if _est_tokens > 80_000:
+                st.warning(
+                    f"⚠️ **Groq daily token limit:** This run may use ~{_est_tokens:,} tokens. "
+                    f"The free tier allows 100,000 tokens/day. "
+                    f"Consider reducing the number of texts or running in smaller batches."
+                )
+
+        if n_total_texts == 0:
+            st.warning("Set at least one reflection or interview above.")
             return
 
         if st.button("▶ Run ITA Pipeline", key="ita_g_run", type="primary"):
@@ -2398,53 +4160,232 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
                 username=username, sources=sources, per_run_files=per_run_files,
                 models=models, temperature=temperature,
                 n_themes=n_themes, n_codes=n_codes, dedup_threshold=dedup_thr,
+                max_reflections=int(n_ref_use),
+                max_interviews=int(n_int_use),
+                custom_sys_prompt=st.session_state.get("ita_g_sys_saved"),
+                custom_p2_prompt=st.session_state.get("ita_g_p2_saved"),
+                custom_p3_prompt=st.session_state.get("ita_g_p3_saved"),
             )
 
+    # ═══════════════════════════════════════════════════════════════════
+    # STEP 6 — RESULTS
+    # ═══════════════════════════════════════════════════════════════════
     elif step == STEPS[5]:
         st.markdown("### Step 6 — Results")
-        _render_ita_results(username)
+        runs = _ita_list_runs(created_by=username)
+        if not runs:
+            st.info("No ITA runs found. Complete Step 5 first."); return
+
+        run_opts = {
+            f"{r['model'].upper()} T={r['temperature']} — "
+            f"{r['created_at'][:16]} [{r['status']}]": r["run_id"]
+            for r in runs[:10]
+        }
+        # Default to the most recently completed run (set by pipeline on finish)
+        _default_run_id  = st.session_state.get("ita_last_run_id")
+        _default_run_key = next(
+            (k for k, v in run_opts.items() if v == _default_run_id),
+            list(run_opts.keys())[0]
+        )
+        selected = st.selectbox(
+            "Select run", list(run_opts.keys()),
+            index=list(run_opts.keys()).index(_default_run_key),
+            key="ita_results_run",
+        )
+        run_id  = run_opts[selected]
+        run_rec = _ita_get_run(run_id)
+        st.caption(
+            f"Model: **{_llm_display_name(run_rec['model'])}** | "
+            f"T={run_rec['temperature']} | "
+            f"Phase reached: {run_rec['phase_reached']}"
+        )
+        st.divider()
+
+        view_tab = st.radio(
+            "View", ["Codes", "Themes", "Phase 4 Review", "Report", "Compare Runs"],
+            horizontal=True, key="ita_results_section",
+        )
+        st.divider()
+
+        p2d = load_phase_result(run_id, 2)
+        p3d = load_phase_result(run_id, 3)
+        p4d = load_phase_result(run_id, 4)
+        p5d = load_phase_result(run_id, 5)
+        p6d = load_phase_result(run_id, 6)
+
+        # ── Codes ──────────────────────────────────────────────────────
+        if view_tab == "Codes":
+            if not p2d: st.info("Phase 2 not yet run."); return
+            codes   = p2d.get("codes", [])
+            dedup   = p2d.get("dedup", {})
+            n_raw   = p2d.get("n_codes_raw", len(codes))
+            n_after = dedup.get("n_after", len(codes))
+            n_rem   = dedup.get("n_removed", 0)
+            cm1, cm2, cm3 = st.columns(3)
+            cm1.metric("Raw codes",   n_raw)
+            cm2.metric("After dedup", n_after)
+            cm3.metric("Removed",     n_rem,
+                       delta=f"-{n_rem}" if n_rem else None,
+                       delta_color="inverse")
+
+            sub = st.radio(
+                "Show",
+                ["Raw codes", "After dedup", "Removed by dedup"],
+                horizontal=True, key="ita_codes_sub",
+            )
+            st.divider()
+
+            if sub == "Raw codes":
+                if codes:
+                    rows = [{"Chunk": c.get("chunk_index", ""),
+                             "Participant": c.get("participant_id", ""),
+                             "Code": c.get("name", ""),
+                             "Description": c.get("description", "")[:100]}
+                            for c in codes]
+                    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+                else:
+                    st.info("No raw codes found.")
+
+            elif sub == "After dedup":
+                dedup_codes = dedup.get("codes_dedup", [])
+                if dedup_codes:
+                    st.caption(
+                        f"**{len(dedup_codes)} code(s) after deduplication** "
+                        f"(threshold = {dedup.get('threshold', 0.85):.2f}). "
+                        "Codes with the same name from **different participants** "
+                        "are intentionally kept — they represent independent evidence "
+                        "from separate people. Only codes from the *same or different* "
+                        "participants whose name **and** description are highly similar "
+                        "(above the threshold) are merged."
+                    )
+                    rows = [{"Chunk": c.get("chunk_index", ""),
+                             "Participant": c.get("participant_id", ""),
+                             "Code": c.get("name", ""),
+                             "Description": c.get("description", "")[:120]}
+                            for c in dedup_codes]
+                    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+                else:
+                    st.info("No deduplicated codes found.")
+
+            elif sub == "Removed by dedup":
+                removed = dedup.get("removed_codes", [])
+                if removed:
+                    st.caption(
+                        f"**{len(removed)} code(s) removed** — each was semantically "
+                        f"too similar (≥ {dedup.get('threshold', 0.85):.2f} cosine "
+                        "similarity) to a code from an earlier chunk. "
+                        "The earliest-chunk version is always kept (De Paoli "
+                        "anti-hallucination: lowest chunk_index wins)."
+                    )
+                    rows = [{"Removed chunk": r.get("chunk_index", ""),
+                             "Participant":   r.get("participant_id", ""),
+                             "Removed code":  r.get("name", ""),
+                             "Description":   r.get("description", "")[:100]}
+                            for r in removed]
+                    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+                else:
+                    st.info(
+                        "No codes were removed in deduplication. "
+                        "If the 'Removed' count above is > 0 but this table is empty, "
+                        "re-run the analysis — older runs pre-date this feature."
+                    )
+
+        # ── Themes ─────────────────────────────────────────────────────
+        elif view_tab == "Themes":
+            data   = p5d or p3d
+            if not data: st.info("Phase 3 not yet run."); return
+            themes = data.get("themes_defined") or data.get("themes", [])
+            st.caption(
+                f"{len(themes)} theme(s) identified. "
+                "Each theme groups related codes under a shared idea."
+            )
+            for i, t in enumerate(themes):
+                with st.expander(f"**{i+1}. {t.get('name', '')}**",
+                                 expanded=(i == 0)):
+                    st.markdown(t.get("summary", t.get("description", "")))
+                    codes_in_theme = t.get("codes", [])
+                    if codes_in_theme:
+                        st.caption(f"Supporting codes ({len(codes_in_theme)}):")
+                        for c in codes_in_theme[:10]:
+                            lbl = c if isinstance(c, str) else c.get("name", str(c))
+                            st.markdown(f"- {lbl}")
+
+        # ── Phase 4 Review ─────────────────────────────────────────────
+        elif view_tab == "Phase 4 Review":
+            if not p3d or not p4d:
+                st.info("Both Phase 3 and Phase 4 must be run first."); return
+            t0 = p3d.get("themes", [])
+            t1 = p4d.get("themes", [])
+            st.markdown(
+                f"**Phase 3 → {len(t0)} themes  |  Phase 4 (T=1.0) → {len(t1)} themes**"
+            )
+            st.caption(
+                "Phase 4 re-runs the theme search at Temperature = 1.0 to check "
+                "whether your themes hold up under variation. "
+                "**Agreement scores above 0.80** suggest the themes are robust "
+                "and not just an artefact of one particular run."
+            )
+            if t0 and t1:
+                with st.spinner("Computing alignment…"):
+                    aligned = _align_themes(t0, t1, "T=0", "T=1.0")
+                st.dataframe(aligned, hide_index=True, width="stretch")
+                if not aligned.empty:
+                    st.metric("Mean agreement", f"{aligned['Agreement Score'].mean():.3f}")
+
+        # ── Report ─────────────────────────────────────────────────────
+        elif view_tab == "Report":
+            if not p6d: st.info("Phase 6 not yet run."); return
+            report = p6d.get("report_text", "")
+            if report:
+                st.markdown(report)
+                st.download_button(
+                    "📄 Download report (.txt)", data=report,
+                    file_name=f"ita_report_{run_id[:8]}.txt",
+                    mime="text/plain", key="ita_dl_report",
+                )
+
+        # ── Compare Runs ───────────────────────────────────────────────
+        elif view_tab == "Compare Runs":
+            completed = [r for r in runs if r["phase_reached"] >= 3]
+            if len(completed) < 2:
+                st.info("Need at least 2 completed runs to compare."); return
+            st.caption(
+                "Compare theme sets from two runs — e.g. different models or "
+                "temperatures — to check how consistent the analysis is. "
+                "High agreement means the themes are stable regardless of model choice."
+            )
+            opts = {
+                f"{r['model'].upper()} T={r['temperature']} {r['created_at'][:10]}":
+                r["run_id"] for r in completed[:8]
+            }
+            ca, cb = st.columns(2)
+            ra = ca.selectbox("Run A", list(opts.keys()), key="ita_cmp_a")
+            rb = cb.selectbox("Run B", list(opts.keys()),
+                              index=min(1, len(opts) - 1), key="ita_cmp_b")
+            if ra == rb: st.warning("Select two different runs."); return
+            pa = load_phase_result(opts[ra], 3)
+            pb = load_phase_result(opts[rb], 3)
+            if pa and pb:
+                with st.spinner("Computing agreement…"):
+                    cmp = _compare_runs(
+                        pa.get("themes", []), pb.get("themes", []), ra, rb
+                    )
+                if cmp.get("error"): st.error(cmp["error"]); return
+                cc1, cc2 = st.columns(2)
+                cc1.metric("Overall agreement", f"{cmp['overall_agreement']:.3f}")
+                cc2.metric("Interpretation",    cmp["interpretation"])
+                bm = pd.DataFrame(cmp.get("best_matches", []))
+                if not bm.empty:
+                    st.dataframe(bm, hide_index=True, width="stretch")
 
 
 # -----------------------------------------------------------------------
-# ITA — Expert mode
+# ITA — Expert mode (merged into guided — kept for backward compatibility)
 # -----------------------------------------------------------------------
 
 def _render_ita_expert(username: str, canonical_df: pd.DataFrame) -> None:
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        sources, per_run_files = _source_checkboxes("ita_e")
-    with col2:
-        st.markdown("**Models:**")
-        _avail = get_available_models(check_keys=True)
-        e_models = []
-        for m, lbl in [("claude","Claude"),("gemini","Gemini"),("gpt","GPT")]:
-            if st.checkbox(lbl, value=_avail.get(m, False),
-                           disabled=not _avail.get(m, False), key=f"ita_e_{m}"):
-                e_models.append(m)
-
-    c1, c2, c3, c4 = st.columns(4)
-    e_temp     = c1.number_input("Temperature", 0.0, 2.0, 0.0, 0.1,
-                                  format="%.1f", key="ita_e_temp")
-    e_n_themes = int(c2.number_input("Themes", 3, 20, 5, 1, key="ita_e_n_themes"))
-    e_n_codes  = int(c3.number_input("Codes/chunk", 2, 4, 3, 1, key="ita_e_n_codes"))
-    e_dedup    = c4.number_input("Dedup", 0.70, 0.99, 0.85, 0.05,
-                                  format="%.2f", key="ita_e_dedup")
-
-    if not e_models:
-        st.warning("Select at least one model.")
-        return
-    if not sources:
-        st.warning("Select at least one data source.")
-        return
-
-    if st.button("▶ Run ITA Pipeline", key="ita_e_run", type="primary"):
-        _run_ita_pipeline(
-            username=username, sources=sources, per_run_files=per_run_files,
-            models=e_models, temperature=e_temp,
-            n_themes=e_n_themes, n_codes=e_n_codes, dedup_threshold=e_dedup,
-        )
-    st.divider()
-    _render_ita_results(username)
+    """Expert mode merged into the unified guided interface."""
+    _render_ita_guided(username, canonical_df)
 
 
 # -----------------------------------------------------------------------
@@ -2454,6 +4395,12 @@ def _render_ita_expert(username: str, canonical_df: pd.DataFrame) -> None:
 def _run_ita_pipeline(
     username, sources, per_run_files,
     models, temperature, n_themes, n_codes, dedup_threshold,
+    max_reflections=None,
+    max_interviews=None,
+    max_transcripts=None,   # legacy fallback — use max_reflections/max_interviews instead
+    custom_sys_prompt=None,
+    custom_p2_prompt=None,
+    custom_p3_prompt=None,
 ):
     src_label = " + ".join(sources) if sources else "none"
     with st.spinner(f"Loading transcripts from: {src_label}..."):
@@ -2464,6 +4411,41 @@ def _run_ita_pipeline(
 
     if not transcripts:
         st.warning(f"No transcript data found in: {src_label}."); return
+
+    # ── Per-type subsetting ──────────────────────────────────────────
+    # Split loaded transcripts by source_types tag, apply limits, then
+    # recombine — gives the teacher independent control over each type.
+    if max_reflections is not None or max_interviews is not None:
+        refs = [t for t in transcripts if "reflections" in t.get("source_types", [])]
+        ints = [t for t in transcripts if "interview"   in t.get("source_types", [])]
+        others = [t for t in transcripts
+                  if "reflections" not in t.get("source_types", [])
+                  and "interview"  not in t.get("source_types", [])]
+        if max_reflections is not None:
+            refs = refs[:max_reflections]
+        if max_interviews is not None:
+            ints = ints[:max_interviews]
+        transcripts = refs + ints + others
+        st.caption(
+            f"Using {len(refs)} reflection(s) + {len(ints)} interview(s)"
+            + (f" + {len(others)} other(s)" if others else "") + "."
+        )
+    elif max_transcripts and len(transcripts) > max_transcripts:
+        # Legacy path
+        transcripts = transcripts[:max_transcripts]
+        st.caption(f"Using first {max_transcripts} text(s).")
+
+    # Apply custom prompts by patching module-level variables before pipeline runs
+    import core.analytics.llm.ita_pipeline as _ita_mod
+    _orig_sys = getattr(_ita_mod, "SYSTEM_PROMPT", None)
+    _orig_p2  = getattr(_ita_mod, "_PHASE2_PROMPT", None)
+    _orig_p3  = getattr(_ita_mod, "_PHASE3_PROMPT", None)
+    if custom_sys_prompt and custom_sys_prompt != _ITA_SYSTEM_PROMPT:
+        _ita_mod.SYSTEM_PROMPT = custom_sys_prompt
+    if custom_p2_prompt and custom_p2_prompt != _PHASE2_PROMPT:
+        _ita_mod._PHASE2_PROMPT = custom_p2_prompt
+    if custom_p3_prompt and custom_p3_prompt != _PHASE3_PROMPT:
+        _ita_mod._PHASE3_PROMPT = custom_p3_prompt
 
     st.info(f"Loaded {len(transcripts)} participant(s). "
             f"Running {len(models)} model(s).")
@@ -2481,27 +4463,101 @@ def _run_ita_pipeline(
             chunks = run_phase1(transcripts, chunk_size=2500)
             s.update(label=f"Phase 1 ✅ — {len(chunks)} chunks", state="complete")
 
+        with st.expander(
+            f"🧩 AI Coding Process Insights — Phase 1: Chunking  "
+            f"({len(chunks)} chunk(s) created)",
+            expanded=False,
+        ):
+            st.caption(
+                "The AI splits each participant's text into overlapping chunks "
+                "so that long responses are not cut off mid-thought. "
+                f"**{len(chunks)} chunk(s)** were created from "
+                f"{len(transcripts)} participant text(s)."
+            )
+
         with st.status(f"Phase 2 — Generating codes (T={temperature})...",
                        expanded=False) as s:
             p2 = run_phase2(chunks, model, temperature,
                             n_codes=n_codes, run_id=run_id)
-            s.update(label=f"Phase 2 ✅ — {p2.get('n_codes_raw',0)} codes",
-                     state="complete")
+            n_codes_raw = p2.get("n_codes_raw", 0)
+            _p2_ok = n_codes_raw > 0
+            s.update(
+                label=f"Phase 2 {'✅' if _p2_ok else '⚠️'} — {n_codes_raw} codes",
+                state="complete" if _p2_ok else "error",
+            )
 
-        with st.status("Phase 2b — Deduplicating...", expanded=False) as s:
+        with st.expander(
+            f"🧩 AI Coding Process Insights — Phase 2: Code Extraction  "
+            f"({'✅ ' + str(n_codes_raw) + ' codes extracted' if _p2_ok else '⚠️ 0 codes — see details below'})",
+            expanded=not _p2_ok,
+        ):
+            st.caption(
+                "The AI reads each chunk and extracts short descriptive labels "
+                "called **codes** — concise phrases that capture a key idea in "
+                "the text (e.g. 'uncertainty about AI decisions'). "
+                f"**{n_codes_raw} code(s)** were extracted across all chunks."
+            )
+            if _p2_ok:
+                st.caption("Sample codes (first 3):")
+                st.json(p2.get("codes", [])[:3])
+            else:
+                st.warning("No codes were extracted. Details below.")
+                _p2_errors = p2.get("errors")
+                if _p2_errors:
+                    st.caption("Errors captured inside the pipeline:")
+                    st.json(_p2_errors) if isinstance(_p2_errors, (list, dict)) \
+                        else st.code(str(_p2_errors))
+                else:
+                    st.caption("No error details stored — check ita_pipeline.run_phase2().")
+
+        with st.status("Phase 2b — Deduplicating codes...", expanded=False) as s:
             dedup = run_phase2_dedup(p2["codes"], threshold=dedup_threshold)
             save_phase_result(run_id, 2, {**p2, "dedup": dedup})
-            s.update(label=f"Phase 2b ✅ — {dedup['n_before']}→{dedup['n_after']} codes",
-                     state="complete")
+            s.update(
+                label=f"Phase 2b ✅ — "
+                      f"{dedup['n_before']}→{dedup['n_after']} codes "
+                      f"({dedup.get('n_removed', 0)} removed)",
+                state="complete",
+            )
 
-        with st.status(f"Phase 3 — Searching themes...", expanded=False) as s:
+        with st.expander(
+            f"🧩 AI Coding Process Insights — Phase 2b: Deduplication  "
+            f"({dedup.get('n_before', 0)} → {dedup.get('n_after', 0)} codes, "
+            f"{dedup.get('n_removed', 0)} removed)",
+            expanded=False,
+        ):
+            st.caption(
+                "Different chunks often produce very similar codes. "
+                "Deduplication uses semantic similarity to merge near-duplicates, "
+                "keeping the code list clean before themes are built. "
+                f"Threshold used: **{dedup_threshold}** "
+                "(higher = stricter, keeps more codes)."
+            )
+
+        with st.status("Phase 3 — Identifying themes...", expanded=False) as s:
             p3 = run_phase3(dedup["codes_dedup"], model, temperature,
                             n_themes=n_themes, run_id=run_id)
             if p3.get("error"):
                 s.update(label=f"Phase 3 ❌ — {p3['error']}", state="error")
             else:
-                s.update(label=f"Phase 3 ✅ — {p3['n_themes']} themes",
-                         state="complete")
+                s.update(
+                    label=f"Phase 3 ✅ — {p3['n_themes']} themes identified",
+                    state="complete",
+                )
+
+        with st.expander(
+            f"🧩 AI Coding Process Insights — Phase 3: Theme Identification  "
+            f"({'❌ ' + str(p3.get('error','')) if p3.get('error') else '✅ ' + str(p3.get('n_themes', 0)) + ' theme(s) identified'})",
+            expanded=bool(p3.get("error")),
+        ):
+            st.caption(
+                "The AI groups related codes into broader **themes** — "
+                "recurring patterns that cut across multiple participants and chunks. "
+                f"**{p3.get('n_themes', 0)} theme(s)** were identified from "
+                f"{dedup.get('n_after', 0)} deduplicated codes."
+            )
+            if p3.get("error"):
+                st.error(p3["error"])
 
         if p3.get("error"):
             continue
@@ -2512,14 +4568,46 @@ def _run_ita_pipeline(
             if p4.get("error"):
                 s.update(label=f"Phase 4 ❌ — {p4['error']}", state="error")
             else:
-                s.update(label=f"Phase 4 ✅ — {p4['n_themes']} themes at T=1.0",
-                         state="complete")
+                s.update(
+                    label=f"Phase 4 ✅ — {p4['n_themes']} themes at T=1.0 "
+                          f"(stability check)",
+                    state="complete",
+                )
+
+        with st.expander(
+            f"🧩 AI Coding Process Insights — Phase 4: Theme Stability Check  "
+            f"({'❌ error' if p4.get('error') else str(p4.get('n_themes', 0)) + ' theme(s) at T=1.0'})",
+            expanded=False,
+        ):
+            st.caption(
+                "The same theme search is re-run at **Temperature = 1.0** "
+                "(more creative/varied). If the themes found here closely match "
+                "Phase 3 (agreement > 0.80), it confirms the themes are robust "
+                "and not just an artefact of one particular run. "
+                "You can compare these in Step 6 → Phase 4 Review."
+            )
+            if p4.get("error"):
+                st.error(p4["error"])
 
         with st.status("Phase 5 — Defining themes...", expanded=False) as s:
             p5 = run_phase5(p3["themes"], dedup["codes_dedup"], model,
                             temperature, run_id=run_id)
-            s.update(label=f"Phase 5 ✅ — {len(p5.get('themes_defined',[]))} themes defined",
-                     state="complete")
+            n_defined = len(p5.get("themes_defined", []))
+            s.update(
+                label=f"Phase 5 ✅ — {n_defined} themes defined with descriptions",
+                state="complete",
+            )
+
+        with st.expander(
+            f"🧩 AI Coding Process Insights — Phase 5: Theme Definition  "
+            f"({n_defined} theme(s) defined)",
+            expanded=False,
+        ):
+            st.caption(
+                "Each theme is given a formal name, a one-paragraph description, "
+                "and a list of the supporting codes that belong to it. "
+                "These definitions form the basis of the final report."
+            )
 
         with st.status("Phase 6 — Writing report...", expanded=False) as s:
             p6 = run_phase6(p5["themes_defined"], dedup["codes_dedup"],
@@ -2527,11 +4615,40 @@ def _run_ita_pipeline(
             if p6.get("error"):
                 s.update(label=f"Phase 6 ❌ — {p6['error']}", state="error")
             else:
-                s.update(label=f"Phase 6 ✅ — {len(p6.get('report_text',''))} chars",
-                         state="complete")
+                n_chars = len(p6.get("report_text", ""))
+                s.update(
+                    label=f"Phase 6 ✅ — Report written ({n_chars:,} characters)",
+                    state="complete",
+                )
+
+        with st.expander(
+            f"🧩 AI Coding Process Insights — Phase 6: Report Generation  "
+            f"({'❌ error' if p6.get('error') else str(len(p6.get('report_text',''))) + ' characters written'})",
+            expanded=False,
+        ):
+            st.caption(
+                "The AI synthesises all themes and supporting evidence into a "
+                "structured qualitative research report suitable for inclusion "
+                "in a study writeup. The full report is available in Step 6 → Report."
+            )
+            if p6.get("error"):
+                st.error(p6["error"])
 
         st.session_state["ita_last_run_id"] = run_id
-        st.success("ITA complete — view results in Step 6 / Results tab.")
+        st.session_state["ita_results_run_default"] = run_id
+
+    # ── Pipeline complete — use flag to navigate, not direct key write ──
+    st.success("✅ ITA complete!")
+    st.session_state["_ita_goto_step6"] = True
+    if st.button("➡ View Results (Step 6)", type="primary",
+                 key="ita_goto_results"):
+        st.rerun()
+
+    # Restore original module-level prompts
+    if _orig_sys is not None:
+        _ita_mod.SYSTEM_PROMPT = _orig_sys
+    if _orig_p2 is not None:
+        _ita_mod._PHASE2_PROMPT = _orig_p2
 
 
 # -----------------------------------------------------------------------
@@ -2655,12 +4772,40 @@ def _render_dta_section(username: str, canonical_df: pd.DataFrame) -> None:
 
 
 def _render_dta_run_panel(username: str, canonical_df: pd.DataFrame) -> None:
+    # ── Session-state defaults for DTA prompts ─────────────────────────
+    _dta_prompt_defaults = {
+        "dta_sys_prompt":   DTA_SYSTEM_PROMPT,
+        "dta_sys_saved":    DTA_SYSTEM_PROMPT,
+        "dta_p2_prompt":    _DTA_PHASE2_PROMPT,
+        "dta_p2_saved":     _DTA_PHASE2_PROMPT,
+        "dta_lo_prompt":    _DTA_LO_PROMPT,
+        "dta_lo_saved":     _DTA_LO_PROMPT,
+        "dta_p5_prompt":    _DTA_PHASE5_PROMPT,
+        "dta_p5_saved":     _DTA_PHASE5_PROMPT,
+    }
+    for _k, _d in _dta_prompt_defaults.items():
+        if _k not in st.session_state:
+            st.session_state[_k] = _d
+    # Reset flags — applied before widgets render
+    for _flag, _key, _default in [
+        ("_dta_reset_sys", "dta_sys_prompt", DTA_SYSTEM_PROMPT),
+        ("_dta_reset_sys", "dta_sys_saved",  DTA_SYSTEM_PROMPT),
+        ("_dta_reset_p2",  "dta_p2_prompt",  _DTA_PHASE2_PROMPT),
+        ("_dta_reset_p2",  "dta_p2_saved",   _DTA_PHASE2_PROMPT),
+        ("_dta_reset_lo",  "dta_lo_prompt",  _DTA_LO_PROMPT),
+        ("_dta_reset_lo",  "dta_lo_saved",   _DTA_LO_PROMPT),
+        ("_dta_reset_p5",  "dta_p5_prompt",  _DTA_PHASE5_PROMPT),
+        ("_dta_reset_p5",  "dta_p5_saved",   _DTA_PHASE5_PROMPT),
+    ]:
+        if st.session_state.pop(_flag, False):
+            st.session_state[_key] = _default
+
     col1, col2 = st.columns(2)
     with col1:
         _avail = get_available_models(check_keys=True)
         st.markdown("**Models:**")
         dta_models = []
-        mc1, mc2, mc3 = st.columns(3)
+        mc1, mc2, mc3, mc4 = st.columns(4)
         if mc1.checkbox("Claude", value=_avail.get("claude", False),
                         disabled=not _avail.get("claude", False), key="dta_claude"):
             dta_models.append("claude")
@@ -2670,6 +4815,9 @@ def _render_dta_run_panel(username: str, canonical_df: pd.DataFrame) -> None:
         if mc3.checkbox("GPT", value=False,
                         disabled=not _avail.get("gpt", False), key="dta_gpt"):
             dta_models.append("gpt")
+        if mc4.checkbox("Groq (free ✅)", value=_avail.get("groq", False),
+                        disabled=not _avail.get("groq", False), key="dta_groq"):
+            dta_models.append("groq")
     with col2:
         dta_temp = st.slider("Temperature", 0.0, 1.0, 0.0, 0.1,
                              format="%.1f", key="dta_temp")
@@ -2716,6 +4864,116 @@ def _render_dta_run_panel(username: str, canonical_df: pd.DataFrame) -> None:
         st.warning("Select at least one data source.")
         return
 
+    # ── Per-type text selection ───────────────────────────────────────
+    st.divider()
+    st.markdown("**How many texts to include in this run?**")
+    st.caption(
+        "Showing what is currently available. "
+        "Use smaller numbers to test with a paid model before committing to a full run — "
+        "even 2 reflections + 1 interview is enough to verify the pipeline and output quality."
+    )
+
+    _dta_counts = _count_available_sources()
+    n_dta_avail_ref = _dta_counts["reflections"]
+    n_dta_avail_int = _dta_counts["interviews"]
+
+    dc1, dc2 = st.columns(2)
+    dc1.metric("Reflections available", n_dta_avail_ref)
+    dc2.metric("Interviews available",  n_dta_avail_int)
+
+    di1, di2 = st.columns(2)
+    dta_n_ref = di1.number_input(
+        "Reflections to include",
+        min_value=0,
+        max_value=max(n_dta_avail_ref, 1),
+        value=min(int(st.session_state.get("dta_max_ref", 2)), n_dta_avail_ref),
+        step=1,
+        key="dta_max_ref",
+        help=f"{n_dta_avail_ref} available  ·  0 = skip  ·  {n_dta_avail_ref} = use all",
+    )
+    dta_n_int = di2.number_input(
+        "Interviews to include",
+        min_value=0,
+        max_value=max(n_dta_avail_int, 1),
+        value=min(int(st.session_state.get("dta_max_int", 1)), max(n_dta_avail_int, 1)),
+        step=1,
+        key="dta_max_int",
+        help=f"{n_dta_avail_int} available  ·  0 = skip  ·  {n_dta_avail_int} = use all",
+    )
+    n_dta_total = int(dta_n_ref) + int(dta_n_int)
+
+    # ── Cost estimates ────────────────────────────────────────────────
+    st.divider()
+    est_dta = _dta_cost_estimate(max(n_dta_total, 1), len(dta_groups), dta_models)
+    est_lo  = _dta_cost_estimate(max(n_dta_total, 1), len(_DTA_LO), dta_models)
+
+    st.info(
+        f"💰 **Estimated cost — Run DTA** "
+        f"({int(dta_n_ref)} reflection(s) + {int(dta_n_int)} interview(s) × "
+        f"{len(dta_groups)} construct(s)): " + "  ·  ".join(est_dta)
+    )
+    st.info(
+        f"💰 **Estimated cost — Run LO Analysis** "
+        f"({n_dta_total} text(s) × {len(_DTA_LO)} learning objective(s)): "
+        + "  ·  ".join(est_lo)
+    )
+
+    if n_dta_total == 0:
+        st.warning("Set at least one reflection or interview above.")
+        return
+
+    # ── Review & Edit Prompts ─────────────────────────────────────────
+    with st.expander("🔍 Review & edit prompts (optional)", expanded=False):
+        st.caption(
+            "These are the exact instructions sent to the AI for each phase. "
+            "They are pre-filled with research-validated defaults. "
+            "Edit to adjust for your cohort's language, age, or research focus. "
+            "**Save** applies your version to the next run. "
+            "**Restore** resets to the default."
+        )
+
+        def _dta_prompt_widget(label, help_text, sess_key, saved_key, reset_flag,
+                               default, height=160):
+            modified = st.session_state.get(sess_key, default) != st.session_state.get(saved_key, default)
+            st.markdown(f"**{label}**")
+            st.caption(help_text)
+            if modified:
+                st.info("✏️ Unsaved changes — click Save to apply.")
+            st.text_area(label, key=sess_key, height=height, label_visibility="collapsed")
+            c1, c2, _ = st.columns([1, 1.4, 4])
+            if c1.button("💾 Save", key=f"dta_save_{sess_key}"):
+                st.session_state[saved_key] = st.session_state[sess_key]
+                st.success("Saved.")
+            if c2.button("↺ Restore", key=f"dta_restore_{sess_key}"):
+                st.session_state[reset_flag] = True
+                st.rerun()
+            st.divider()
+
+        _dta_prompt_widget(
+            "System prompt",
+            "Defines the AI's role and analysis approach. Injected into every DTA phase call.",
+            "dta_sys_prompt", "dta_sys_saved", "_dta_reset_sys", DTA_SYSTEM_PROMPT, height=150,
+        )
+        _dta_prompt_widget(
+            "Phase 2 prompt (construct coding)",
+            "Sent once per participant × construct. "
+            "Must keep `{participant_id}`, `{construct_name}`, `{definition}`, "
+            "`{analytic_focus}`, `{indicators}`, `{text}`.",
+            "dta_p2_prompt", "dta_p2_saved", "_dta_reset_p2", _DTA_PHASE2_PROMPT, height=280,
+        )
+        _dta_prompt_widget(
+            "Learning Objectives prompt",
+            "Sent once per participant × module × LO. "
+            "Must keep `{participant_id}`, `{module_id}`, `{module_title}`, "
+            "`{lo_index}`, `{lo_text}`, `{indicators}`, `{text}`.",
+            "dta_lo_prompt", "dta_lo_saved", "_dta_reset_lo", _DTA_LO_PROMPT, height=240,
+        )
+        _dta_prompt_widget(
+            "Phase 5 prompt (narrative summary)",
+            "Sent once per run to generate the academic summary. Must keep `{table_text}`.",
+            "dta_p5_prompt", "dta_p5_saved", "_dta_reset_p5", _DTA_PHASE5_PROMPT, height=180,
+        )
+
     col_r, col_lo = st.columns(2)
     run_dta = col_r.button("▶ Run DTA",         key="dta_run_btn", type="primary")
     run_lo  = col_lo.button("▶ Run LO Analysis", key="lo_run_btn")
@@ -2726,14 +4984,29 @@ def _render_dta_run_panel(username: str, canonical_df: pd.DataFrame) -> None:
             models=dta_models, temperature=dta_temp,
             construct_groups=dta_groups,
             show_stream=st.session_state.get("dta_show_stream", False),
+            max_reflections=int(dta_n_ref),
+            max_interviews=int(dta_n_int),
+            custom_sys_prompt=st.session_state.get("dta_sys_saved"),
+            custom_p2_prompt=st.session_state.get("dta_p2_saved"),
+            custom_p5_prompt=st.session_state.get("dta_p5_saved"),
         )
     if run_lo:
-        _execute_lo_run(username=username, models=dta_models, temperature=dta_temp)
+        _execute_lo_run(
+            username=username, models=dta_models, temperature=dta_temp,
+            max_reflections=int(dta_n_ref), max_interviews=int(dta_n_int),
+            custom_sys_prompt=st.session_state.get("dta_sys_saved"),
+            custom_lo_prompt=st.session_state.get("dta_lo_saved"),
+        )
 
 
 def _execute_dta_run(username, sources, per_run_files,
                      models, temperature, construct_groups,
-                     show_stream=False):
+                     show_stream=False,
+                     max_reflections=None,
+                     max_interviews=None,
+                     custom_sys_prompt=None,
+                     custom_p2_prompt=None,
+                     custom_p5_prompt=None):
     src_label = " + ".join(sources)
     with st.spinner(f"Loading data from: {src_label}..."):
         try:
@@ -2743,6 +5016,23 @@ def _execute_dta_run(username, sources, per_run_files,
 
     if not transcripts:
         st.warning(f"No transcript data found in: {src_label}."); return
+
+    # Per-type subsetting
+    if max_reflections is not None or max_interviews is not None:
+        refs   = [t for t in transcripts if "reflections" in t.get("source_types", [])]
+        ints   = [t for t in transcripts if "interview"   in t.get("source_types", [])]
+        others = [t for t in transcripts
+                  if "reflections" not in t.get("source_types", [])
+                  and "interview"  not in t.get("source_types", [])]
+        if max_reflections is not None:
+            refs = refs[:max_reflections]
+        if max_interviews is not None:
+            ints = ints[:max_interviews]
+        transcripts = refs + ints + others
+        st.caption(
+            f"Using {len(refs)} reflection(s) + {len(ints)} interview(s)"
+            + (f" + {len(others)} other(s)" if others else "") + "."
+        )
 
     constructs_to_run = {k: v for k, v in _DTA_CODEBOOK.items()
                          if v["group"] in construct_groups}
@@ -2754,10 +5044,14 @@ def _execute_dta_run(username, sources, per_run_files,
     import json as _j
     from datetime import datetime as _dt
 
-    try:
-        sys_p = _ITA_SYSTEM_PROMPT
-    except Exception:
-        sys_p = "You are a qualitative research assistant."
+    import core.analytics.llm.dta_pipeline as _dta_mod
+    if custom_sys_prompt and custom_sys_prompt != DTA_SYSTEM_PROMPT:
+        _dta_mod.DTA_SYSTEM_PROMPT = custom_sys_prompt
+    if custom_p2_prompt and custom_p2_prompt != _DTA_PHASE2_PROMPT:
+        _dta_mod._DTA_PHASE2_PROMPT = custom_p2_prompt
+    if custom_p5_prompt and custom_p5_prompt != _DTA_PHASE5_PROMPT:
+        _dta_mod._DTA_PHASE5_PROMPT = custom_p5_prompt
+    sys_p = custom_sys_prompt or DTA_SYSTEM_PROMPT
 
     for model in models:
         st.markdown(f"---\n#### {_llm_display_name(model)}")
@@ -2944,7 +5238,10 @@ def _execute_dta_run(username, sources, per_run_files,
         st.success("DTA complete — view results in the Results tab.")
 
 
-def _execute_lo_run(username, models, temperature):
+def _execute_lo_run(username, models, temperature,
+                    max_reflections=None, max_interviews=None,
+                    custom_sys_prompt=None,
+                    custom_lo_prompt=None):
     import sqlite3 as _sq3, re as _re3
     from pathlib import Path as _P3
     db3 = next((p/"responses.db" for p in _P3(__file__).resolve().parents
@@ -2965,6 +5262,12 @@ def _execute_lo_run(username, models, temperature):
             lo_trans.append({"participant_id": uid,
                              "module_id": f"module_{m.group(1)}",
                              "content": str(rval)})
+    if not lo_trans: st.warning("No module reflection notes found."); return
+
+    # Apply limit — LO analysis uses reflections only
+    if max_reflections is not None and max_reflections < len(lo_trans):
+        lo_trans = lo_trans[:max_reflections]
+        st.caption(f"Using first {max_reflections} participant-module reflection(s).")
     if not lo_trans: st.warning("No module reflection notes found."); return
     st.info(f"{len(lo_trans)} participant-module combinations.")
     for model in models:
@@ -3273,6 +5576,7 @@ def _render_report_tab(
             "iv. LLM Analysis",
             "v. Competency Progression",
             "vi. Full Programme Report",
+            "vii. Instruments & References",
         ],
         horizontal=True,
         key="report_section_radio",
@@ -3283,7 +5587,8 @@ def _render_report_tab(
         "iii. IRT Analysis":         ("#009E73", "#E6F7F1"),
         "iv. LLM Analysis":          ("#CC79A7", "#F9EEF5"),
         "v. Competency Progression": ("#888888", "#F0F0F0"),
-        "vi. Full Programme Report": ("#333333", "#F5F5F5"),
+        "vi. Full Programme Report":       ("#333333", "#F5F5F5"),
+        "vii. Instruments & References":   ("#56B4E9", "#E8F4FB"),
     }
     _rc, _rbg = _RS_COLORS.get(rep_section, ("#333","#F8F8F8"))
     st.markdown(
@@ -3307,18 +5612,183 @@ def _render_report_tab(
         _report_llm()
 
     elif rep_section == "v. Competency Progression":
-        st.info(
-            "🔧 Competency Progression Index is under development. "
-            "This section will provide composite index scores per student "
-            "combining misconception improvement, conceptual gain, and MCQ scores. "
-            "Reports will be available once the index is implemented."
-        )
+        _report_cpi(canonical_df)
 
     elif rep_section == "vi. Full Programme Report":
         _report_full_programme(
             canonical_df, demographics_df, cohort_map, username
         )
 
+    elif rep_section == "vii. Instruments & References":
+        _report_instruments_references()
+
+
+
+# -----------------------------------------------------------------------
+# vii. Instruments & References
+# -----------------------------------------------------------------------
+
+def _report_instruments_references() -> None:
+    """Instruments used and full references for Basics4AI scales."""
+    st.markdown("### vii. Instruments & References")
+    st.caption(
+        "Full citations for all adapted instruments used in the Basics4AI "
+        "programme evaluation. Cite these sources when reporting survey results."
+    )
+
+    # ── Instruments overview ─────────────────────────────────────────
+    with st.expander("📋 Instruments used in this study", expanded=True):
+        st.markdown("""
+**SCCCES — Situational Conceptual Change Cognitive Engagement Scale**
+Measures learners' cognitive engagement with instructional messaging across
+seven constructs: Engagement with Task, Effort & Persistence, Experience of Flow,
+Coherency, Plausibility, Credibility, and Comprehensibility of Messaging,
+Attention, Culture, and Personal Relevance. Likert scale 1–4.
+Items Q9_1, Q9_2, Q10_1, Q10_2 are reverse-scored (5−x) before computing construct means.
+
+---
+
+**SIMS — Situational Motivation Scale**
+Measures motivation type in four constructs: Intrinsic Motivation, Identified
+Regulation, External Regulation, and Amotivation. Likert scale 1–4.
+Items Q4_1–Q4_4 (External Regulation) and Q5_1–Q5_3 (Amotivation) are
+reverse-scored so that all four constructs read in the same direction:
+**higher mean = better self-determined motivation**.
+
+---
+
+**AIM-F — AI Misconceptions Framework (adapted)**
+8-item True/False and Yes/No assessment measuring common misconceptions
+about AI systems (learning autonomy, emotions, anthropomorphism, etc.).
+Source: Basics4AI programme instrument.
+
+---
+
+**AI-CI — AI Conceptual Inventory (20-item)**
+MCQ assessment of AI conceptual understanding across classification,
+decision trees, supervised/unsupervised learning, bias, and prediction.
+See Appendix 1 of the published instrument for full item listings.
+        """)
+
+    st.divider()
+
+    # ── References ───────────────────────────────────────────────────
+    st.markdown("#### References")
+
+    _REFS = [
+        {
+            "tag": "SIMS",
+            "color": "#E6F3FB",
+            "border": "#0077BB",
+            "citation": (
+                "Guay, F., Vallerand, R. J., & Blanchard, C. (2000). "
+                "On the Assessment of Situational Intrinsic and Extrinsic Motivation: "
+                "The Situational Motivation Scale (SIMS). "
+                "*Motivation and Emotion, 24*(3), 175–213. "
+                "https://doi.org/10.1023/a:1005614228250"
+            ),
+            "note": "Adapted for Basics4AI: External Regulation and Amotivation items reverse-scored.",
+        },
+        {
+            "tag": "SCES",
+            "color": "#E6F7F1",
+            "border": "#009E73",
+            "citation": (
+                "Rotgans, J. I., & Schmidt, H. G. (2011). "
+                "Cognitive engagement in the problem-based learning classroom. "
+                "*Advances in Health Sciences Education, 16*(4), 465–479. "
+                "https://doi.org/10.1007/s10459-011-9272-9"
+            ),
+            "note": "Engagement with Task, Effort & Persistence, and Experience of Flow subscales.",
+        },
+        {
+            "tag": "CCCES",
+            "color": "#F9EEF5",
+            "border": "#CC79A7",
+            "citation": (
+                "Heddy, B. C., Taasoobshirazi, G., Chancey, J. B., & Danielson, R. W. (2018). "
+                "Developing and Validating a Conceptual Change Cognitive Engagement Instrument. "
+                "*Frontiers in Education, 3*(43), 1–9. "
+                "https://doi.org/10.3389/feduc.2018.00043"
+            ),
+            "note": (
+                "Coherency, Plausibility, Credibility, Comprehensibility of Messaging, "
+                "Attention, Culture, and Personal Relevance subscales."
+            ),
+        },
+        {
+            "tag": "IRT",
+            "color": "#E6F7F1",
+            "border": "#009E73",
+            "citation": (
+                "De Ayala, R. J. (2009). "
+                "*The Theory and Practice of Item Response Theory*. "
+                "Guilford Press."
+            ),
+            "note": "Rasch (1PL), 2PL, and GRM models used in the IRT Analysis tab.",
+        },
+        {
+            "tag": "ITA",
+            "color": "#FFF3E6",
+            "border": "#EE7733",
+            "citation": (
+                "Braun, V., & Clarke, V. (2006). "
+                "Using thematic analysis in psychology. "
+                "*Qualitative Research in Psychology, 3*(2), 77–101. "
+                "https://doi.org/10.1191/1478088706qp063oa"
+            ),
+            "note": "Inductive Thematic Analysis (ITA) methodology used in the LLM Analysis tab.",
+        },
+        {
+            "tag": "De Paoli",
+            "color": "#FFF3E6",
+            "border": "#EE7733",
+            "citation": (
+                "De Paoli, S. (2024). "
+                "Performing an inductive thematic analysis of semi-structured interviews "
+                "with a Large Language Model. "
+                "*Applied AI Letters, 5*(1), e129. "
+                "https://doi.org/10.1002/ail2.129"
+            ),
+            "note": "LLM-assisted ITA pipeline methodology (Phases 1–6) used in the LLM Analysis tab.",
+        },
+        {
+            "tag": "SDT",
+            "color": "#E6F3FB",
+            "border": "#0077BB",
+            "citation": (
+                "Deci, E. L., & Ryan, R. M. (1985). "
+                "*Intrinsic Motivation and Self-Determination in Human Behavior*. "
+                "Plenum. https://doi.org/10.1007/978-1-4899-2271-7"
+            ),
+            "note": "Self-Determination Theory underpinning SIMS construct interpretation.",
+        },
+    ]
+
+    for ref in _REFS:
+        _r_color  = ref["color"]
+        _r_border = ref["border"]
+        _r_tag    = ref["tag"]
+        _r_cite   = ref["citation"]
+        _r_note   = ref["note"]
+        st.markdown(
+            f"<div style='background:{_r_color};border-left:4px solid "
+            f"{_r_border};border-radius:6px;padding:0.5rem 1rem;"
+            f"margin:0.5rem 0;'>"
+            f"<span style='font-size:11px;font-weight:500;color:{_r_border}'>"
+            f"[{_r_tag}]</span><br>"
+            f"{_r_cite}<br>"
+            f"<span style='font-size:12px;color:#555;font-style:italic;'>"
+            f"↳ {_r_note}</span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    st.divider()
+    st.caption(
+        "To export this reference list to PDF, use the Full Programme Report "
+        "generator in section vi."
+    )
 
 # -----------------------------------------------------------------------
 # PDF builder — shared utility

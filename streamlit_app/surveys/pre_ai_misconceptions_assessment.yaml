@@ -5,7 +5,7 @@ version: 1.0
 
 module_id: global
 scope: pre
-title: Pre-Intervention AI Misconceptions
+title: "Pre-Intervention: What you know about AI already?"
 
 questions:
   - id: Q3_1

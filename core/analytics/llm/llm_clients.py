@@ -69,6 +69,7 @@ def _load_keys() -> Dict[str, Optional[str]]:
         "anthropic": os.environ.get("ANTHROPIC_API_KEY"),
         "gemini":    os.environ.get("GEMINI_API_KEY"),
         "openai":    os.environ.get("OPENAI_API_KEY"),
+        "groq":      os.environ.get("GROQ_API_KEY"),
     }
 
     # Step 2: fall back to st.secrets for any missing keys
@@ -77,8 +78,14 @@ def _load_keys() -> Dict[str, Optional[str]]:
         try:
             import streamlit as st
             secrets = st.secrets if hasattr(st, "secrets") else {}
+            key_map = {
+                "anthropic": "ANTHROPIC_API_KEY",
+                "gemini":    "GEMINI_API_KEY",
+                "openai":    "OPENAI_API_KEY",
+                "groq":      "GROQ_API_KEY",
+            }
             for k in missing:
-                env_key = f"{k.upper()}_API_KEY"
+                env_key = key_map[k]
                 if env_key in secrets:
                     keys[k] = secrets[env_key]
         except Exception:
@@ -303,6 +310,106 @@ def call_openai(
 
 
 # -----------------------------------------------------------------------
+# Groq (Llama 3.1 70B — free tier)
+# -----------------------------------------------------------------------
+
+def call_groq(
+    prompt: str,
+    system: str = "",
+    temperature: float = 0.3,
+    max_tokens: int = 4096,           # raised from 2000 — Llama descriptions are verbose
+    model_id: str = "llama-3.3-70b-versatile",
+) -> Dict[str, Any]:
+    """
+    Call Groq API (Llama 3.3 70B).
+
+    Free tier limits (as of 2025)
+    ------------------------------
+    - 100,000 tokens / day  (TPD)
+    - 6,000 tokens / minute (TPM)
+    If either limit is hit a 429 is returned. This function retries up to
+    3 times with exponential backoff before returning an error.
+
+    Design notes
+    ------------
+    - response_format=json_object is intentionally NOT used. It forces Llama
+      to produce valid JSON but ignores the schema in the prompt, causing it
+      to use arbitrary key names instead of pipeline-expected keys.
+    - max_tokens is set to 4096 (not 2000) because Llama generates verbose
+      descriptions; truncation at 2000 tokens produces invalid JSON.
+    - Markdown fences are stripped before returning.
+
+    Returns
+    -------
+    dict : {text, model, tokens_used, error}
+    """
+    import time
+
+    keys = _load_keys()
+    api_key = keys.get("groq")
+
+    if not api_key:
+        return _err(
+            "GROQ_API_KEY not found. Add it to .env or st.secrets.",
+            "groq"
+        )
+
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            from groq import Groq
+            client = Groq(api_key=api_key)
+
+            response = client.chat.completions.create(
+                model=model_id,
+                messages=messages,
+                temperature=float(temperature),
+                max_tokens=max_tokens,
+                # NO response_format — let prompt schema drive output
+            )
+
+            text   = response.choices[0].message.content.strip()
+            tokens = response.usage.total_tokens if response.usage else 0
+
+            # Strip markdown fences if present
+            if text.startswith("```"):
+                lines = text.splitlines()
+                inner = [l for l in lines[1:] if l.strip() != "```"]
+                text  = "\n".join(inner).strip()
+
+            return _ok(text, "groq", tokens)
+
+        except Exception as e:
+            err_str = str(e)
+
+            # 429 rate limit — wait and retry
+            if "429" in err_str and attempt < max_retries - 1:
+                # Parse suggested wait time from error if present
+                import re as _re
+                m = _re.search(r"try again in ([\d.]+)s", err_str)
+                wait = float(m.group(1)) + 2 if m else (10 * (attempt + 1))
+                wait = min(wait, 60)   # cap at 60s so UI doesn't appear frozen
+                time.sleep(wait)
+                continue
+
+            # Daily token limit (TPD) — not recoverable by waiting a few seconds
+            if "tokens per day" in err_str.lower() or "TPD" in err_str:
+                return _err(
+                    f"Groq daily token limit reached (100K tokens/day free tier). "
+                    f"Wait until tomorrow or upgrade at console.groq.com/settings/billing. "
+                    f"Full error: {err_str}",
+                    "groq"
+                )
+
+            return _err(f"Groq API error: {err_str}", "groq")
+
+
+# -----------------------------------------------------------------------
 # Unified dispatcher
 # -----------------------------------------------------------------------
 
@@ -311,12 +418,14 @@ _DEFAULT_MODELS = {
     "claude": "claude-sonnet-4-5",
     "gemini": "gemini-2.5-flash",
     "gpt":    "gpt-4o-mini",
+    "groq":   "llama-3.3-70b-versatile",
 }
 
 _DISPLAY_NAMES = {
     "claude": "Claude (Anthropic)",
     "gemini": "Gemini (Google)",
     "gpt":    "GPT (OpenAI)",
+    "groq":   "Llama 3.3 70B (Groq — free)",
 }
 
 
@@ -362,6 +471,8 @@ def call_model(
         return call_gemini(prompt, system, temperature, max_tokens, mid)
     elif model == "gpt":
         return call_openai(prompt, system, temperature, max_tokens, mid)
+    elif model == "groq":
+        return call_groq(prompt, system, temperature, max_tokens, mid)
 
 
 def get_available_models(check_keys: bool = True) -> Dict[str, bool]:
@@ -385,6 +496,7 @@ def get_available_models(check_keys: bool = True) -> Dict[str, bool]:
         "claude": bool(keys.get("anthropic")),
         "gemini": bool(keys.get("gemini")),
         "gpt":    bool(keys.get("openai")),
+        "groq":   bool(keys.get("groq")),
     }
 
 

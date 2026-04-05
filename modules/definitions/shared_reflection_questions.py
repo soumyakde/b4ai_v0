@@ -5,11 +5,11 @@ REFLECTION_QUESTIONS = [
     {
         "id": "conceptual_change",
         "text": (
-            "Think about what you knew about AI before this module and what you know now. What is one new thing about AI that you can explain now that you couldn’t explain before this module? Use an example from a game, activity, or video in this module to help explain your answer."),
+            "Think about what you knew about AI before this module and what you know now. What is the one new thing about AI that you know now and can explain that you couldn’t explain before this module? You may use an example to help explain your answer."),
     },
     {
         "id": "module_takeaway",
         "text": (
-            "In your own words, what did this module teach you about AI? Use examples from the games or activities to explain: What AI does or how it works, and why those examples helped you understand AI better. You can also share: Whether this felt easy or hard to understand, and if anything in this module reminded you of your own life, interests, or experiences."),
+            "Summarize in your own words, what did this module teach you about AI? What AI is or how it works? Did the concepts/activities in the module help you understand AI better? You can also share whether the module was easy or hard to understand? Did anything in this module remind you of anything you experienced before?"),
     },
 ]

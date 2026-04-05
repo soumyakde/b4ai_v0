@@ -5,17 +5,9 @@ version: 1.0
 module_id: global
 scope: baseline
 title: Demographics Survey
-description: Participant background and initial information (Pre-Event Rev 3)
+description: Participant background and initial information (Pre-Event Rev 4)
 
 questions:
-  - id: Q1_1
-    text: |
-      Activity Name: Demographics Survey
-      Write your first and last initials in the box.
-    type: text
-    system_date: true
-    required: true
-
   - id: Q2_1
     text: >
       Where are you attending this event now?

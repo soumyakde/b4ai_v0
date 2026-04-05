@@ -116,10 +116,26 @@ def _extract_text(file_obj, filename: str) -> str:
 
 
 def _infer_pid(filename: str) -> str:
-    """Derive participant ID from filename stem."""
+    """
+    Derive participant ID from filename stem.
+
+    Strips known programme/content suffixes iteratively until none remain,
+    so compound names like 'aa_ub_b4ai_transcript' resolve to 'aa_ub'
+    rather than stopping at 'aa_ub_b4ai' after a single pass.
+
+    Known suffixes stripped (case-insensitive):
+        _transcript, _b4ai, _basics4ai, _interview, _recording, _reflection
+    """
     stem = Path(filename).stem
-    # Remove common suffixes like _transcript, _b4ai, _interview
-    stem = re.sub(r"_(transcript|b4ai|interview|recording)$", "", stem, flags=re.I)
+    _SUFFIXES = re.compile(
+        r"_(transcript|b4ai|basics4ai|interview|recording|reflection)$",
+        flags=re.I,
+    )
+    while True:
+        new_stem = _SUFFIXES.sub("", stem)
+        if new_stem == stem:
+            break
+        stem = new_stem
     return stem.strip("_").replace(" ", "_")
 
 
@@ -203,27 +219,36 @@ def get_persistent_transcripts(
     source_type: Optional[str] = None,
     db_path: Optional[Path] = None,
 ) -> pd.DataFrame:
-    """Return all stored transcripts as a DataFrame."""
+    """
+    Return all stored transcripts as a DataFrame.
+
+    Includes char_count (length of content) without loading full text into
+    memory — safe to call for large transcript stores.
+    """
     init_transcript_table(db_path)
     conn = _get_ts_conn(db_path)
     if source_type:
         rows = conn.execute(
-            "SELECT id, participant_id, source_type, uploaded_by, uploaded_at "
+            "SELECT id, participant_id, source_type, uploaded_by, uploaded_at, "
+            "length(content) as char_count "
             "FROM transcripts WHERE source_type=? ORDER BY participant_id",
             (source_type,)
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT id, participant_id, source_type, uploaded_by, uploaded_at "
+            "SELECT id, participant_id, source_type, uploaded_by, uploaded_at, "
+            "length(content) as char_count "
             "FROM transcripts ORDER BY source_type, participant_id"
         ).fetchall()
     conn.close()
     if not rows:
         return pd.DataFrame(columns=[
-            "id","participant_id","source_type","uploaded_by","uploaded_at"
+            "id", "participant_id", "source_type",
+            "uploaded_by", "uploaded_at", "char_count"
         ])
     return pd.DataFrame(rows, columns=[
-        "id","participant_id","source_type","uploaded_by","uploaded_at"
+        "id", "participant_id", "source_type",
+        "uploaded_by", "uploaded_at", "char_count"
     ])
 
 
@@ -257,6 +282,63 @@ def delete_transcript(
         "DELETE FROM transcripts WHERE participant_id=? AND source_type=?",
         (participant_id, source_type)
     )
+    conn.commit()
+    conn.close()
+
+
+# -----------------------------------------------------------------------
+# Single-transcript save — called by admin_dashboard explicit ID mapping
+# -----------------------------------------------------------------------
+
+def save_transcript(
+    participant_id: str,
+    content: str,
+    source_type: str = "interview",
+    filename: str = "",
+    uploaded_by: str = "admin",
+    db_path: Optional[Path] = None,
+) -> None:
+    """
+    Save or update a single transcript with an explicitly supplied participant ID.
+
+    Called by the admin dashboard transcript upload panel, where the admin
+    maps each file to a participant ID manually.  Inserts a new row, or
+    updates the existing one if the (participant_id, source_type) pair
+    already exists.
+
+    Parameters
+    ----------
+    participant_id : str  — must match the student's username in responses.db
+    content        : str  — full plain-text transcript content
+    source_type    : str  — 'interview' (default) | 'reflection'
+    filename       : str  — original filename, stored for audit purposes
+    uploaded_by    : str  — username of the admin who uploaded the file
+    db_path        : Path | None — optional override for responses.db location
+    """
+    init_transcript_table(db_path)
+    conn = _get_ts_conn(db_path)
+    now  = datetime.utcnow().isoformat()
+
+    existing = conn.execute(
+        "SELECT id FROM transcripts WHERE participant_id=? AND source_type=?",
+        (participant_id, source_type)
+    ).fetchone()
+
+    if existing:
+        conn.execute(
+            """UPDATE transcripts
+               SET content=?, uploaded_by=?, uploaded_at=?
+               WHERE participant_id=? AND source_type=?""",
+            (content, uploaded_by, now, participant_id, source_type)
+        )
+    else:
+        conn.execute(
+            """INSERT INTO transcripts
+               (participant_id, source_type, content, uploaded_by, uploaded_at)
+               VALUES (?,?,?,?,?)""",
+            (participant_id, source_type, content, uploaded_by, now)
+        )
+
     conn.commit()
     conn.close()
 

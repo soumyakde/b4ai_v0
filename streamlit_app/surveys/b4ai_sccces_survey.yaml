@@ -8,17 +8,6 @@ scope: pre_post
 title: B4AI SCCCES Survey
 
 sections:
-  - name: Learner_Initials_w_date
-    questions:
-      - id: Q1_1
-        text: >
-          Module #1. Write your first name initial and
-          last name initial in the box.
-        type: text
-        placeholder: "Enter initials"
-        system_date: true
-        required: true
-
   - name: Engagement_with_task
     questions:
       - id: Q2_1

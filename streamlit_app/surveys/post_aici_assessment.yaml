@@ -5,7 +5,7 @@ version: 1.0
 
 module_id: global
 scope: post
-title: Post-AI Conceptual Inventory Assessment
+title: "Post-Intervention: How much you know about AI now?"
 description: Survey assessing understanding of basic AI concepts.
 
 questions:

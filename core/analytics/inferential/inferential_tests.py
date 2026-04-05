@@ -725,3 +725,145 @@ def run_repeated_measures(
         result["error"] = str(e)
 
     return result
+
+
+# -----------------------------------------------------------------------
+# Public function 4: run_bland_altman
+# -----------------------------------------------------------------------
+
+def run_bland_altman(
+    canonical_df: pd.DataFrame,
+    pre_instrument: str,
+    post_instrument: str,
+    use_pct: bool = True,
+) -> Dict[str, Any]:
+    """
+    Bland-Altman method agreement analysis for paired pre/post instruments.
+
+    Computes the mean difference (bias), SD of differences (random error),
+    and 95% limits of agreement for each paired observation.
+
+    Statistical method
+    ------------------
+    For each subject i with pre score A_i and post score B_i:
+
+        diff_i   = A_i - B_i            (pre minus post)
+        mean_i   = (A_i + B_i) / 2
+
+    Summary statistics:
+        d_bar = mean(diff_i)            <- systematic bias
+        s     = SD(diff_i, ddof=1)      <- random error
+        LoA   = d_bar +/- 2s            <- ~95% of individual differences
+
+    A Pearson correlation between diff_i and mean_i is computed to test
+    for proportional bias. If the correlation p-value < 0.05, the
+    measurement error grows with the size of the measurement; a log
+    transformation of raw scores is recommended before re-running.
+
+    Parameters
+    ----------
+    canonical_df : pd.DataFrame
+        Output of DatasetBuilder.build().
+    pre_instrument : str
+        DB instrument_name for the pre measure (e.g.
+        "precourse_pre_ai_misconceptions_assessment").
+    post_instrument : str
+        DB instrument_name for the post measure.
+    use_pct : bool
+        If True, use % correct (0-100) -- recommended for cross-instrument
+        comparability. If False, use raw sum scores.
+
+    Returns
+    -------
+    dict with keys:
+        pre_instrument, post_instrument, use_pct,
+        n_pairs,
+        mean_diff       -- d_bar (systematic bias; +ve = pre > post on average),
+        sd_diff         -- s (random error),
+        loa_lower       -- d_bar - 2s,
+        loa_upper       -- d_bar + 2s,
+        proportional_bias_r  -- Pearson r(diff, mean),
+        proportional_bias_p  -- p-value for that correlation,
+        proportional_bias    -- bool: True if p < 0.05 (consider log transform),
+        per_pair_df     -- pd.DataFrame with columns:
+                           user_id | pre | post | diff | mean_val
+        low_n_warning   -- bool: n < LOW_N_THRESHOLD,
+        error           -- str | None
+
+    Reference
+    ---------
+    Bland, J. M., & Altman, D. G. (1990). A note on the use of the
+    intraclass correlation coefficient in the evaluation of agreement
+    between two methods of measurement. Computers in Biology and
+    Medicine, 20(5), 337-340.
+    https://doi.org/10.1016/0010-4825(90)90013-F
+    """
+    result: Dict[str, Any] = {
+        "pre_instrument":  pre_instrument,
+        "post_instrument": post_instrument,
+        "use_pct":         use_pct,
+        "error":           None,
+        "per_pair_df":     None,
+    }
+
+    try:
+        get_fn = _get_user_pct_correct if use_pct else _get_user_scores
+        pre_scores  = get_fn(canonical_df, pre_instrument)
+        post_scores = get_fn(canonical_df, post_instrument)
+
+        # Inner join -- only subjects with both pre and post scores
+        paired = pd.DataFrame({
+            "pre":  pre_scores,
+            "post": post_scores,
+        }).dropna()
+
+        n = len(paired)
+
+        if n < 2:
+            result["error"] = (
+                f"Insufficient paired observations (n={n}). "
+                f"Need at least 2 subjects with both pre and post scores."
+            )
+            return result
+
+        # Per-pair statistics (Bland-Altman 1990)
+        diff     = paired["pre"] - paired["post"]        # A - B
+        mean_val = (paired["pre"] + paired["post"]) / 2  # (A + B) / 2
+
+        d_bar = float(diff.mean())
+        s     = float(diff.std(ddof=1))
+
+        result["n_pairs"]    = n
+        result["mean_diff"]  = round(d_bar, 4)
+        result["sd_diff"]    = round(s,     4)
+        result["loa_lower"]  = round(d_bar - 2 * s, 4)
+        result["loa_upper"]  = round(d_bar + 2 * s, 4)
+
+        # Proportional bias: Pearson r between differences and means.
+        # If significant (p < 0.05), error grows with measurement size.
+        if n >= 3:
+            r_val, r_p = stats.pearsonr(diff, mean_val)
+            result["proportional_bias_r"] = round(float(r_val), 4)
+            result["proportional_bias_p"] = round(float(r_p),   6)
+            result["proportional_bias"]   = bool(r_p < 0.05)
+        else:
+            result["proportional_bias_r"] = None
+            result["proportional_bias_p"] = None
+            result["proportional_bias"]   = False
+
+        # Per-pair table for dashboard display
+        per_pair = pd.DataFrame({
+            "user_id":  paired.index,
+            "pre":      paired["pre"].round(2).values,
+            "post":     paired["post"].round(2).values,
+            "diff":     diff.round(2).values,
+            "mean_val": mean_val.round(2).values,
+        })
+        result["per_pair_df"] = per_pair
+
+        result["low_n_warning"] = n < LOW_N_THRESHOLD
+
+    except Exception as e:
+        result["error"] = str(e)
+
+    return result

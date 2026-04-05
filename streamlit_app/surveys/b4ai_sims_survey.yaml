@@ -8,17 +8,6 @@ scope: pre_post
 title: B4AI SIMS Survey
 
 sections:
-  - name: Learner_Name
-    questions:
-      - id: Q1_1
-        text: >
-          Activity: Module 1 - Maze: Write your first name initial and
-          last name initial in the box.
-        type: text
-        placeholder: "Enter initials"
-        system_date: true
-        required: true
-
   - name: Intrinsic_motivation
     questions:
       - id: Q2_1

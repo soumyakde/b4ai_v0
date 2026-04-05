@@ -5,7 +5,7 @@ version: 1.0
 
 module_id: global
 scope: pre
-title: Pre-Intervention Conceptual Inventory Assessment
+title: "Pre-Intervention: How much you know about AI already?"
 description: Survey assessing understanding of basic AI concepts.
 
 questions:

@@ -5,14 +5,13 @@
 # ==========================================================
 
 import streamlit as st
-import json
-import random
 import yaml
 from pathlib import Path
 
 from modules.registry.module_registry import module_registry
 from core.progress_engine import get_completed_instruments
 from core.submission_engine import submit_instrument
+from utils.question_bank_loader import load_question_bank   # ← NEW
 
 
 # ==========================================================
@@ -121,46 +120,46 @@ def render(username):
 
 
 # ==========================================================
-# ✅ MCQ ASSESSMENT (UPDATED SIGNATURE)
+# ✅ MCQ ASSESSMENT
 # ==========================================================
 
 def render_content_mcq(assessment_def, assessment_key, username):
     """
-    Renders randomized MCQ assessment using JSON question bank.
+    Renders MCQ assessment using JSON question bank.
+
+    Question selection is governed by QUIZ_MODE in .env:
+      random   → random sample of num_questions (original behaviour)
+      research → fixed set for every student (see question_bank_loader.py)
+
+    The 'randomize' field in assessment_def is superseded by QUIZ_MODE.
     """
 
     st.subheader("Content Assessment")
 
     question_bank_path = assessment_def.get("question_bank_path")
     num_questions = assessment_def.get("num_questions", 10)
-    randomize = assessment_def.get("randomize", True)
 
     # --------------------------------------------------
-    # ✅ Load question bank
+    # ✅ Load and select questions (mode-aware)
+    # ONE call replaces: open() + json.load() + if/else random.sample()
     # --------------------------------------------------
 
     try:
-        with open(question_bank_path, "r", encoding="utf-8") as f:
-            question_bank = json.load(f)
+        questions = load_question_bank(
+            question_bank_path=question_bank_path,
+            module_id=MODULE_ID,
+            n=num_questions,
+        )
     except FileNotFoundError:
         st.error(f"Question bank file not found: {question_bank_path}")
         return
-
-    if not question_bank:
-        st.error("Question bank is empty.")
+    except ValueError as e:
+        st.error(str(e))
         return
 
-    # --------------------------------------------------
-    # ✅ Select questions
-    # --------------------------------------------------
-
-    if randomize:
-        questions = random.sample(
-            question_bank,
-            min(num_questions, len(question_bank))
-        )
-    else:
-        questions = question_bank[:num_questions]
+    if not questions:
+        st.error("No questions were loaded. Check the question bank file.")
+        return
 
     responses = {}
 
@@ -234,7 +233,7 @@ def render_content_mcq(assessment_def, assessment_key, username):
 
 
 # ==========================================================
-# ✅ REFLECTION RENDERER (NEW)
+# ✅ REFLECTION RENDERER
 # ==========================================================
 
 def render_reflection(assessment_def, assessment_key, username):

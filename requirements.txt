@@ -26,3 +26,4 @@ girth
 pdfplumber
 pypdf
 python-docx
+apscheduler

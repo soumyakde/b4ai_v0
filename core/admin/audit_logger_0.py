@@ -51,7 +51,6 @@ class AdminAction(Enum):
     CLEAR_CACHE      = "CLEAR_CACHE"
 
     LOGIN_LOCKOUT    = "LOGIN_LOCKOUT"        # ← NEW: recorded when lockout triggers
-    PASSWORD_RESET   = "PASSWORD_RESET"       # ← Admin-initiated password reset
 
     RUN_DIAGNOSTICS  = "RUN_DIAGNOSTICS"
 

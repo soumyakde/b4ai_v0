@@ -12,6 +12,10 @@ This module has:
 - No Streamlit
 - No resolver logic
 - No scoring logic
+
+NOTE: This file is intentionally unchanged for the quiz-mode feature.
+      Question bank files are JSON (content_dev/*.json), not YAML.
+      Question selection logic lives in utils/question_bank_loader.py.
 """
 
 import os

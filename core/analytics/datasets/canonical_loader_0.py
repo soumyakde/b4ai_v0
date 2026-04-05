@@ -269,14 +269,7 @@ def load_canonical_data(
     ValueError
         If DatasetBuilder detects schema or scoring issues.
     """
-    # Changed by Claude as part of migration: the below was working locally
-    # db_path = Path(db_path) if db_path else _DB_PATH
-    # Changed to:
-    if not db_path:
-        from core.db_utils import DB_PATH as _DB_PATH
     db_path = Path(db_path) if db_path else _DB_PATH
-    
-    # End of the above change
 
     if not db_path.exists():
         raise FileNotFoundError(f"responses.db not found at: {db_path}")

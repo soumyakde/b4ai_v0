@@ -24,9 +24,8 @@ if _ENV_SQLITE_PATH:
     DB_PATH = Path(_ENV_SQLITE_PATH)
 else:
     # Fall back to path relative to this file (works both locally and in Docker)
-    # DB_PATH = Path(__file__).resolve().parents[2] / "responses.db"
-    # One character change on the fallback line. Change parents[2] to parents[1], change to (yet to be checked):
-    DB_PATH = Path(__file__).resolve().parents[1] / "responses.db"
+    DB_PATH = Path(__file__).resolve().parents[2] / "responses.db"
+
 
 def get_connection(db_path: Path = None):
     """

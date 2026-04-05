@@ -1,21 +1,32 @@
 """
 streamlit_app/app.py
-Basics4AI — Minimal Authentication Portal
+Basics4AI — Authentication Portal
 Login → Student / Teacher / Admin dashboards
 
-Derived-state architecture.
-No JSON.
-No stored completion flags.
-All module resolution via registry.
+Changes v3:
+  - Overview diagram shown on every page (top-center)
+  - Super Admin gate: registrations are 'pending' until skde approves them
+  - Pending users see a friendly holding message instead of the dashboard
+
+Changes v4 (security pre-freeze):
+  - Login lockout: 3 failures in 5 min → 5-min timed lockout (DB-backed)
+  - Auto-backup scheduler started at module level (survives Streamlit reruns)
 """
 
 import os
 import sys
 from pathlib import Path
 
-# 1. SET ENVIRONMENT VARIABLES (Must be before rpy2 is imported)
+# 1. SET ENVIRONMENT VARIABLES (must be before rpy2 is imported)
 os.environ['R_HOME'] = r'C:\Program Files\R\R-4.5.2'
 os.environ['RPY2_CFFI_MODE'] = 'ABI'
+
+# Load .env file into os.environ (python-dotenv — safe no-op if file absent)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # 2. PATH SETUP
 root = Path(__file__).resolve().parents[1]
@@ -29,6 +40,16 @@ try:
 except Exception:
     r = None
     to_r = to_pd = None
+
+# 3b. Suppress sentence-transformers / HuggingFace loading noise
+import logging as _logging
+_logging.getLogger("transformers").setLevel(_logging.ERROR)
+_logging.getLogger("sentence_transformers").setLevel(_logging.ERROR)
+try:
+    import transformers as _tf
+    _tf.logging.set_verbosity_error()
+except Exception:
+    pass
 
 # 4. STREAMLIT & OTHER IMPORTS
 import streamlit as st
@@ -46,7 +67,35 @@ from auth.user_manager import (
     register_user,
     authenticate_user,
     get_user_role,
+    get_user_status,
+    is_super_admin,
+    seed_super_admin,
 )
+
+# ── NEW: Login security ───────────────────────────────────────────────────────
+from auth.login_security import (
+    init_login_attempts_table,
+    record_attempt,
+    is_locked_out,
+    get_lockout_remaining_seconds,
+)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ----------------------------------------------------------
+# AUTO-BACKUP SCHEDULER — module-level boot (runs once per process)
+# Module-level globals survive Streamlit reruns within the same process.
+# NEVER move this inside a render/dashboard function — it would restart
+# the scheduler on every user interaction.
+# ----------------------------------------------------------
+_AUTO_BACKUP_STARTED = False  # module-level flag — NOT session_state
+
+if not _AUTO_BACKUP_STARTED:
+    _AUTO_BACKUP_STARTED = True
+    try:
+        from core.admin.system_service import start_auto_backup_scheduler
+        start_auto_backup_scheduler()
+    except Exception:
+        pass  # APScheduler absent — manual backups still work
 
 # ----------------------------------------------------------
 # INITIALIZATION (ONCE)
@@ -58,6 +107,13 @@ if "modules_registered" not in st.session_state:
 # Ensure databases exist
 init_app_db()
 init_auth_db()
+
+# ── NEW: Ensure login_attempts table exists ───────────────────────────────────
+init_login_attempts_table()
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Seed super admin on first boot (idempotent — safe to call every run)
+seed_super_admin()
 
 # ----------------------------------------------------------
 # PAGE CONFIG
@@ -71,33 +127,82 @@ st.set_page_config(
 # ── Global CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* Left-align all dataframe cells */
 [data-testid="stDataFrame"] td,
 [data-testid="stDataFrame"] th { text-align: left !important; }
 </style>
 """, unsafe_allow_html=True)
 
+
 # ----------------------------------------------------------
-# REGISTRATION PAGE
+# HELPER: resolve asset paths
+# ----------------------------------------------------------
+def _asset(filename: str) -> Path | None:
+    candidates = [
+        Path(__file__).resolve().parent / "assets" / "images" / filename,
+        Path(__file__).resolve().parents[1] / "streamlit_app" / "assets" / "images" / filename,
+    ]
+    return next((p for p in candidates if p.exists()), None)
+
+
+# ----------------------------------------------------------
+# HEADER: logo + portal title (shown on every page)
+# ----------------------------------------------------------
+def _render_header():
+    logo_path = _asset("B4AI_Logo_trimmed.png")
+    col_logo, col_title = st.columns([1, 4])
+    with col_logo:
+        if logo_path:
+            st.image(str(logo_path), width=90)
+        else:
+            st.markdown("🤖")
+    with col_title:
+        st.markdown(
+            "<h1 style='margin-top:0.2rem; font-size:2.2rem; font-weight:800;"
+            " color:#0077BB; letter-spacing:-0.5px;'>Basics4AI Portal</h1>"
+            "<p style='margin:0; color:#555; font-size:0.95rem;'>"
+            "AI Literacy for Young Learners</p>",
+            unsafe_allow_html=True,
+        )
+    st.divider()
+
+    diagram_path = _asset("Basics4ai_Overview_diagram.png")
+    if diagram_path:
+        _, col_mid, _ = st.columns([0.5, 9, 0.5])
+        with col_mid:
+            st.image(
+                str(diagram_path),
+                caption="Basics4ai — Qual+Quant Hybrid Analysis Platform",
+                width="stretch",
+            )
+        st.divider()
+
+
+# ----------------------------------------------------------
+# REGISTRATION PAGE  (unchanged)
 # ----------------------------------------------------------
 def show_registration():
     st.markdown(
         "<h2 style='font-size:1.6rem;font-weight:700;'>Register</h2>",
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
+    )
+    st.info(
+        "⏳ After registration your account will be **pending approval** by the "
+        "system administrator. You will be able to log in once approved.",
+        icon="🔐",
     )
 
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
-    confirm = st.text_input("Confirm Password", type="password")
-    role = st.selectbox("Role", ["student", "teacher", "admin"])
+    confirm  = st.text_input("Confirm Password", type="password")
+    role     = st.selectbox("Role", ["student", "teacher", "admin"])
 
     cohort_id = None
     current_user_role = (
-        st.session_state.get("username") and get_user_role(st.session_state.get("username"))
+        st.session_state.get("username")
+        and get_user_role(st.session_state.get("username"))
     )
-
     cohort_list = user_service.get_all_cohorts()
-    if current_user_role in ("admin", "teacher") or current_user_role is None:
+    if current_user_role in ("admin", "teacher", "super_admin") or current_user_role is None:
         selected_cohort = st.selectbox("Assign Cohort (optional)", ["None"] + cohort_list)
         cohort_id = None if selected_cohort == "None" else selected_cohort
 
@@ -108,69 +213,129 @@ def show_registration():
         if password != confirm:
             st.error("Passwords do not match.")
             return
-
         try:
-            register_user(username.strip(), password, role=role, cohort_id=cohort_id)
-            st.success("Registration successful. Please login.")
+            register_user(
+                username.strip(),
+                password,
+                role=role,
+                cohort_id=cohort_id,
+                status="pending",
+            )
+            st.success(
+                "✅ Registration submitted! Your account is **pending approval**. "
+                "Please check back after the administrator has reviewed your request."
+            )
             st.session_state.mode = "login"
             st.rerun()
         except Exception as e:
-            st.error(str(e))
+            _emsg = str(e)
+            if "already exists" in _emsg.lower() or "unique" in _emsg.lower():
+                st.error(
+                    f"❌ **Username already taken.** "
+                    f"'{username.strip()}' is registered. "
+                    "Please choose a different username."
+                )
+            else:
+                st.error(_emsg)
 
 
 # ----------------------------------------------------------
-# LOGIN PAGE
+# LOGIN PAGE  ← MODIFIED for lockout
 # ----------------------------------------------------------
 def show_login():
     st.markdown(
         "<h2 style='font-size:1.6rem;font-weight:700;'>Login</h2>",
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
-
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
 
     if st.button("Login"):
-        if authenticate_user(username.strip(), password):
+        uname = username.strip()
+
+        # ── Step 1: Check lockout BEFORE attempting authentication ────────────
+        # Lockout is DB-backed — survives page refreshes and multiple tabs.
+        if is_locked_out(uname):
+            remaining = get_lockout_remaining_seconds(uname)
+            minutes   = remaining // 60
+            seconds   = remaining % 60
+            st.error(
+                f"🔒 Account temporarily locked after too many failed attempts. "
+                f"Please try again in **{minutes}m {seconds}s**."
+            )
+            return
+        # ─────────────────────────────────────────────────────────────────────
+
+        if authenticate_user(uname, password):
+
+            # ── Step 2a: Record successful attempt ───────────────────────────
+            record_attempt(uname, success=True)
+            # ─────────────────────────────────────────────────────────────────
+
+            status = get_user_status(uname)
+            if status == "pending":
+                st.warning(
+                    "⏳ Your account is **pending approval** by the administrator. "
+                    "You will receive access once it is reviewed."
+                )
+                return
+            if status == "rejected":
+                st.error("❌ Your registration was not approved. Please contact the administrator.")
+                return
             st.session_state.logged_in = True
-            st.session_state.username = username.strip()
-            st.session_state.mode = "dashboard"
+            st.session_state.username  = uname
+            st.session_state.mode      = "dashboard"
             st.rerun()
+
         else:
-            st.error("Invalid credentials.")
+            # ── Step 2b: Record failed attempt, then re-check lockout ────────
+            record_attempt(uname, success=False)
+
+            if is_locked_out(uname):
+                # This attempt just triggered the lockout threshold
+                remaining = get_lockout_remaining_seconds(uname)
+                minutes   = remaining // 60
+                seconds   = remaining % 60
+                st.error(
+                    f"🔒 Too many failed attempts. Account locked for "
+                    f"**{minutes}m {seconds}s**."
+                )
+            else:
+                st.error("Invalid credentials.")
+            # ─────────────────────────────────────────────────────────────────
 
 
 # ----------------------------------------------------------
-# ROLE GUARD
+# ROLE GUARD  (unchanged)
 # ----------------------------------------------------------
 def require_role(allowed_roles):
     username = st.session_state.get("username")
     if not username:
         st.error("Not authenticated.")
         st.stop()
-
     role = get_user_role(username)
+    if role == "super_admin":
+        return
     if role not in allowed_roles:
         st.error("Unauthorized access.")
         st.stop()
 
 
 # ----------------------------------------------------------
-# MODULE VIEW RENDERER
+# MODULE VIEW RENDERER  (unchanged)
 # ----------------------------------------------------------
 def render_active_module(username: str):
     module_id = st.session_state.get("view")
     if not module_id:
         return
-
     if not module_registry.has(module_id):
         st.error(f"Module not found: {module_id}")
         st.session_state.view = None
         st.rerun()
 
     module = module_registry.get(module_id)
-    meta = module.get("meta", {})
-    title = meta.get("title", module_id)
+    meta   = module.get("meta", {})
+    title  = meta.get("title", module_id)
 
     if st.button("⬅ Back to Dashboard"):
         st.session_state.view = None
@@ -185,43 +350,19 @@ def render_active_module(username: str):
         st.stop()
 
     render_fn(username)
-    st.stop()  # Prevent dashboard bleed-through
+    st.stop()
 
 
 # ----------------------------------------------------------
-# MAIN CONTROLLER
+# MAIN CONTROLLER  (unchanged)
 # ----------------------------------------------------------
 def main():
-    # Session defaults
     st.session_state.setdefault("logged_in", False)
     st.session_state.setdefault("mode", "register")
     st.session_state.setdefault("view", None)
 
-    # ── Logo + Portal title (top of every page) ──────────────────────────────
-    from pathlib import Path as _Path
-    import os as _os
-    _logo_candidates = [
-        _Path(__file__).resolve().parent / "assets" / "images" / "B4AI_Logo_trimmed.png",
-        _Path(__file__).resolve().parents[1] / "streamlit_app" / "assets" / "images" / "B4AI_Logo_trimmed.png",
-    ]
-    _logo_path = next((p for p in _logo_candidates if p.exists()), None)
-    col_logo, col_title = st.columns([1, 4])
-    with col_logo:
-        if _logo_path:
-            st.image(str(_logo_path), width=90)
-        else:
-            st.markdown("🤖")
-    with col_title:
-        st.markdown(
-            "<h1 style='margin-top:0.2rem; font-size:2.2rem; font-weight:800;"
-            " color:#0077BB; letter-spacing:-0.5px;'>Basics4AI Portal</h1>"
-            "<p style='margin:0; color:#555; font-size:0.95rem;'>"
-            "AI Literacy for Young Learners</p>",
-            unsafe_allow_html=True,
-        )
-    st.divider()
+    _render_header()
 
-    # ---------------------- NOT LOGGED IN ----------------------
     if not st.session_state.logged_in:
         choice = st.sidebar.radio("Navigation", ["Register", "Login"])
         st.session_state.mode = choice.lower()
@@ -231,48 +372,59 @@ def main():
             show_login()
         return
 
-    # ---------------------- LOGGED IN ----------------------
     username = st.session_state.username
-    role = get_user_role(username)
+    role     = get_user_role(username)
 
-    st.sidebar.success(f"Logged in as {username} ({role})")
+    st.sidebar.success(f"Logged in as **{username}** ({role})")
     if st.sidebar.button("Logout"):
         st.session_state.clear()
         st.rerun()
 
-    # ── References & Disclaimer ──────────────────────────────────────────────
     st.sidebar.divider()
     with st.sidebar.expander("📚 Instruments & References", expanded=False):
         st.markdown(
             "**Instruments**\n\n"
             "- CCCES — Conceptual Change Cognitive Engagement Scale\n"
             "- SCES — Situational Cognitive Engagement Scale\n"
-            "- SIMS — Situational Motivation Scale\n"
+            "- SIMS — Situational Motivation Scale (Deci & Ryan, 1985)\n"
             "- AI-CI — AI Conceptual Inventory\n"
             "- AIM-F — AI Misconceptions Framework\n\n"
+            "**Quantitative Analysis (CPI)**\n\n"
+            "Crocker, L., & Algina, J. (1986). *Introduction to classical and "
+            "modern test theory*. Holt, Rinehart and Winston. *(CPI_quant / CTT)*\n\n"
+            "Baker, F. B. (1985). *The basics of item response theory*. "
+            "Heinemann. *(IRT)*\n\n"
+            "Hake, R. R. (1998). Interactive-engagement versus traditional methods. "
+            "*American Journal of Physics, 66*(1), 64–74. *(Normalised gain)*\n\n"
+            "Pellegrino, J. W., & Hilton, M. L. (Eds.). (2012). *Education for "
+            "life and work*. National Academies Press. *(CPI+ framework)*\n\n"
+            "Dawes, R. M. (1979). The robust beauty of improper linear models. "
+            "*Psychological Bulletin, 86*(2), 571–582. *(Equal weighting)*\n\n"
+            "Rosli, M. S., Saleh, N. S., Alshammari, S. H., Ibrahim, M. M., "
+            "Atan, A. S., & Atan, N. A. (2021). Improving Questionnaire Reliability "
+            "using Construct Reliability for Researches in Educational Technology. "
+            "*iJIM, 15*(04), 109. "
+            "https://doi.org/10.3991/ijim.v15i04.20199 *(Construct Reliability / CR)*\n\n"
             "**Qualitative Analysis**\n\n"
             "Braun, V., & Clarke, V. (2006). Using thematic analysis in psychology. "
-            "*Qualitative Research in Psychology, 3*(2), 77–101. "
-            "https://doi.org/10.1191/1478088706qp063oa\n\n"
-            "De Paoli, S. (2024). Performing an inductive thematic analysis of "
-            "semi-structured interviews with a large language model. "
-            "*Social Science Computer Review, 42*(4), 997–1019. "
-            "https://doi.org/10.1177/08944393231220483\n\n"
+            "*Qualitative Research in Psychology, 3*(2), 77–101.\n\n"
+            "De Paoli, S. (2024). Performing an inductive thematic analysis with a LLM. "
+            "*Social Science Computer Review, 42*(4), 997–1019.\n\n"
             "Bingham, A. J. (2023). From data management to actionable findings. "
-            "*International Journal of Qualitative Methods, 22*, 16094069231183620. "
-            "https://doi.org/10.1177/16094069231183620\n\n"
+            "*International Journal of Qualitative Methods, 22*.\n\n"
+            "Zheng, L., et al. (2023). Judging LLM-as-a-Judge with MT-Bench and "
+            "Chatbot Arena. *arXiv*. https://doi.org/10.48550/ARXIV.2306.05685 "
+            "*(CPI_qual / LLM-as-a-Judge)*\n\n"
             "*Disclaimer: LLM-assisted thematic analysis is exploratory and does "
             "not establish formal procedures for I-/D-TA with LLMs.*"
         )
 
-    # ---------------------- STUDENT MODULE VIEW ----------------------
     if role == "student" and st.session_state.get("view"):
         require_role(["student"])
         render_active_module(username)
 
-    # ---------------------- DASHBOARD ROUTING ----------------------
-    if role == "admin":
-        require_role(["admin"])
+    if role in ("admin", "super_admin"):
+        require_role(["admin", "super_admin"])
         show_admin_dashboard(username)
     elif role == "teacher":
         require_role(["teacher"])

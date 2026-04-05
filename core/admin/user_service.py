@@ -62,13 +62,21 @@ def get_all_cohorts():
 # CREATE USER
 # ---------------------------------------------------------
 
-def create_user(admin_user, username, role, cohort_id=None):
+def create_user(admin_user, username, role, cohort_id=None, status="approved"):
     """
     Create a new user with a randomly generated, hashed password.
 
+    Parameters
+    ----------
+    admin_user : str  — username of the admin performing the action
+    username   : str  — new user's login name
+    role       : str  — 'student' | 'teacher' | 'admin'
+    cohort_id  : str | None
+    status     : str  — 'approved' (default, admin-created) | 'pending'
+
     Returns
     -------
-    str  — plaintext generated password (show once to admin)
+    str  — plaintext generated password (display once to admin, then discard)
     """
     plaintext_pw = generate_password()
     hashed_pw    = hash_password(plaintext_pw)
@@ -77,10 +85,10 @@ def create_user(admin_user, username, role, cohort_id=None):
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT INTO users (username, password, role, cohort_id)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO users (username, password, role, cohort_id, status)
+        VALUES (?, ?, ?, ?, ?)
         """,
-        (username, hashed_pw, role, cohort_id)
+        (username, hashed_pw, role, cohort_id, status)
     )
     conn.commit()
     conn.close()

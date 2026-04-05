@@ -749,6 +749,28 @@ LEARNING_OBJECTIVES = {
 
 
 # -----------------------------------------------------------------------
+# System prompt — injected into every DTA LLM call
+# -----------------------------------------------------------------------
+
+DTA_SYSTEM_PROMPT = """You are a qualitative research assistant supporting \
+a deductive thematic analysis of data from the Basics4AI programme — \
+a 7-module curriculum teaching AI literacy to young people aged 10-14 \
+years in informal learning settings (after-school programs, community \
+centres, libraries). Modules cover: what AI is, how AI learns, how AI \
+works, goal-based problem-solving, natural vs. artificial agents' \
+problem-solving processes, real-world problem-solving with constraints \
+and uncertainties, natural language processing, and AI in society. \
+Data sources include semi-structured interviews and end-of-module \
+reflection notes collected from participants aged 10-14 years. You are \
+performing deductive thematic analysis following Braun and Clarke (2006) \
+using a pre-defined codebook of constructs. All evidence must be \
+grounded strictly in the participant's actual text. Ensure all sources \
+for evidence identified are saved with the participant username to whom \
+the quotes are to be attributed, for transparency and traceability \
+purposes. Do not introduce evidence not present in the data."""
+
+
+# -----------------------------------------------------------------------
 # Prompt templates
 # -----------------------------------------------------------------------
 
@@ -792,6 +814,7 @@ negative = construct present but reversed/absent; neutral = ambiguous
 _DTA_LO_PROMPT = """\
 You are analysing a participant's reflection from Module {module_id} \
 of the Basics4AI programme.
+This text is from participant: {participant_id}
 
 Module title: {module_title}
 Learning objective {lo_index}: {lo_text}
@@ -807,10 +830,16 @@ Does this text show evidence that the participant has achieved this learning obj
 Return ONLY valid JSON:
 {{
   "lo_index": {lo_index},
+  "participant_id": "{participant_id}",
   "evidence_present": <0 or 1>,
-  "evidence_quote": "<quote if present, empty string if not>",
+  "evidence_quote": "<verbatim quote from participant text if present, empty string if not>",
   "explanation": "<1 sentence>"
-}}"""
+}}
+
+Rules:
+- participant_id must be exactly "{participant_id}" — do not alter it
+- evidence_quote must be verbatim from the participant text — do not paraphrase
+- Return ONLY the JSON object, no other text"""
 
 
 # -----------------------------------------------------------------------
@@ -867,26 +896,18 @@ def run_dta_phase2(
 
         for construct_name, construct_def in constructs_to_run.items():
             prompt = _DTA_PHASE2_PROMPT.format(
+                participant_id = pid,
                 construct_name = construct_name.replace("_", " ").title(),
                 definition     = construct_def["definition"],
                 analytic_focus = ", ".join(construct_def["analytic_focus"]),
                 indicators     = "\n".join(
-                    f"  - \"{ind}\"" for ind in construct_def["indicators"]
+                    f'  - "{ind}"' for ind in construct_def["indicators"]
                 ),
-                text           = text[:3000],  # cap per-participant text
+                text           = text[:3000],
             )
             raw_prompt = prompt  # capture for audit trail
 
-            # Get system prompt from ita_pipeline
-            try:
-                sys_prompt = _lazy_import(
-                    "core.analytics.llm.ita_pipeline", "SYSTEM_PROMPT"
-                )
-            except Exception:
-                sys_prompt = (
-                    "You are a qualitative research assistant for the "
-                    "Basics4AI AI literacy programme."
-                )
+            sys_prompt = DTA_SYSTEM_PROMPT
 
             response = call_model(
                 model, prompt,
@@ -1096,6 +1117,28 @@ def run_dta_phase4(
 # -----------------------------------------------------------------------
 # Phase 5: Report
 # -----------------------------------------------------------------------
+# Phase 5 prompt — narrative DTA summary (module-level constant for UI exposure)
+# -----------------------------------------------------------------------
+
+_DTA_PHASE5_PROMPT = """You are writing a summary of a deductive thematic \
+analysis of reflection data from the Basics4AI AI literacy programme for \
+10-14 year-olds.
+
+The following construct evidence was identified across all participants:
+
+{table_text}
+
+Write a concise academic summary (300-400 words) that:
+1. Describes the overall pattern of construct evidence
+2. Notes which constructs showed the strongest and weakest evidence
+3. Discusses the valence patterns (positive vs negative evidence)
+4. Draws preliminary conclusions about participants' experiences
+
+Write in academic English. Use construct names as they appear above.
+Do not use bullet points — write in continuous prose."""
+
+
+# -----------------------------------------------------------------------
 
 def run_dta_phase5(
     phase3_matrix: Dict[str, Any],
@@ -1133,33 +1176,11 @@ def run_dta_phase5(
         )
     table_text = "\n".join(table_lines)
 
-    prompt = f"""\
-You are writing a summary of a deductive thematic analysis of reflection data \
-from the Basics4AI AI literacy programme for 10-14 year-olds.
-
-The following construct evidence was identified across all participants:
-
-{table_text}
-
-Write a concise academic summary (300-400 words) that:
-1. Describes the overall pattern of construct evidence
-2. Notes which constructs showed the strongest and weakest evidence
-3. Discusses the valence patterns (positive vs negative evidence)
-4. Draws preliminary conclusions about participants' experiences
-
-Write in academic English. Use construct names as they appear above.
-Do not use bullet points — write in continuous prose."""
-
-    try:
-        sys_prompt = _lazy_import(
-            "core.analytics.llm.ita_pipeline", "SYSTEM_PROMPT"
-        )
-    except Exception:
-        sys_prompt = "You are a qualitative research assistant."
+    prompt = _DTA_PHASE5_PROMPT.format(table_text=table_text)
 
     response = call_model(
         model, prompt,
-        system=sys_prompt,
+        system=DTA_SYSTEM_PROMPT,
         temperature=temperature,
         max_tokens=2000,
     )
@@ -1223,13 +1244,6 @@ def run_lo_analysis(
     results = []
     now     = datetime.utcnow().isoformat()
 
-    try:
-        sys_prompt = _lazy_import(
-            "core.analytics.llm.ita_pipeline", "SYSTEM_PROMPT"
-        )
-    except Exception:
-        sys_prompt = "You are a qualitative research assistant."
-
     for transcript in transcripts:
         pid       = transcript.get("participant_id", "unknown")
         text      = str(transcript.get("content", "")).strip()
@@ -1247,19 +1261,20 @@ def run_lo_analysis(
 
         for lo_idx, lo_text in enumerate(lo_def["objectives"]):
             prompt = _DTA_LO_PROMPT.format(
-                module_id    = mod_key,
-                module_title = lo_def["title"],
-                lo_index     = lo_idx + 1,
-                lo_text      = lo_text,
-                indicators   = "\n".join(
+                participant_id = pid,
+                module_id      = mod_key,
+                module_title   = lo_def["title"],
+                lo_index       = lo_idx + 1,
+                lo_text        = lo_text,
+                indicators     = "\n".join(
                     f"  - {ind}" for ind in lo_def["indicators"]
                 ),
-                text         = text[:2000],
+                text           = text[:2000],
             )
 
             response = call_model(
                 model, prompt,
-                system=sys_prompt,
+                system=DTA_SYSTEM_PROMPT,
                 temperature=temperature,
                 max_tokens=400,
             )
@@ -1480,10 +1495,26 @@ def _detect_matched_indicators(
     return matched
 
 
+def _sanitise_dta_json_strings(text: str) -> str:
+    """Replace literal newlines inside JSON string values with a space.
+    Llama 3.x embeds real newline characters in string values — json.loads
+    rejects these as invalid control characters. Same fix as ita_pipeline."""
+    result, in_str, escaped = [], False, False
+    for ch in text:
+        if escaped: escaped = False; result.append(ch); continue
+        if ch == "\\" and in_str: escaped = True; result.append(ch); continue
+        if ch == '"': in_str = not in_str; result.append(ch); continue
+        if in_str and ch in ("\n", "\r"): result.append(" "); continue
+        result.append(ch)
+    return "".join(result)
+
+
 def _parse_dta_json(text: str) -> Optional[Dict]:
-    """Parse JSON from LLM response, handling fences and truncation."""
+    """Parse JSON from LLM response, handling fences, truncation, and
+    literal newlines inside string values (Llama 3.x quirk)."""
     if not text:
         return None
+    text = _sanitise_dta_json_strings(text)
     text = re.sub(r"```(?:json)?\s*", "", text).strip()
     start = text.find("{")
     if start == -1:
