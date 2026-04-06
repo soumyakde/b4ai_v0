@@ -5,6 +5,7 @@ FROM python:3.10-slim AS builder
 
 WORKDIR /install
 
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
@@ -12,31 +13,40 @@ RUN apt-get update && apt-get install -y \
     libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Copy and install Python dependencies in standard location
 COPY requirements.txt .
+RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-RUN pip install --upgrade pip && \
-    pip install --prefix=/install --no-cache-dir -r requirements.txt && \
-    find /install -type d -name "__pycache__" -exec rm -rf {} + && \
-    find /install -type f -name "*.pyc" -delete
+# Optional: cleanup pycache
+RUN find /usr/local/lib/python3.10/site-packages -type d -name "__pycache__" -exec rm -rf {} + && \
+    find /usr/local/lib/python3.10/site-packages -type f -name "*.pyc" -delete
 
 ########################################
-# STAGE 2 — RUNTIME (SMALL IMAGE)
+# STAGE 2 — RUNTIME
 ########################################
 FROM python:3.10-slim
 
 WORKDIR /app
 
-COPY --from=builder /install /usr/local
+# Copy installed packages from builder (standard site-packages)
+COPY --from=builder /usr/local /usr/local
 
-RUN rm -rf /usr/local/lib/python*/site-packages/*.dist-info \
-           /usr/local/lib/python*/site-packages/*.egg-info
-
+# Copy app code
 COPY . .
 
+# Streamlit config: dynamic port fallback
 RUN mkdir -p /app/.streamlit && \
-    echo '[server]\nport = 8501\naddress = "0.0.0.0"\nheadless = true\nenableCORS = false\nenableXsrfProtection = false\n\n[browser]\ngatherUsageStats = false\n' \
+    echo "[server]\n\
+port = ${PORT:-8501}\n\
+address = \"0.0.0.0\"\n\
+headless = true\n\
+enableCORS = false\n\
+enableXsrfProtection = false\n\n\
+[browser]\ngatherUsageStats = false\n" \
     > /app/.streamlit/config.toml
 
-EXPOSE 8501
+# Expose port dynamically
+EXPOSE ${PORT:-8501}
 
+# Run the app
 CMD ["streamlit", "run", "streamlit_app/app.py"]
