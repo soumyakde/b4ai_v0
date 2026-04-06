@@ -1,6 +1,3 @@
-# docker-compose.yml — Basics4AI (Phase A: SQLite)
-# Phase C will add PostgreSQL service here
-version: "3.9"
 
 services:
   app:
@@ -10,14 +7,16 @@ services:
     ports:
       - "8501:8501"
     env_file:
-      - .env          # your local .env with API keys
+      - .env
     environment:
       - DB_TYPE=sqlite
       - SQLITE_PATH=/app/data/responses.db
+      - USERS_DB_PATH=/app/data/users.db
+      - RESEARCH_DB_PATH=/app/data/research.db
     volumes:
-      # Mount databases as persistent volumes so data survives container restarts
       - ./responses.db:/app/data/responses.db
       - ./users.db:/app/data/users.db
+      - ./research.db:/app/data/research.db
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]

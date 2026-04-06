@@ -3387,7 +3387,27 @@ def _render_irt_result(
 # =======================================================================
 # LLM ANALYSIS TAB — ITA + DTA
 # =======================================================================
+# this helper at the top of the LLM section fixes path lookup in docker by replacing both next(...) path searches in this function with a direct env var lookup. 
+def _get_responses_db_path(): #cgpt replaced for syntax errors
+    """Return responses.db path using env var first, then filesystem search."""
+    import os
+    from pathlib import Path as _P
 
+    env_path = os.getenv("SQLITE_PATH")
+    if env_path:
+        p = _P(env_path)
+        if p.exists():
+            return p
+
+    # fallback: filesystem search (works locally)
+    return next(
+        (
+            p / "responses.db"
+            for p in _P(__file__).resolve().parents
+            if (p / "responses.db").exists()
+        ),
+        None,
+    )
 # -----------------------------------------------------------------------
 # Multi-source loader (shared by ITA and DTA)
 # -----------------------------------------------------------------------
@@ -3401,10 +3421,11 @@ def _count_available_sources() -> dict:
     from pathlib import Path as _Pth
     counts = {"reflections": 0, "interviews": 0}
     # Reflections — count distinct users with reflection responses
-    db = next(
-        (p / "responses.db" for p in _Pth(__file__).resolve().parents
-         if (p / "responses.db").exists()), None
-    )
+    #db = next(
+    #    (p / "responses.db" for p in _Pth(__file__).resolve().parents # replace both next(...) path searches in this function with a direct env var lookup.
+    #     if (p / "responses.db").exists()), None
+    #)
+    db = _get_responses_db_path()
     if db:
         try:
             with _sq.connect(db) as _c:
@@ -3440,10 +3461,11 @@ def _load_combined_transcripts(
 
     for source_key in sources:
         if source_key == "responses":
-            db = next(
-                (p / "responses.db" for p in _Pth(__file__).resolve().parents
-                 if (p / "responses.db").exists()), None
-            )
+            #db = next(
+            #    (p / "responses.db" for p in _Pth(__file__).resolve().parents #replace both next(...) path searches in this function with a direct env var lookup.
+            #if (p / "responses.db").exists()), None
+            #)
+            db = _get_responses_db_path()
             if not db:
                 continue
             conn = _sq.connect(db)
@@ -3720,10 +3742,11 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
             if "responses" in sources:
                 import sqlite3 as _sq2
                 from pathlib import Path as _P2
-                db2 = next(
-                    (p / "responses.db" for p in _P2(__file__).resolve().parents
-                     if (p / "responses.db").exists()), None
-                )
+                #db2 = next(
+                #    (p / "responses.db" for p in _P2(__file__).resolve().parents #replace both next(...) path searches in this function with a direct env var lookup. 
+                #     if (p / "responses.db").exists()), None
+                #)
+                db2 = _get_responses_db_path()
                 n_avail_ref = 0
                 if db2:
                     with _sq2.connect(db2) as _c2:
@@ -5244,8 +5267,9 @@ def _execute_lo_run(username, models, temperature,
                     custom_lo_prompt=None):
     import sqlite3 as _sq3, re as _re3
     from pathlib import Path as _P3
-    db3 = next((p/"responses.db" for p in _P3(__file__).resolve().parents
-                if (p/"responses.db").exists()), None)
+    #db3 = next((p/"responses.db" for p in _P3(__file__).resolve().parents #fix is to replace both next(...) path searches in this function with a direct env var lookup.
+    #            if (p/"responses.db").exists()), None)
+    db3 = _get_responses_db_path()
     if not db3: st.error("responses.db not found."); return
     conn3 = _sq3.connect(db3)
     rows3 = conn3.execute(
@@ -5467,8 +5491,9 @@ def _render_dta_lo_panel(username: str) -> None:
     try:
         import sqlite3 as _sq4
         from pathlib import Path as _P4
-        db4 = next((p/"responses.db" for p in _P4(__file__).resolve().parents
-                    if (p/"responses.db").exists()), None)
+        #db4 = next((p/"responses.db" for p in _P4(__file__).resolve().parents #fix is to replace both next(...) path searches in this function with a direct env var lookup. 
+        #            if (p/"responses.db").exists()), None)
+        db4 = _get_responses_db_path()
         if not db4: st.error("DB not found."); return
         conn4 = _sq4.connect(db4)
         rows4 = conn4.execute(

@@ -31,16 +31,22 @@ Handles:
 ✅ Dataset-builder cohort map
 """
 
+import os
 import sqlite3
 import hashlib
 import secrets
 import string
 from pathlib import Path
+from dotenv import load_dotenv
 
+_HERE = Path(__file__).resolve()
+#load_dotenv(_HERE.parents[1] / ".env")
 # ---------------------------------------------------------------------
 #  Configuration
 # ---------------------------------------------------------------------
-DB_PATH = Path(__file__).resolve().parents[1] / "users.db"
+# DB_PATH = Path(os.getenv("USERS_DB_PATH", str(Path(__file__).resolve().parents[1] / "users.db")))
+# Above line replaced b/c docker build test failed, smoke_test.py
+DB_PATH = Path(os.getenv("USERS_DB_PATH", str(_HERE.parents[1] / "users.db")))
 
 SUPER_ADMIN_USERNAME         = "skde"
 SUPER_ADMIN_DEFAULT_PASSWORD = "ChangeMe@2025!"   # <- change after first login
@@ -48,9 +54,16 @@ SUPER_ADMIN_DEFAULT_PASSWORD = "ChangeMe@2025!"   # <- change after first login
 # ---------------------------------------------------------------------
 #  Connection helper
 # ---------------------------------------------------------------------
+#def get_connection() -> sqlite3.Connection:
+#    """Return a new SQLite connection to the users database."""
+#    return sqlite3.connect(DB_PATH)
+# Above 3 lines replaced b/c docker build test failed, smoke_test.py
 def get_connection() -> sqlite3.Connection:
     """Return a new SQLite connection to the users database."""
-    return sqlite3.connect(DB_PATH)
+    #load_dotenv(_HERE.parents[1] / ".env")
+    path = Path(os.getenv("USERS_DB_PATH", str(_HERE.parents[1] / "users.db")))
+    return sqlite3.connect(path)
+
 
 # ---------------------------------------------------------------------
 #  Database Initialization  (safe, non-destructive migration)
