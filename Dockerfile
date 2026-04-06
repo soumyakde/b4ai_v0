@@ -1,43 +1,39 @@
-# Dockerfile — Basics4AI
-# Python 3.10-slim matches your conda environment
-FROM python:3.10-slim
+########################################
+# STAGE 1 — BUILDER
+########################################
+FROM python:3.10-slim AS builder
 
-# System dependencies needed by some packages
-# (sentence-transformers needs gcc, reportlab needs freetype)
+WORKDIR /install
+
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     libfreetype6-dev \
     libffi-dev \
-    curl \
-    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+
+RUN pip install --upgrade pip && \
+    pip install --prefix=/install --no-cache-dir -r requirements.txt
+
+
+########################################
+# STAGE 2 — RUNTIME (SMALL IMAGE)
+########################################
+FROM python:3.10-slim
 
 WORKDIR /app
 
-# Install Python dependencies first (cached layer if requirements unchanged)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# copy only installed packages (NOT compilers)
+COPY --from=builder /install /usr/local
 
-# Copy application code
 COPY . .
 
-# Streamlit config — disable telemetry, set port
-RUN mkdir -p /app/.streamlit
-RUN echo '\
-[server]\n\
-port = 8501\n\
-address = "0.0.0.0"\n\
-headless = true\n\
-enableCORS = false\n\
-enableXsrfProtection = false\n\
-\n\
-[browser]\n\
-gatherUsageStats = false\n\
-' > /app/.streamlit/config.toml
+RUN mkdir -p /app/.streamlit && \
+    echo '[server]\nport = 8501\naddress = "0.0.0.0"\nheadless = true\nenableCORS = false\nenableXsrfProtection = false\n\n[browser]\ngatherUsageStats = false\n' \
+    > /app/.streamlit/config.toml
 
 EXPOSE 8501
 
-# Use launch.py if R is available, otherwise direct streamlit
-CMD ["python", "-m", "streamlit", "run", "streamlit_app/app.py", \
-     "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "app.py"]
