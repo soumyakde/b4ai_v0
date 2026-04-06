@@ -1,34 +1,98 @@
-# Version control
+########################################
+# VERSION CONTROL
+########################################
 .git
 .gitignore
+.github/
 
-# Python cache
-__pycache__
-*.pyc
-*.pyo
-*.pyd
+########################################
+# PYTHON CACHE / BYTECODE
+########################################
+__pycache__/
+*.py[cod]
+*$py.class
 .Python
 
-# Environment files (secrets — use docker run --env-file instead)
-.env
-*.env
+########################################
+# VIRTUAL ENVIRONMENTS (CRITICAL)
+########################################
+.venv/
+venv/
+env/
+ENV/
+conda/
+.anaconda/
+.mamba/
 
-# Databases — mount as volume instead
+########################################
+# LOCAL DATABASES (Railway volume instead)
+########################################
 *.db
+*.sqlite
+*.sqlite3
 
-# Local dev artifacts
-.pytest_cache
-*.egg-info
+########################################
+# ENV / SECRETS
+########################################
+.env
+.env.*
+*.env
+.streamlit/secrets.toml
+
+########################################
+# DEVELOPMENT + BUILD ARTIFACTS
+########################################
+.pytest_cache/
+.mypy_cache/
+coverage/
+htmlcov/
 dist/
 build/
+*.egg-info/
+.eggs/
 
-# OS artifacts
+########################################
+# NOTEBOOKS & RESEARCH FILES
+########################################
+notebooks/
+*.ipynb
+
+########################################
+# DATASETS / LARGE FILES (MAJOR TIMEOUT CAUSE)
+########################################
+data/
+datasets/
+models/
+checkpoints/
+artifacts/
+
+########################################
+# CACHE DIRECTORIES
+########################################
+.cache/
+pip-cache/
+huggingface/
+hf_cache/
+
+########################################
+# NODE (if ever present)
+########################################
+node_modules/
+npm-debug.log
+
+########################################
+# OS FILES
+########################################
 .DS_Store
 Thumbs.db
 
-# Large model caches (sentence-transformers downloads at runtime)
-.cache/
-models/
-
-# Test files (optional — remove if you want tests in container)
+########################################
+# TESTS (optional in production)
+########################################
 tests/
+
+########################################
+# DOCKER / LOCAL DEV
+########################################
+docker-compose.yml
+Dockerfile.dev
