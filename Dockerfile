@@ -39,4 +39,4 @@ RUN mkdir -p /app/.streamlit && \
 
 EXPOSE 8501
 
-CMD ["streamlit", "run", "app.py"]
+CMD ["streamlit", "run", "streamlit_app/app.py"]
