@@ -15,8 +15,9 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 
 RUN pip install --upgrade pip && \
-    pip install --prefix=/install --no-cache-dir -r requirements.txt
-
+    pip install --prefix=/install --no-cache-dir -r requirements.txt && \
+    find /install -type d -name "__pycache__" -exec rm -rf {} + && \
+    find /install -type f -name "*.pyc" -delete
 
 ########################################
 # STAGE 2 — RUNTIME (SMALL IMAGE)
@@ -25,8 +26,10 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# copy only installed packages (NOT compilers)
 COPY --from=builder /install /usr/local
+
+RUN rm -rf /usr/local/lib/python*/site-packages/*.dist-info \
+           /usr/local/lib/python*/site-packages/*.egg-info
 
 COPY . .
 
