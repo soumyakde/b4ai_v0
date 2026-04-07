@@ -61,7 +61,7 @@ def get_connection(db_path: Path = None):
         #conn = sqlite3.connect(path)
         #conn.row_factory = sqlite3.Row
         # - WAL Implementation
-        path = db_path if db_path else _get_sqlite_path()
+        path = db_path or DB_PATH
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
