@@ -297,7 +297,6 @@ def load_canonical_data(
     #    raise ValueError("responses table is empty.")
     # replaced by 
     if responses_df.empty:
-        import pandas as pd
         empty_canonical = pd.DataFrame(columns=["user_id","module_id","instrument_key","question_id","response_value","item_score","construct","grade","submitted_at","completed_at","cohort_id"])
         empty_demo = pd.DataFrame(columns=["user_id","grade","grade_level","gender","first_language_english"])
         return empty_canonical, empty_demo, {}
