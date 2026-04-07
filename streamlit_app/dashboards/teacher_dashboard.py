@@ -3733,8 +3733,10 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
         st.session_state["ita_src_persistent"] = "persistent" in sources
         st.session_state["ita_src_per_run"]    = "per_run"    in sources
         if per_run_files:
-            st.session_state["ita_g_upload"] = per_run_files
-
+            #st.session_state["ita_g_upload"] = per_run_files #the code tries to write to a session state key that's already bound to a widget. 
+            # Replaced with, which use a different key for the stored value
+            st.session_state["ita_g_upload_store"] = per_run_files
+            
         if not sources:
             st.warning("Select at least one source above.")
         else:

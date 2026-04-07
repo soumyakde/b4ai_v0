@@ -293,8 +293,14 @@ def load_canonical_data(
     )
     conn.close()
 
+    #if responses_df.empty: #results in teacher dashboard being inaccessible due to a crash when no data is in the responses.db
+    #    raise ValueError("responses table is empty.")
+    # replaced by 
     if responses_df.empty:
-        raise ValueError("responses table is empty.")
+        import pandas as pd
+        empty_canonical = pd.DataFrame(columns=["user_id","module_id","instrument_key","question_id","response_value","item_score","construct","grade","submitted_at","completed_at","cohort_id"])
+        empty_demo = pd.DataFrame(columns=["user_id","grade","grade_level","gender","first_language_english"])
+        return empty_canonical, empty_demo, {}
 
     # ---- 2. Load demographics ----
     demographics_df = extract_demographics(db_path)
