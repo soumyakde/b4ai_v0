@@ -50,12 +50,37 @@ def get_all_users():
 # ---------------------------------------------------------
 
 def get_all_cohorts():
-    conn   = get_connection()          # uses DB_PATH, not bare "users.db"
+    """
+    Returns list of cohort IDs.
+
+    Works both:
+    - locally (table already exists)
+    - Railway fresh deployments (table auto-created)
+    """
+
+    conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT cohort_id FROM cohorts ORDER BY cohort_id")
-    cohorts = [row[0] for row in cursor.fetchall()]
+
+    # --------------------------------------------------
+    # NEW: Ensure cohorts table exists (safe + idempotent)
+    # --------------------------------------------------
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cohorts (
+            cohort_id TEXT PRIMARY KEY
+        )
+    """)
+    conn.commit()
+    # --------------------------------------------------
+
+    # Existing logic (unchanged)
+    cursor.execute(
+        "SELECT cohort_id FROM cohorts ORDER BY cohort_id"
+    )
+
+    rows = cursor.fetchall()
     conn.close()
-    return cohorts
+
+    return [row[0] for row in rows]
 
 
 # ---------------------------------------------------------
