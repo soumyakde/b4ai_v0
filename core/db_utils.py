@@ -56,10 +56,16 @@ def get_connection(db_path: Path = None):
                 "Add psycopg2-binary to requirements.txt."
             )
     else:
-        # SQLite (default)
-        path = db_path or DB_PATH
+        # SQLite (default) before journal_mode=WAL implementation
+        #path = db_path or DB_PATH
+        #conn = sqlite3.connect(path)
+        #conn.row_factory = sqlite3.Row
+        # - WAL Implementation
+        path = db_path if db_path else _get_sqlite_path()
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         return conn
 
 
@@ -73,6 +79,11 @@ def init_db(db_path: Path = None):
     Initialize the database and create tables if they do not exist.
     """
     conn = get_connection(db_path)
+    # Enable WAL mode — critical for concurrent reads/writes
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")  # safe with WAL, faster than FULL
+    conn.execute("PRAGMA busy_timeout=5000")    # wait up to 5s if DB is locked
+    conn.commit()
     cur = conn.cursor()
 
     # -----------------------------

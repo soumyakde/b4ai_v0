@@ -3518,33 +3518,19 @@ def _load_combined_transcripts(
 
 
 def _source_checkboxes(prefix: str, default_reflections: bool = True):
-    """Render 3-way source checkboxes. Returns (sources_list, per_run_files)."""
+    """Render 2-way source checkboxes. Returns (sources_list, None)."""
     st.markdown("**Data sources** (select one or more):")
-    c1, c2, c3 = st.columns(3)
-    use_ref = c1.checkbox("Module reflections (DB)",      value=default_reflections,
+    c1, c2 = st.columns(2)
+    use_ref = c1.checkbox("Module reflections (DB)", value=default_reflections,
                           key=f"{prefix}_src_ref",
                           help="End-of-module reflection notes from responses.db")
     use_int = c2.checkbox("Interview transcripts (store)", value=False,
                           key=f"{prefix}_src_int",
                           help="Semi-structured transcripts uploaded via Admin dashboard")
-    use_upl = c3.checkbox("Upload now (this run only)",    value=False,
-                          key=f"{prefix}_src_upl",
-                          help="Upload transcript files fresh for this run")
-
     sources = []
     if use_ref: sources.append("responses")
     if use_int: sources.append("persistent")
-    if use_upl: sources.append("per_run")
-
-    per_run_files = None
-    if use_upl:
-        per_run_files = st.file_uploader(
-            "Upload transcript files (.vtt, .txt, .pdf)",
-            type=["vtt", "txt", "pdf"],
-            accept_multiple_files=True,
-            key=f"{prefix}_upload",
-        )
-    return sources, per_run_files
+    return sources, None
 
 
 # -----------------------------------------------------------------------
@@ -4045,7 +4031,8 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
         if st.session_state.get("ita_src_responses",  True):  sources.append("responses")
         if st.session_state.get("ita_src_persistent", False): sources.append("persistent")
         if st.session_state.get("ita_src_per_run",    False): sources.append("per_run")
-        per_run_files = st.session_state.get("ita_g_upload")
+        #per_run_files = st.session_state.get("ita_g_upload") #remove upload now in llm analysis, ITA
+        per_run_files = st.session_state.get("ita_g_upload_store")
 
         _src_labels = {
             "responses":  "Module reflections (DB)",
