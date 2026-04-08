@@ -8,6 +8,7 @@ Changes v3:
     SQLite result cache, cost estimator, result display
 """
 
+import os
 import streamlit as st
 import sqlite3
 import pandas as pd
