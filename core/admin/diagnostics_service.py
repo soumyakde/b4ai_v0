@@ -26,9 +26,9 @@ RESPONSES_DB = Path(os.getenv("SQLITE_PATH",       str(BASE_DIR / "responses.db"
 # ---------------------------------------------------------
 
 #def get_user_stats():
-    """
-    Returns counts of all users by role, keyed for admin dashboard.
-    """
+#    """
+#    Returns counts of all users by role, keyed for admin dashboard.
+#    """
 #    conn = sqlite3.connect(USERS_DB)
 #    cursor = conn.cursor()
 
