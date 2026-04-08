@@ -21,6 +21,7 @@ import shutil
 import sqlite3
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
 
 from core.admin.audit_logger import log_admin_action, AdminAction
 
@@ -29,13 +30,16 @@ from core.admin.audit_logger import log_admin_action, AdminAction
 # PATH CONFIGURATION
 # ---------------------------------------------------------
 
-BASE_DIR     = Path(__file__).resolve().parents[2]
-DATA_DIR     = BASE_DIR
-BACKUP_DIR   = BASE_DIR / "backups"
-CACHE_DIR    = BASE_DIR / "cache"
+BASE_DIR = Path(__file__).resolve().parents[2]
+load_dotenv(BASE_DIR / ".env")
 
-USERS_DB     = DATA_DIR / "users.db"
-RESPONSES_DB = DATA_DIR / "responses.db"
+USERS_DB     = Path(os.getenv("USERS_DB_PATH", str(BASE_DIR / "users.db")))
+RESPONSES_DB = Path(os.getenv("SQLITE_PATH",   str(BASE_DIR / "responses.db")))
+
+# Backup and cache dirs sit alongside the DB files
+_DATA_DIR  = USERS_DB.parent
+BACKUP_DIR = _DATA_DIR / "backups"
+CACHE_DIR  = _DATA_DIR / "cache"
 
 # Auto-backup interval — override via .env
 BACKUP_INTERVAL_HOURS = int(os.getenv("BACKUP_INTERVAL_HOURS", "24"))
