@@ -6,7 +6,8 @@ Provides system metrics and audit log data for the BasicsB4AI admin dashboard.
 
 import sqlite3
 from pathlib import Path
-
+import os
+from dotenv import load_dotenv
 from core.admin.data_service import get_dataset_counts
 from core.admin.audit_logger import get_recent_logs
 
@@ -15,36 +16,55 @@ from core.admin.audit_logger import get_recent_logs
 # ---------------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-USERS_DB = BASE_DIR / "users.db"
-RESPONSES_DB = BASE_DIR / "responses.db"
+load_dotenv(BASE_DIR / ".env")
+USERS_DB     = Path(os.getenv("USERS_DB_PATH",     str(BASE_DIR / "users.db")))
+RESPONSES_DB = Path(os.getenv("SQLITE_PATH",       str(BASE_DIR / "responses.db")))
 
 
 # ---------------------------------------------------------
 # USER METRICS
 # ---------------------------------------------------------
 
-def get_user_stats():
+#def get_user_stats():
     """
     Returns counts of all users by role, keyed for admin dashboard.
     """
-    conn = sqlite3.connect(USERS_DB)
-    cursor = conn.cursor()
+#    conn = sqlite3.connect(USERS_DB)
+#    cursor = conn.cursor()
 
-    stats = {}
+#    stats = {}
 
-    cursor.execute("SELECT COUNT(*) FROM users")
-    stats["total_users"] = cursor.fetchone()[0]
+#    cursor.execute("SELECT COUNT(*) FROM users")
+#    stats["total_users"] = cursor.fetchone()[0]
 
-    cursor.execute("SELECT COUNT(*) FROM users WHERE role='student'")
-    stats["total_students"] = cursor.fetchone()[0]
+#    cursor.execute("SELECT COUNT(*) FROM users WHERE role='student'")
+#    stats["total_students"] = cursor.fetchone()[0]
 
-    cursor.execute("SELECT COUNT(*) FROM users WHERE role='teacher'")
-    stats["total_teachers"] = cursor.fetchone()[0]
+#    cursor.execute("SELECT COUNT(*) FROM users WHERE role='teacher'")
+#    stats["total_teachers"] = cursor.fetchone()[0]
 
-    cursor.execute("SELECT COUNT(*) FROM users WHERE role='admin'")
-    stats["total_admins"] = cursor.fetchone()[0]
+#    cursor.execute("SELECT COUNT(*) FROM users WHERE role='admin'")
+#    stats["total_admins"] = cursor.fetchone()[0]
 
-    conn.close()
+#    conn.close()
+#    return stats
+
+def get_user_stats() -> dict:
+    stats = {"total_users": 0, "total_students": 0, "total_teachers": 0, "total_admins": 0}
+    try:
+        conn = sqlite3.connect(USERS_DB)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM users")
+        stats["total_users"] = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM users WHERE role='student'")
+        stats["total_students"] = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM users WHERE role='teacher'")
+        stats["total_teachers"] = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM users WHERE role='admin'")
+        stats["total_admins"] = cursor.fetchone()[0]
+        conn.close()
+    except Exception:
+        pass
     return stats
 
 
