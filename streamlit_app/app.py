@@ -285,6 +285,12 @@ def show_login():
             st.session_state.logged_in = True
             st.session_state.username  = uname
             st.session_state.mode      = "dashboard"
+            # Migration 2 — resolve RID at login, cache in session
+            try:
+                from auth.user_manager import get_user_rid
+                st.session_state.rid = get_user_rid(uname)
+            except Exception:
+                st.session_state.rid = None
             st.rerun()
 
         else:

@@ -251,6 +251,14 @@ def get_user_status(username: str) -> str:
     return result[0] if result else "approved"
 
 
+def get_user_rid(username: str) -> str | None:
+    """Return the RID for a username, or None if not yet assigned."""
+    with get_connection() as conn:
+        result = conn.execute(
+            "SELECT rid FROM users WHERE username = ?", (username,)
+        ).fetchone()
+    return result[0] if result else None
+
 def is_super_admin(username: str) -> bool:
     """Return True only if the account has the is_super_admin flag set."""
     with get_connection() as conn:
