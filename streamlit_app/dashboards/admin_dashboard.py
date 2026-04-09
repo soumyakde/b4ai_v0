@@ -266,7 +266,7 @@ def show_admin_dashboard(username: str):
         try:
             _all_users_df = user_service.get_all_users()
             _reset_candidates = _all_users_df[
-                _all_users_df["role"].isin(["student", "teacher"])
+                _all_users_df["role"].isin(["student", "teacher", "admin"])
             ]["username"].tolist()
         except Exception:
             _reset_candidates = []

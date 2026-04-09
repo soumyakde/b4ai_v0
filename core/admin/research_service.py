@@ -8,19 +8,20 @@ Supports:
 - research dataset preparation
 """
 
+import os
 import sqlite3
 import csv
 from pathlib import Path
 
 from core.admin.audit_logger import log_admin_action, AdminAction
-
+from dotenv import load_dotenv
 # ---------------------------------------------------------
 # PATH CONFIGURATION
 # ---------------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-
-RESPONSES_DB = BASE_DIR / "responses.db"
+load_dotenv(BASE_DIR / ".env")
+RESPONSES_DB = Path(os.getenv("SQLITE_PATH",   str(BASE_DIR / "responses.db")))
 INSTRUMENTS_DIR = BASE_DIR / "streamlit_app" / "surveys"
 
 # ---------------------------------------------------------
