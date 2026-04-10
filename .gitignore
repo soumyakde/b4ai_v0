@@ -20,3 +20,7 @@ build/
 Thumbs.db
 *.db
 run_docker_b4ai.bat
+
+# Migration backups
+*.pre_migration1
+*_backup_*.db

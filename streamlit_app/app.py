@@ -54,6 +54,15 @@ except Exception:
 # 4. STREAMLIT & OTHER IMPORTS
 import streamlit as st
 
+# Message whether R is loaded or not?
+st.write("🚨 TOP OF SCRIPT EXECUTED")
+
+if r is None:
+    st.write("🚨 R = None")
+else:
+    st.write("🚨 R LOADED")
+# End of message
+
 from modules.registry.register_modules import register_all_modules
 from modules.registry.module_registry import module_registry
 from core.admin import user_service
