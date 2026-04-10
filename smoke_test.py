@@ -77,6 +77,18 @@ def t_research():
 
 check("T_RES  research DB reachable", t_research)
 
+def t_wal():
+    from core.db_utils import get_connection
+    conn = get_connection()
+    mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    busy = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+    conn.close()
+    assert mode == "wal", f"Expected WAL mode, got: {mode}"
+    assert busy >= 5000, f"busy_timeout too low: {busy}ms"
+    return f"journal_mode={mode}, busy_timeout={busy}ms"
+
+check("T_WAL  WAL mode active", t_wal)
+
 # Summary
 print(f"\n{'='*30}")
 if failures:
