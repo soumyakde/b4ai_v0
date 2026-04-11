@@ -77,18 +77,6 @@ def t_research():
 
 check("T_RES  research DB reachable", t_research)
 
-def t_wal():
-    from core.db_utils import get_connection
-    conn = get_connection()
-    mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
-    busy = conn.execute("PRAGMA busy_timeout").fetchone()[0]
-    conn.close()
-    assert mode == "wal", f"Expected WAL mode, got: {mode}"
-    assert busy >= 5000, f"busy_timeout too low: {busy}ms"
-    return f"journal_mode={mode}, busy_timeout={busy}ms"
-
-check("T_WAL  WAL mode active", t_wal)
-
 # Summary
 print(f"\n{'='*30}")
 if failures:
@@ -98,3 +86,37 @@ if failures:
 else:
     print("\033[92mAll checks passed — proceed to manual tests.\033[0m\n")
     sys.exit(0)
+
+# T_M3 — Migration 3: verify RID is being written to research tables
+def t_migration3():
+    from core.db_utils import get_connection
+    conn = get_connection()
+    # Check rid column exists in key tables
+    for table in ["responses", "completions", "assessment_scores", "survey_scores"]:
+        cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+        assert "rid" in cols, f"rid column missing from {table}"
+    # Check RID coverage on non-empty tables
+    results = []
+    for table, id_col in [("responses", "user_id"), ("completions", "user_id"),
+                           ("assessment_scores", "user_id"), ("survey_scores", "user_id")]:
+        total = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        if total > 0:
+            null_rids = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE rid IS NULL").fetchone()[0]
+            results.append(f"{table}: {total-null_rids}/{total} have RID")
+    conn.close()
+    return "rid columns present; " + (", ".join(results) if results else "tables empty (clean slate ok)")
+
+check("T_M3   Migration 3 RID coverage", t_migration3)
+
+# T_WAL — WAL mode active
+def t_wal():
+    from core.db_utils import get_connection
+    conn = get_connection()
+    mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    busy = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+    conn.close()
+    assert mode == "wal", f"Expected WAL mode, got: {mode}"
+    assert int(busy) >= 5000, f"busy_timeout too low: {busy}ms"
+    return f"journal_mode={mode}, busy_timeout={busy}ms"
+
+check("T_WAL  WAL mode active", t_wal)

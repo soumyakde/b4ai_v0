@@ -21,7 +21,8 @@ def submit_instrument(
     module_id: str,
     instrument_key: str,
     responses: dict,
-    score: float | None = None
+    score: float | None = None,
+    rid: str | None = None,
 ):
     """
     Handles submission of a survey or assessment instrument.
@@ -30,7 +31,18 @@ def submit_instrument(
     - Instrument semantics come from progress_engine
     - Resolver provides validated module access
     - Registry is NOT used for completion logic
+
+    Migration 3: rid is the Research Identifier written alongside user_id.
+    If not supplied by the caller, it is resolved from user_manager.
+    This keeps all module files unchanged.
     """
+    # Migration 3 — resolve RID if caller did not supply one
+    if rid is None:
+        try:
+            from auth.user_manager import get_user_rid
+            rid = get_user_rid(user_id)
+        except Exception:
+            rid = None  # graceful fallback — shadow-write fails silently
 
     # --------------------------------------------------
     # 1️⃣ Resolve module once (single source of truth)
@@ -69,10 +81,11 @@ def submit_instrument(
     for question_id, response_value in responses.items():
         cur.execute("""
             INSERT INTO responses
-            (user_id, instrument_name, question_id, response_value, submitted_at)
-            VALUES (?, ?, ?, ?, ?)
+            (user_id, rid, instrument_name, question_id, response_value, submitted_at)
+            VALUES (?, ?, ?, ?, ?, ?)
         """, (
             user_id,
+            rid,
             stored_name,
             question_id,
             str(response_value),
@@ -89,24 +102,26 @@ def submit_instrument(
         if instrument_type == "survey":
             cur.execute("""
                 INSERT INTO survey_scores
-                (user_id, survey_key, score, calculated_at)
-                VALUES (?, ?, ?, ?)
+                (user_id, rid, survey_key, score, calculated_at)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(user_id, survey_key)
                 DO UPDATE SET
+                    rid = excluded.rid,
                     score = excluded.score,
                     calculated_at = excluded.calculated_at
-            """, (user_id, instrument_key, score, timestamp))
+            """, (user_id, rid, instrument_key, score, timestamp))
 
         elif instrument_type == "assessment":
             cur.execute("""
                 INSERT INTO assessment_scores
-                (user_id, assessment_code, score, calculated_at)
-                VALUES (?, ?, ?, ?)
+                (user_id, rid, assessment_code, score, calculated_at)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(user_id, assessment_code)
                 DO UPDATE SET
+                    rid = excluded.rid,
                     score = excluded.score,
                     calculated_at = excluded.calculated_at
-            """, (user_id, instrument_key, score, timestamp))
+            """, (user_id, rid, instrument_key, score, timestamp))
 
         else:
             raise ValueError(

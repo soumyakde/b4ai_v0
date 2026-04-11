@@ -166,16 +166,23 @@ def mark_instrument_complete(
     module_id: str,
     instrument_key: str,
     db_path: Path = None,
+    rid: str | None = None,
 ):
+    if rid is None:
+        try:
+            from auth.user_manager import get_user_rid
+            rid = get_user_rid(user_id)
+        except Exception:
+            rid = None
     conn = get_connection(db_path)
     cur  = conn.cursor()
     p    = _placeholder()
 
     cur.execute(f"""
         INSERT OR IGNORE INTO completions
-        (user_id, module_id, instrument_key, completed_at)
-        VALUES ({p}, {p}, {p}, {p})
-    """, (user_id, module_id, instrument_key, datetime.utcnow().isoformat()))
+        (user_id, rid, module_id, instrument_key, completed_at)
+        VALUES ({p}, {p}, {p}, {p}, {p})
+    """, (user_id, rid, module_id, instrument_key, datetime.utcnow().isoformat()))
 
     conn.commit()
     conn.close()
