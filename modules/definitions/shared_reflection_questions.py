@@ -3,13 +3,13 @@
 
 REFLECTION_QUESTIONS = [
     {
-        "id": "conceptual_change",
+        "id": "cognitive engagement",
         "text": (
-            "Think about what you knew about AI before this module and what you know now. What is the one new thing about AI that you know now and can explain that you couldn’t explain before this module? You may use an example to help explain your answer."),
+            "Before this module, what did you think AI was? What new idea did you learn in this module? How did the game or activity help you understand this idea? You can use an example."),
     },
     {
-        "id": "module_takeaway",
+        "id": "module takeaway",
         "text": (
-            "Summarize in your own words, what did this module teach you about AI? What AI is or how it works? Did the concepts/activities in the module help you understand AI better? You can also share whether the module was easy or hard to understand? Did anything in this module remind you of anything you experienced before?"),
+            "What is the one important thing you will remember from this module? How could you use this idea in real life or in another situation? Did anything in the module remind you of something you already knew or experienced?"),
     },
 ]
