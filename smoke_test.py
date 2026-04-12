@@ -77,16 +77,6 @@ def t_research():
 
 check("T_RES  research DB reachable", t_research)
 
-# Summary
-print(f"\n{'='*30}")
-if failures:
-    print(f"\033[91m{len(failures)} check(s) failed:\033[0m {', '.join(failures)}")
-    print("Fix these before proceeding to manual tests.\n")
-    sys.exit(1)
-else:
-    print("\033[92mAll checks passed — proceed to manual tests.\033[0m\n")
-    sys.exit(0)
-
 # T_M3 — Migration 3: verify RID is being written to research tables
 def t_migration3():
     from core.db_utils import get_connection
@@ -120,3 +110,13 @@ def t_wal():
     return f"journal_mode={mode}, busy_timeout={busy}ms"
 
 check("T_WAL  WAL mode active", t_wal)
+
+# Summary
+print(f"\n{'='*30}")
+if failures:
+    print(f"\033[91m{len(failures)} check(s) failed:\033[0m {', '.join(failures)}")
+    print("Fix these before proceeding to manual tests.\n")
+    sys.exit(1)
+else:
+    print("\033[92mAll checks passed — proceed to manual tests.\033[0m\n")
+    sys.exit(0)
