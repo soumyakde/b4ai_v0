@@ -18,15 +18,16 @@ from datetime import datetime
 DB_TYPE = os.getenv("DB_TYPE", "sqlite").lower()
 
 # ── SQLite path resolution ────────────────────────────────────────────────────
-# Priority: SQLITE_PATH env var → default "responses.db" relative to project root
+# Priority 1: SQLITE_PATH env var (set in docker-compose.yml and Railway)
+# Priority 2: DATA_DIR env var / default /app/data (Railway volume mount)
+# Priority 3: project root relative path (local dev without Docker)
 _ENV_SQLITE_PATH = os.getenv("SQLITE_PATH")
 if _ENV_SQLITE_PATH:
     DB_PATH = Path(_ENV_SQLITE_PATH)
 else:
-    # Fall back to path relative to this file (works both locally and in Docker)
-    # DB_PATH = Path(__file__).resolve().parents[2] / "responses.db"
-    # One character change on the fallback line. Change parents[2] to parents[1], change to (yet to be checked):
-    DB_PATH = Path(__file__).resolve().parents[1] / "responses.db"
+    _DATA_DIR = Path(os.getenv("DATA_DIR", str(Path(__file__).resolve().parents[1])))
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    DB_PATH = _DATA_DIR / "responses.db"
 
 def get_connection(db_path: Path = None):
     """
@@ -94,6 +95,7 @@ def init_db(db_path: Path = None):
         CREATE TABLE IF NOT EXISTS responses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT NOT NULL,
+            rid TEXT,
             instrument_name TEXT NOT NULL,
             question_id TEXT NOT NULL,
             response_value TEXT,
@@ -113,6 +115,7 @@ def init_db(db_path: Path = None):
         CREATE TABLE IF NOT EXISTS survey_scores (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT NOT NULL,
+            rid TEXT,
             survey_key TEXT NOT NULL,
             score REAL,
             calculated_at TEXT NOT NULL,
@@ -127,6 +130,7 @@ def init_db(db_path: Path = None):
         CREATE TABLE IF NOT EXISTS assessment_scores (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT NOT NULL,
+            rid TEXT,
             assessment_code TEXT NOT NULL,
             score REAL,
             calculated_at TEXT NOT NULL,
@@ -141,6 +145,7 @@ def init_db(db_path: Path = None):
         CREATE TABLE IF NOT EXISTS completions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT NOT NULL,
+            rid TEXT,
             module_id TEXT NOT NULL,
             instrument_key TEXT NOT NULL,
             completed_at TEXT NOT NULL,
@@ -152,6 +157,15 @@ def init_db(db_path: Path = None):
         CREATE INDEX IF NOT EXISTS idx_completions_user_module
         ON completions(user_id, module_id);
     """)
+
+    # ── Auto-migrate existing DBs: add rid column if missing (idempotent) ──
+    # Handles the case where the DB was created before Migration 1.
+    # Safe to run on every startup — fails silently if column already exists.
+    for _tbl in ["responses", "completions", "survey_scores", "assessment_scores"]:
+        try:
+            conn.execute(f"ALTER TABLE {_tbl} ADD COLUMN rid TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists — expected on all non-fresh DBs
 
     conn.commit()
     conn.close()
