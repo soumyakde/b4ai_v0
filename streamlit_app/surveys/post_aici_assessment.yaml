@@ -11,9 +11,7 @@ description: Survey assessing understanding of basic AI concepts.
 questions:
   - id: Q4_1
     text: >
-      Review the following technology scenarios and indicate whether or not
-      they involve artificial intelligence (AI). Scenario: A software that can
-      classify different types of hats based on the type.
+      Review the following technology scenarios and indicate whether or not they involve artificial intelligence (AI). Scenario: A software that can classify different types of hats based on the type.
     type: select
     options:
       - "A: Artificial Intelligence"
@@ -21,9 +19,7 @@ questions:
 
   - id: Q4_2
     text: >
-      Review the following technology scenarios and indicate whether or not
-      they involve artificial intelligence (AI). Scenario: A facial recognition
-      software that can tell whether you or your friends are in the picture.
+      Review the following technology scenarios and indicate whether or not they involve artificial intelligence (AI). Scenario: A facial recognition software that can tell whether you or your friends are in the picture.
     type: select
     options:
       - "A: Artificial Intelligence"
@@ -31,9 +27,7 @@ questions:
 
   - id: Q4_3
     text: >
-      An automatic door opens when someone steps onto the mat in front of it.
-      This mat includes a pressure sensor that sends a signal to the actuator
-      attached to the door to open. Does this automatic door use a dataset?
+      An automatic door opens when someone steps onto the mat in front of it. This mat includes a pressure sensor that sends a signal to the actuator attached to the door to open. Does this automatic door use a dataset?
     type: select
     options:
       - "A: Yes"
@@ -41,9 +35,7 @@ questions:
 
   - id: Q4_4
     text: >
-      A phone app keeps a record of the types of games you played before. When
-      a new game is released that you might like, it will tell you about it.
-      Does this app make a prediction?
+      A phone app keeps a record of the types of games you played before. When a new game is released that you might like, it will tell you about it. Does this app make a prediction?
     type: select
     options:
       - "A: Yes"
@@ -51,11 +43,7 @@ questions:
 
   - id: Q4_5
     text: >
-      A school stores all of its students' contact information in a computer
-      program. This student data includes their email address, phone number,
-      and address. The school uses software to help search for information
-      about certain students. For example, the school could identify all of
-      the 4th grade students. Does this computer program use a dataset?
+      A school stores all of its students' contact information in a computer program. This student data includes their email address, phone number, and address. The school uses software to help search for information about certain students. For example, the school could identify all of the 4th grade students. Does this computer program use a dataset?
     type: select
     options:
       - "A: Yes"
@@ -63,11 +51,7 @@ questions:
 
   - id: Q4_6
     text: >
-      A school stores all of its students' contact information in a computer
-      program. This student data includes their email address, phone number,
-      and address. The school uses software to help search for information
-      about certain students. For example, the school could identify all of
-      the 4th grade students. Does this computer program make a prediction?
+      A school stores all of its students' contact information in a computer program. This student data includes their email address, phone number, and address. The school uses software to help search for information about certain students. For example, the school could identify all of the 4th grade students. Does this computer program make a prediction?
     type: select
     options:
       - "A: Yes"
@@ -75,10 +59,8 @@ questions:
 
   - id: Q4_7
     text: >
-      Computers make use of decision trees to classify data. Below is an image
-      of a decision tree. Based on the decision tree above, in which category
-      will the blueberry end up?
-    image: "assets/images/q4.7-img.jpg"
+      Computers make use of decision trees to classify data. Below is an image of a decision tree. Based on the decision tree above, in which category will the blueberry end up?
+    image: "streamlit_app/assets/images/q4.7-img.jpg"
     type: select
     options:
       - "A: Category of Bananas"
@@ -88,9 +70,8 @@ questions:
 
   - id: Q4_8
     text: >
-      Below is an image of a decision tree. Pick which question was most likely
-      used at the '?' oval to classify this set of fruit.
-    image: "assets/images/q4.8-img.jpg"
+      Below is an image of a decision tree. Pick which question was most likely used at the '?' oval to classify this set of fruit.
+    image: "streamlit_app/assets/images/q4.8-img.jpg"
     type: select
     options:
       - "A: Is it sour?"
@@ -100,9 +81,8 @@ questions:
 
   - id: Q4_9
     text: >
-      Below is an image of a decision tree. Pick which question was most likely
-      used at the '?' oval to classify the set of fruit.
-    image: "assets/images/q4.9-img.jpg"
+      Below is an image of a decision tree. Pick which question was most likely used at the '?' oval to classify the set of fruit.
+    image: "streamlit_app/assets/images/q4.9-img.jpg"
     type: select
     options:
       - "A: Is it red?"
@@ -112,30 +92,18 @@ questions:
 
   - id: Q4_10
     text: >
-      Humans make decision trees to classify data. Below is a diagram of the
-      steps a person takes during this process. The backward arrow from Step 3
-      to Step 2 indicates that Steps 2 and 3 happen repeatedly. What should
-      the person do in Steps 2 and 3?
-    image: "assets/images/q4.10-img.jpg"
+      Humans make decision trees to classify data. Below is a diagram of the steps a person takes during this process. The backward arrow from Step 3 to Step 2 indicates that Steps 2 and 3 happen repeatedly. What should the person do in Steps 2 and 3?
+    image: "streamlit_app/assets/images/q4.10-img.jpg"
     type: select
     options:
-      - >
-        "A: Split the set based on the question; then pick a feature of the
-        data to ask about."
-      - >
-        "B: Pick a feature of the data to ask about; then split the dataset
-        based on the question."
-      - >
-        "C: Pick a feature of the data to ask about; then decide what the leaves
-        of the tree would be."
-      - >
-        "D: Decide what the leaves of the tree would be; then pick a feature
-        of the data to ask about."
+      - "A: Split the set based on the question; then pick a feature of the data to ask about."
+      - "B: Pick a feature of the data to ask about; then split the dataset based on the question."
+      - "C: Pick a feature of the data to ask about; then decide what the leaves of the tree would be."
+      - "D: Decide what the leaves of the tree would be; then pick a feature of the data to ask about."
 
   - id: Q4_11
     text: >
-      A doctor sends x-ray scans out to an AI to determine whether or not you
-      have broken a bone. Is this an example of an AI classifying or generating?
+      A doctor sends x-ray scans out to an AI to determine whether or not you have broken a bone. Is this an example of an AI classifying or generating?
     type: select
     options:
       - "A: Classifying"
@@ -143,8 +111,7 @@ questions:
 
   - id: Q4_12
     text: >
-      An app converts the style of your face to a Van Gogh painting. Is this
-      an example of an AI classifying or generating?
+      An app converts the style of your face to a Van Gogh painting. Is this an example of an AI classifying or generating?
     type: select
     options:
       - "A: Classifying"
@@ -152,9 +119,7 @@ questions:
 
   - id: Q4_13
     text: >
-      A machine is given a dataset of thousands of audio clips (containing
-      sounds only) and generates a new audio clip similar to the dataset.
-      What was the learning method referred to in the above scenario?
+      A machine is given a dataset of thousands of audio clips (containing sounds only) and generates a new audio clip similar to the dataset. What was the learning method referred to in the above scenario?
     type: select
     options:
       - "A: Unsupervised learning"
@@ -163,10 +128,7 @@ questions:
 
   - id: Q4_14
     text: >
-      A machine is given a dataset of images of flowers with the identification
-      of whether the image is an image of a 'tulip' or 'not tulip' and is
-      trained to identify when an image contains a 'tulip'. What was the
-      learning method referred to in the above scenario?
+      A machine is given a dataset of images of flowers with the identification of whether the image is an image of a 'tulip' or 'not tulip' and is trained to identify when an image contains a 'tulip'. What was the learning method referred to in the above scenario?
     type: select
     options:
       - "A: Unsupervised learning"
@@ -175,9 +137,7 @@ questions:
 
   - id: Q4_15
     text: >
-      A machine is given a dataset of images of dogs (without naming them)
-      and can group different dogs by their types. What was the learning
-      method referred to in the above scenario?
+      A machine is given a dataset of images of dogs (without naming them) and can group different dogs by their types. What was the learning method referred to in the above scenario?
     type: select
     options:
       - "A: Unsupervised learning"
@@ -186,10 +146,8 @@ questions:
 
   - id: Q4_16
     text: >
-      An AI technology has been trained to classify images only using the
-      following data. Which of the following would you expect the technology
-      to predict?
-    image: "assets/images/q4.16-img.jpg"
+      An AI technology has been trained to classify images only using the following data. Which of the following would you expect the technology to predict?
+    image: "streamlit_app/assets/images/q4.16-img.jpg"
     type: select
     options:
       - "A: All crunchy things are broccoli"
@@ -199,9 +157,8 @@ questions:
 
   - id: Q4_17
     text: >
-      An AI technology has been trained to classify images only using the
-      following data.
-    image: "assets/images/q4.17-img.jpg"
+      An AI technology has been trained to classify images only using the following data.
+    image: "streamlit_app/assets/images/q4.17-img.jpg"
     type: select
     options:
       - "A: Broccoli"
@@ -210,31 +167,23 @@ questions:
 
   - id: Q4_18
     text: >
-      Samantha uses labeled pictures to train an AI technology to tell if a
-      picture has her in it or not. During the training phase, if the technology
-      identifies incorrectly, what does she do to improve the system?
+      Samantha uses labeled pictures to train an AI technology to tell if a picture has her in it or not. During the training phase, if the technology identifies incorrectly, what does she do to improve the system?
     type: select
     options:
       - "A: Strengthen or weaken connections in the network"
-      - "B: Ask the algorithm to remember the picture that AI technology
-        identifies wrong"
+      - "B: Ask the algorithm to remember the picture that AI technology identifies wrong"
       - "C: Delete the picture"
-      - "D: Change the label of the picture so that the AI technology won't
-        identify it incorrectly"
+      - "D: Change the label of the picture so that the AI technology won't identify it incorrectly"
 
   - id: Q4_19
     text: >
-      An AI technology can recognize men's shoes accurately but not women's
-      shoes. Which of the following could be the cause?
+      An AI technology can recognize men's shoes accurately but not women's shoes. Which of the following could be the cause?
     type: select
     options:
-      - "A: The dataset it uses to learn to identify shoes only includes
-        men's shoes"
+      - "A: The dataset it uses to learn to identify shoes only includes men's shoes"
       - "B: No brand labels make women's shoes"
-      - "C: Women's shoes are smaller than men's shoes, making them
-        difficult to identify"
-      - "D: The dataset it uses to learn to identify shoes only includes
-        women's shoes"
+      - "C: Women's shoes are smaller than men's shoes, making them difficult to identify"
+      - "D: The dataset it uses to learn to identify shoes only includes women's shoes"
 
   - id: Q4_20
     text: >
