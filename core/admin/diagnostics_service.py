@@ -76,7 +76,9 @@ def get_research_metrics():
     """
     Returns counts of research-related tables in responses.db.
     """
-    conn = sqlite3.connect(RESPONSES_DB)
+    # Resolve path at call time — not at module import time
+    from core.db_utils import get_connection
+    conn = get_connection()
     cursor = conn.cursor()
 
     stats = {}
