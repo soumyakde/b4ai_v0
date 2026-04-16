@@ -25,7 +25,3 @@ pdfplumber
 pypdf
 python-docx
 apscheduler
-torch==2.2.2+cpu
-torchvision==0.17.2+cpu
-transformers==4.38.2
-sentence-transformers==2.6.1
