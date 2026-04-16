@@ -22,11 +22,20 @@ os.environ['R_HOME'] = r'C:\Program Files\R\R-4.5.2'
 os.environ['RPY2_CFFI_MODE'] = 'ABI'
 
 # Load .env file into os.environ (python-dotenv — safe no-op if file absent)
+#try:
+#    from dotenv import load_dotenv
+#    load_dotenv()
+#except ImportError:
+#    pass
+
+# above code worked but can't check survey scores table updates, so changed to the following
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    if os.getenv("RAILWAY_ENVIRONMENT") is None:
+        load_dotenv()
 except ImportError:
     pass
+# -------------END
 
 # 2. PATH SETUP
 root = Path(__file__).resolve().parents[1]
@@ -123,6 +132,90 @@ init_login_attempts_table()
 
 # Seed super admin on first boot (idempotent — safe to call every run)
 seed_super_admin()
+
+# ==========================================================
+# 🚨 DEBUG BLOCK — survey_scores DATA VALIDATION
+# ==========================================================
+print("=== DB DEBUG START (survey_scores) ===")
+
+import os
+from core.db_utils import get_connection
+
+print("SQLITE_PATH (runtime):", os.getenv("SQLITE_PATH"))
+
+try:
+    conn = get_connection()
+
+    # 1. Total row count (your original check)
+    try:
+        n = conn.execute("SELECT COUNT(*) FROM survey_scores").fetchone()[0]
+        print("survey_scores total count:", n)
+    except Exception as e:
+        print("ERROR counting survey_scores:", e)
+
+    # 2. Dump actual rows (limit to avoid log explosion)
+    try:
+        rows = conn.execute(
+            "SELECT user_id, survey_key, score FROM survey_scores LIMIT 50"
+        ).fetchall()
+
+        print(f"Fetched {len(rows)} rows (showing up to 50):")
+
+        for r in rows:
+            try:
+                print(dict(r))
+            except Exception:
+                print(r)
+
+    except Exception as e:
+        print("ERROR fetching rows:", e)
+
+    # 3. Grouped counts (THIS is usually where the bug reveals itself)
+    try:
+        grouped = conn.execute("""
+            SELECT survey_key, COUNT(*) as cnt
+            FROM survey_scores
+            GROUP BY survey_key
+            ORDER BY survey_key
+        """).fetchall()
+
+        print("Counts by survey_key:")
+        for g in grouped:
+            try:
+                print(dict(g))
+            except Exception:
+                print(g)
+
+    except Exception as e:
+        print("ERROR grouping by survey_key:", e)
+
+    # 4. Check duplicates per user+survey (common hidden bug)
+    try:
+        dupes = conn.execute("""
+            SELECT user_id, survey_key, COUNT(*) as cnt
+            FROM survey_scores
+            GROUP BY user_id, survey_key
+            HAVING cnt > 1
+        """).fetchall()
+
+        print("Duplicate entries (user_id + survey_key):", len(dupes))
+        for d in dupes[:20]:
+            try:
+                print(dict(d))
+            except Exception:
+                print(d)
+
+    except Exception as e:
+        print("ERROR checking duplicates:", e)
+
+    conn.close()
+
+except Exception as e:
+    print("DB CONNECTION ERROR:", e)
+
+print("=== DB DEBUG END ===")
+# ==========================================================
+    
 
 # ----------------------------------------------------------
 # PAGE CONFIG
