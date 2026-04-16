@@ -143,6 +143,61 @@ init_login_attempts_table()
 # Seed super admin on first boot (idempotent — safe to call every run)
 seed_super_admin()
 
+# ONE-TIME: backfill survey_scores from responses via scoring engine
+try:
+    from core.db_utils import get_connection as _gc
+    _conn = _gc()
+    _n = _conn.execute("SELECT COUNT(*) FROM survey_scores").fetchone()[0]
+    if _n == 0:
+        import yaml as _yaml
+        from pathlib import Path as _P
+        from core.scoring_engine import compute_score as _cs
+        _surveys_dir = _P(__file__).resolve().parents[1] / "streamlit_app" / "surveys"
+        _rows = _conn.execute(
+            "SELECT DISTINCT user_id, instrument_name FROM responses"
+        ).fetchall()
+        _backfilled = 0
+        for _row in _rows:
+            _uid, _iname = _row[0], _row[1]
+            # strip module prefix to get instrument key
+            _key = _iname
+            for _pfx in ["module1_","module2_","module3_","module4_",
+                         "module5_","module6_","module7_","precourse_","postcourse_"]:
+                if _iname.startswith(_pfx):
+                    _key = _iname[len(_pfx):]
+                    break
+            _fkey = _key.removesuffix("_survey")
+            _sf = _surveys_dir / f"{_fkey}_scoring.yaml"
+            if not _sf.exists():
+                continue
+            with open(_sf, encoding="utf-8") as _f:
+                _syaml = _yaml.safe_load(_f)
+            _resp_rows = _conn.execute(
+                "SELECT question_id, response_value FROM responses WHERE user_id=? AND instrument_name=?",
+                (_uid, _iname)
+            ).fetchall()
+            _resps = {r[0]: r[1] for r in _resp_rows}
+            try:
+                _score = float(_cs(_resps, _syaml))
+                from datetime import datetime as _dt
+                _conn.execute("""
+                    INSERT INTO survey_scores (user_id, rid, survey_key, score, calculated_at)
+                    VALUES (?, (SELECT rid FROM users WHERE username=? LIMIT 1), ?, ?, ?)
+                    ON CONFLICT(user_id, survey_key) DO UPDATE SET
+                        score=excluded.score, calculated_at=excluded.calculated_at
+                """, (_uid, _uid, _key, _score, _dt.utcnow().isoformat()))
+                _backfilled += 1
+            except Exception:
+                pass
+        _conn.commit()
+        if _backfilled:
+            import logging as _lg
+            _lg.getLogger(__name__).info(f"Backfilled {_backfilled} survey_scores rows")
+    _conn.close()
+except Exception:
+    pass
+# - After confirming survey scores show in admin dashboard, remove the above and below blocks
+
 # ==========================================================
 # 🚨 DEBUG BLOCK — survey_scores DATA VALIDATION
 # ==========================================================
