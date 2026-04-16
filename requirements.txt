@@ -29,3 +29,4 @@ pypdf
 python-docx
 apscheduler
 torch==2.2.2+cpu
+torchvision

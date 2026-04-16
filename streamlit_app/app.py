@@ -51,9 +51,19 @@ except Exception:
     to_r = to_pd = None
 
 # 3b. Suppress sentence-transformers / HuggingFace loading noise
+#import logging as _logging
+#_logging.getLogger("transformers").setLevel(_logging.ERROR)
+#_logging.getLogger("sentence_transformers").setLevel(_logging.ERROR)
+#try:
+#    import transformers as _tf
+#    _tf.logging.set_verbosity_error()
+#except Exception:
+#    pass
+# 3b. Suppress transformers / Streamlit noise (STRONG suppression)
 import logging as _logging
-_logging.getLogger("transformers").setLevel(_logging.ERROR)
-_logging.getLogger("sentence_transformers").setLevel(_logging.ERROR)
+_logging.getLogger("transformers").setLevel(_logging.CRITICAL)
+_logging.getLogger("sentence_transformers").setLevel(_logging.CRITICAL)
+_logging.getLogger("streamlit").setLevel(_logging.ERROR)
 try:
     import transformers as _tf
     _tf.logging.set_verbosity_error()
