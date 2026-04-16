@@ -1,5 +1,4 @@
-﻿--extra-index-url https://download.pytorch.org/whl/cpu
-streamlit
+﻿streamlit
 passlib
 bcrypt
 python-dotenv
@@ -11,11 +10,9 @@ pytest
 openai
 anthropic
 google-genai
-transformers
-sentence-transformers
 tqdm
 altair
-numpy
+numpy==1.26.4
 matplotlib
 plotly
 scikit-learn
@@ -29,4 +26,6 @@ pypdf
 python-docx
 apscheduler
 torch==2.2.2+cpu
-torchvision
+torchvision==0.17.2+cpu
+transformers==4.38.2
+sentence-transformers==2.6.1
