@@ -143,68 +143,6 @@ init_login_attempts_table()
 # Seed super admin on first boot (idempotent — safe to call every run)
 seed_super_admin()
 
-# ONE-TIME: backfill survey_scores from responses via scoring engine
-# Runs only when survey_scores is empty. Safe to leave in — skips if data exists.
-try:
-    import yaml as _yaml
-    from pathlib import Path as _P
-    from datetime import datetime as _dt
-    from core.db_utils import get_connection as _gc
-    from core.scoring_engine import compute_score as _cs
-    from auth.user_manager import get_user_rid as _gur
-
-    _conn = _gc()
-    _n = _conn.execute("SELECT COUNT(*) FROM survey_scores").fetchone()[0]
-    if _n == 0:
-        # surveys dir relative to this file: streamlit_app/surveys/
-        _surveys_dir = _P(__file__).resolve().parent / "surveys"
-        _rows = _conn.execute(
-            "SELECT DISTINCT user_id, instrument_name FROM responses"
-        ).fetchall()
-        _backfilled = 0
-        for _row in _rows:
-            _uid, _iname = _row[0], _row[1]
-            _key = _iname
-            for _pfx in ["module1_","module2_","module3_","module4_",
-                         "module5_","module6_","module7_","precourse_","postcourse_"]:
-                if _iname.startswith(_pfx):
-                    _key = _iname[len(_pfx):]
-                    break
-            _fkey = _key.removesuffix("_survey")
-            _sf = _surveys_dir / f"{_fkey}_scoring.yaml"
-            if not _sf.exists():
-                continue
-            with open(_sf, encoding="utf-8") as _f:
-                _syaml = _yaml.safe_load(_f)
-            _resp_rows = _conn.execute(
-                "SELECT question_id, response_value FROM responses "
-                "WHERE user_id=? AND instrument_name=?",
-                (_uid, _iname)
-            ).fetchall()
-            _resps = {r[0]: r[1] for r in _resp_rows}
-            try:
-                _score = float(_cs(_resps, _syaml))
-                _rid = _gur(_uid)  # resolved from users.db, not via subquery
-                _conn.execute("""
-                    INSERT INTO survey_scores (user_id, rid, survey_key, score, calculated_at)
-                    VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT(user_id, survey_key) DO UPDATE SET
-                        rid=excluded.rid, score=excluded.score,
-                        calculated_at=excluded.calculated_at
-                """, (_uid, _rid, _key, _score, _dt.utcnow().isoformat()))
-                _backfilled += 1
-            except Exception:
-                pass
-        _conn.commit()
-        import logging as _lg
-        _lg.getLogger(__name__).info(f"survey_scores backfill: {_backfilled} rows written")
-    _conn.close()
-except Exception as _e:
-    import logging as _lg
-    _lg.getLogger(__name__).warning(f"survey_scores backfill failed: {_e}")
-
-    
-
 # ----------------------------------------------------------
 # PAGE CONFIG
 # ----------------------------------------------------------
