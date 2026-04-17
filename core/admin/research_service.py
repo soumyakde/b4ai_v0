@@ -27,9 +27,10 @@ INSTRUMENTS_DIR = BASE_DIR / "streamlit_app" / "surveys"
 # ---------------------------------------------------------
 # DATABASE CONNECTION
 # ---------------------------------------------------------
-
-def get_connection():
-    return sqlite3.connect(RESPONSES_DB)
+# --survey scores zero despite submitting surveys
+#def get_connection():
+#    return sqlite3.connect(RESPONSES_DB)
+from core.db_utils import get_connection
 
 # ---------------------------------------------------------
 # DISCOVER LOADED INSTRUMENTS

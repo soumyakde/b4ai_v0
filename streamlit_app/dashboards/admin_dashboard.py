@@ -694,6 +694,19 @@ def show_admin_dashboard(username: str):
                     st.rerun()
 
         # ── Dataset Metrics ───────────────────────────────────────────────────
+        # --- Begin DEBUG for ensuring correct database is being read to read survey scores
+        from core.db_utils import get_connection
+        
+        conn = get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT COUNT(*) FROM survey_scores")
+            st.write("DEBUG — survey_scores rows:", cursor.fetchone()[0])
+        except Exception as e:
+            st.write("DEBUG ERROR:", e)
+        conn.close()
+        # ---END of DEBUG
+        
         st.subheader("Dataset Metrics")
         try:
             metrics = diagnostics_service.get_research_metrics()
