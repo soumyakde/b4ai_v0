@@ -144,22 +144,26 @@ init_login_attempts_table()
 seed_super_admin()
 
 # ONE-TIME: backfill survey_scores from responses via scoring engine
+# Runs only when survey_scores is empty. Safe to leave in — skips if data exists.
 try:
+    import yaml as _yaml
+    from pathlib import Path as _P
+    from datetime import datetime as _dt
     from core.db_utils import get_connection as _gc
+    from core.scoring_engine import compute_score as _cs
+    from auth.user_manager import get_user_rid as _gur
+
     _conn = _gc()
     _n = _conn.execute("SELECT COUNT(*) FROM survey_scores").fetchone()[0]
     if _n == 0:
-        import yaml as _yaml
-        from pathlib import Path as _P
-        from core.scoring_engine import compute_score as _cs
-        _surveys_dir = _P(__file__).resolve().parents[1] / "streamlit_app" / "surveys"
+        # surveys dir relative to this file: streamlit_app/surveys/
+        _surveys_dir = _P(__file__).resolve().parent / "surveys"
         _rows = _conn.execute(
             "SELECT DISTINCT user_id, instrument_name FROM responses"
         ).fetchall()
         _backfilled = 0
         for _row in _rows:
             _uid, _iname = _row[0], _row[1]
-            # strip module prefix to get instrument key
             _key = _iname
             for _pfx in ["module1_","module2_","module3_","module4_",
                          "module5_","module6_","module7_","precourse_","postcourse_"]:
@@ -173,113 +177,32 @@ try:
             with open(_sf, encoding="utf-8") as _f:
                 _syaml = _yaml.safe_load(_f)
             _resp_rows = _conn.execute(
-                "SELECT question_id, response_value FROM responses WHERE user_id=? AND instrument_name=?",
+                "SELECT question_id, response_value FROM responses "
+                "WHERE user_id=? AND instrument_name=?",
                 (_uid, _iname)
             ).fetchall()
             _resps = {r[0]: r[1] for r in _resp_rows}
             try:
                 _score = float(_cs(_resps, _syaml))
-                from datetime import datetime as _dt
+                _rid = _gur(_uid)  # resolved from users.db, not via subquery
                 _conn.execute("""
                     INSERT INTO survey_scores (user_id, rid, survey_key, score, calculated_at)
-                    VALUES (?, (SELECT rid FROM users WHERE username=? LIMIT 1), ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(user_id, survey_key) DO UPDATE SET
-                        score=excluded.score, calculated_at=excluded.calculated_at
-                """, (_uid, _uid, _key, _score, _dt.utcnow().isoformat()))
+                        rid=excluded.rid, score=excluded.score,
+                        calculated_at=excluded.calculated_at
+                """, (_uid, _rid, _key, _score, _dt.utcnow().isoformat()))
                 _backfilled += 1
             except Exception:
                 pass
         _conn.commit()
-        if _backfilled:
-            import logging as _lg
-            _lg.getLogger(__name__).info(f"Backfilled {_backfilled} survey_scores rows")
+        import logging as _lg
+        _lg.getLogger(__name__).info(f"survey_scores backfill: {_backfilled} rows written")
     _conn.close()
-except Exception:
-    pass
-# - After confirming survey scores show in admin dashboard, remove the above and below blocks
+except Exception as _e:
+    import logging as _lg
+    _lg.getLogger(__name__).warning(f"survey_scores backfill failed: {_e}")
 
-# ==========================================================
-# 🚨 DEBUG BLOCK — survey_scores DATA VALIDATION
-# ==========================================================
-print("=== DB DEBUG START (survey_scores) ===")
-
-import os
-from core.db_utils import get_connection
-
-print("SQLITE_PATH (runtime):", os.getenv("SQLITE_PATH"))
-
-try:
-    conn = get_connection()
-
-    # 1. Total row count (your original check)
-    try:
-        n = conn.execute("SELECT COUNT(*) FROM survey_scores").fetchone()[0]
-        print("survey_scores total count:", n)
-    except Exception as e:
-        print("ERROR counting survey_scores:", e)
-
-    # 2. Dump actual rows (limit to avoid log explosion)
-    try:
-        rows = conn.execute(
-            "SELECT user_id, survey_key, score FROM survey_scores LIMIT 50"
-        ).fetchall()
-
-        print(f"Fetched {len(rows)} rows (showing up to 50):")
-
-        for r in rows:
-            try:
-                print(dict(r))
-            except Exception:
-                print(r)
-
-    except Exception as e:
-        print("ERROR fetching rows:", e)
-
-    # 3. Grouped counts (THIS is usually where the bug reveals itself)
-    try:
-        grouped = conn.execute("""
-            SELECT survey_key, COUNT(*) as cnt
-            FROM survey_scores
-            GROUP BY survey_key
-            ORDER BY survey_key
-        """).fetchall()
-
-        print("Counts by survey_key:")
-        for g in grouped:
-            try:
-                print(dict(g))
-            except Exception:
-                print(g)
-
-    except Exception as e:
-        print("ERROR grouping by survey_key:", e)
-
-    # 4. Check duplicates per user+survey (common hidden bug)
-    try:
-        dupes = conn.execute("""
-            SELECT user_id, survey_key, COUNT(*) as cnt
-            FROM survey_scores
-            GROUP BY user_id, survey_key
-            HAVING cnt > 1
-        """).fetchall()
-
-        print("Duplicate entries (user_id + survey_key):", len(dupes))
-        for d in dupes[:20]:
-            try:
-                print(dict(d))
-            except Exception:
-                print(d)
-
-    except Exception as e:
-        print("ERROR checking duplicates:", e)
-
-    conn.close()
-
-except Exception as e:
-    print("DB CONNECTION ERROR:", e)
-
-print("=== DB DEBUG END ===")
-# ==========================================================
     
 
 # ----------------------------------------------------------
