@@ -12,7 +12,7 @@ from core.db_utils import (
     mark_instrument_complete
 )
 
-# ✅ Resolver instance (safe — lightweight, no state mutation)
+# Resolver instance (safe — lightweight, no state mutation)
 resolver = LearningUnitResolver()
 
 
@@ -32,9 +32,8 @@ def submit_instrument(
     - Resolver provides validated module access
     - Registry is NOT used for completion logic
 
-    Migration 3: rid is the Research Identifier written alongside user_id.
-    If not supplied by the caller, it is resolved from user_manager.
-    This keeps all module files unchanged.
+    Migration 3: rid written alongside user_id in all research tables.
+    Auto-scoring: surveys scored from YAML when score=None.
     """
     # Migration 3 — resolve RID if caller did not supply one
     if rid is None:
@@ -42,14 +41,12 @@ def submit_instrument(
             from auth.user_manager import get_user_rid
             rid = get_user_rid(user_id)
         except Exception:
-            rid = None  # graceful fallback — shadow-write fails silently
+            rid = None
 
     # --------------------------------------------------
-    # 1️⃣ Resolve module once (single source of truth)
+    # 1 — Resolve module
     # --------------------------------------------------
     module = resolver.get(module_id)
-
-    # Validate instrument exists in module definition
     required = get_required_instruments(module)
 
     if instrument_key not in required:
@@ -60,18 +57,12 @@ def submit_instrument(
 
     conn = get_connection()
     cur = conn.cursor()
-
     timestamp = datetime.utcnow().isoformat()
 
     # --------------------------------------------------
-    # 2️⃣ Store individual responses
+    # 2 — Store individual responses
     # --------------------------------------------------
-    # Build a module-scoped name for the responses table only.
-    # MCQ keys are already prefixed (e.g. "module1_content_mcq_assessment"),
-    # so guard with the compact prefix ("module_1" -> "module1") to avoid
-    # double-prefixing. Everything else — completions, progress_engine,
-    # registry — continues to use the original instrument_key unchanged.
-    module_prefix = module_id.replace("_", "")   # "module_1" -> "module1"
+    module_prefix = module_id.replace("_", "")
     stored_name = (
         instrument_key
         if instrument_key.startswith(module_prefix)
@@ -83,21 +74,31 @@ def submit_instrument(
             INSERT INTO responses
             (user_id, rid, instrument_name, question_id, response_value, submitted_at)
             VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            user_id,
-            rid,
-            stored_name,
-            question_id,
-            str(response_value),
-            timestamp
-        ))
+        """, (user_id, rid, stored_name, question_id, str(response_value), timestamp))
 
     # --------------------------------------------------
-    # 3️⃣ Store score (if provided)
+    # 3 — Store score (auto-compute for surveys if score=None)
     # --------------------------------------------------
+    instrument_type = get_instrument_type(module, instrument_key)
+
+    # Auto-compute survey score when caller passes score=None.
+    # Reflections have instrument_type="reflection" and are skipped.
+    if score is None and instrument_type == "survey":
+        try:
+            from core.scoring_engine import compute_score
+            from pathlib import Path
+            import yaml
+            _scoring_dir = Path(__file__).resolve().parents[1] / "streamlit_app" / "surveys"
+            _file_key = instrument_key.removesuffix("_survey")
+            _scoring_file = _scoring_dir / f"{_file_key}_scoring.yaml"
+            if _scoring_file.exists():
+                with open(_scoring_file, "r", encoding="utf-8") as _f:
+                    _scoring_yaml = yaml.safe_load(_f)
+                score = float(compute_score(responses, _scoring_yaml))
+        except Exception:
+            score = None  # YAML missing or parse error — store None, no crash
+
     if score is not None:
-
-        instrument_type = get_instrument_type(module, instrument_key)
 
         if instrument_type == "survey":
             cur.execute("""
@@ -124,21 +125,14 @@ def submit_instrument(
             """, (user_id, rid, instrument_key, score, timestamp))
 
         else:
-            raise ValueError(
-                f"Unsupported instrument type '{instrument_type}'."
-            )
+            raise ValueError(f"Unsupported instrument type '{instrument_type}'.")
 
     conn.commit()
     conn.close()
 
     # --------------------------------------------------
-    # 4️⃣ Mark instrument complete (authoritative path)
+    # 4 — Mark instrument complete
     # --------------------------------------------------
-    # mark_instrument_complete internally re-validates via resolver + progress_engine
     mark_instrument_complete(user_id, module_id, instrument_key)
 
-    return {
-        "status": "success",
-        "instrument": instrument_key,
-        "module": module_id
-    }
+    return {"status": "success", "instrument": instrument_key, "module": module_id}
