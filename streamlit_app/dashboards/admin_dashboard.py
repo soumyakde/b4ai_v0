@@ -717,8 +717,8 @@ def show_admin_dashboard(username: str):
             col4.metric("Assessment Scores", metrics.get("total_assessment_scores", 0))
             col5.metric("LLM Ratings",       metrics.get("total_llm_ratings", 0))
             col6.metric("Human Ratings",     metrics.get("total_human_ratings", 0))
-            if DEBUG:
-                st.write("DEBUG — Metrics:", metrics)
+            #if DEBUG:
+            #    st.write("DEBUG — Metrics:", metrics)
         except Exception as e:
             st.error(f"Error: {e}")
 
