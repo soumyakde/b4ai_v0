@@ -3,13 +3,13 @@
 
 REFLECTION_QUESTIONS = [
     {
-        "id": "prior knowledge + conceptual learning + cognitive engagement",
+        "id": "schema construction + content acquisition + internalization + scaffolding + learning mechanism + curriculum effectiveness + prior knowledge activation + schema integration + transfer + abstraction",
         "text": (
-            "a) Before this module, what did you think AI was? b) What new idea did you learn in this module? c) How did the game or activity help you understand this idea? d) What did you do or notice in the game?"),
+            "a) What is the most important idea you learned in this activity? Explain it in your own words. b) What happened in the game or activity that helped you understand this idea? c) Did this activity remind you of something you already knew, did before, or experienced? How were they similar or different? d) Where else could you use this idea? Can you think of a different game, school subject, or real-life situation where it might help?"),
     },
     {
-        "id": "module takeaway",
+        "id": "attention + engagement + intrinsic motivation + identified regulation + comprehensibility + coherence + personal relevance",
         "text": (
-            "a) What is the one important thing you will remember from this module? b) How could you use this idea in real life or in another situation? c) Did anything in the module remind you of something you already knew or experienced? d) Was this module easy or hard to understand? e) What made it feel that way?"),
+            "a) What part of today's activity kept your attention the most? Why? b) What part of today's activity was most interesting or enjoyable? Why? c) Was anything confusing, difficult, or hard to understand? What would have helped? d) Did today's activity feel useful or important to you? Why or why not?"),
     },
 ]
