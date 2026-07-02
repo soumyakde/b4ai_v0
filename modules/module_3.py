@@ -177,6 +177,7 @@ def render_content_mcq(assessment_def, assessment_key, username):
             responses[qid] = st.radio(
                 "Select an option",
                 options,
+                index=None,
                 key=widget_key,
                 label_visibility="collapsed"
             )
@@ -325,6 +326,7 @@ def render_yaml_survey(survey_key, username):
                     responses[q_id] = st.radio(
                         labeled_text,
                         options,
+                        index=None,
                         key=widget_key
                     )
 
