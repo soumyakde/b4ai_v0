@@ -11,7 +11,7 @@ scoring_type: binary
 true_value: "True"
 
 correct_answers:
-  Q3_1: "False"
+  Q3_1: "True"
   Q3_2: "False"
   Q3_3: "False"
   Q3_4: "False"
