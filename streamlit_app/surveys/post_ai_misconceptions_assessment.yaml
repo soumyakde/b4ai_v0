@@ -9,7 +9,7 @@ title: "Post-Intervention: What you know about AI now?"
 
 questions:
   - id: Q3_1
-    text: "AI systems learn and understand what they are doing on their own."
+    text: "AI systems learn from data and feedback to decide and act on their own."
     type: select
     options:
       - "True"
