@@ -14,7 +14,7 @@
   {"id":"Q13","question":"Which term describes ignoring unimportant details so you can focus on the key parts of a problem?","options":["A)  Decomposition","B)  Supervised Learning","C)  Abstraction","D)  Sequential planning"]},
   {"id":"Q14","question":"Pictures of instructions to build a model is analogous to ________ for AI training?","options":["A)  Experience","B)  Data","C)  Decomposition","D)  Abstraction"]},
   {"id":"Q15","question":"A mechanical maze is an example of a:","options":["A)  Dynamic environment","B)  Static environment"]},
-  {"id":"Q16","question":"Defining a problem includes understanding which of the following?","options":["If it is single-agent or multi-agent","If the problem is known or unknown","If it is static or dynamic","All of the above"]},
+  {"id":"Q16","question":"Defining a problem includes understanding which of the following?","options":["A)  If it is single-agent or multi-agent","B)  If the problem is known or unknown","C)  If it is static or dynamic","D)  All of the above"]},
   {"id":"Q17","question":"Why did the robot need two runs to solve the maze in Module 1 quickly?","options":["The robot was slow","The environment was unknown","The environment was known","None of the above"]},
   {"id":"Q18","question":"When the mouse solved the maze, the environment was:","options":["Dynamic and known","Static and fully observable","Single-agent, static, unknown, and partially observable","None of the above"]},
   {"id":"Q19","question":"A mechanical maze is an example of a:","options":["Dynamic environment","Static environment"]},

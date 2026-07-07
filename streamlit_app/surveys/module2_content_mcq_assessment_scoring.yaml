@@ -1,7 +1,7 @@
 ---
 instrument_key: module2_content_mcq_assessment
 instrument_type: assessment
-version: 1.05
+version: 1.01
 module_id: module2
 scope: module
 title: module2_content_mcq_assessment_scoring
