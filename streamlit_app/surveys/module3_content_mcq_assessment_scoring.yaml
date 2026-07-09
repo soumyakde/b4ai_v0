@@ -1,7 +1,7 @@
 ---
 instrument_key: module3_content_mcq_assessment
 instrument_type: assessment
-version: 1.0
+version: 1.01
 module_id: module3
 scope: module
 title: module3_content_mcq_assessment_scoring
@@ -10,20 +10,20 @@ scoring_type: binary
 true_value: 1
 
 correct_answers:
-  Q1: "B"
-  Q2: "C"
-  Q3: "B"
-  Q4: "D"
-  Q5: "D"
-  Q6: "D"
-  Q7: "D"
-  Q8: "A"
+  Q1: "C"
+  Q2: "A"
+  Q3: "C"
+  Q4: "B"
+  Q5: "B"
+  Q6: "C"
+  Q7: "A"
+  Q8: "D"
   Q9: "C"
-  Q10: "B"
-  Q11: "C"
-  Q12: "D"
-  Q13: "A"
-  Q14: "D"
+  Q10: "C"
+  Q11: "B"
+  Q12: "B"
+  Q13: "B"
+  Q14: "B"
   Q15: "B"
   Q16: "C"
   Q17: "A"
