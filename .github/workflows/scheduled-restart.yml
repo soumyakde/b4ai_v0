@@ -16,7 +16,7 @@ jobs:
       - name: Check service status
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: railway status --service a672cdd0-2808-4c44-bbc7-f59abf49662c --environment 7424e81e-7b33-4c1f-b1f0-fd37bc984af5 --json
+        run: railway status --json
 
       - name: Restart Railway service
         env:
