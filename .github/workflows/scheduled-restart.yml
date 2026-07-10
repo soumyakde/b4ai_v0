@@ -13,7 +13,12 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
+      - name: Check service status
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway status --service a672cdd0-2808-4c44-bbc7-f59abf49662c --environment 7424e81e-7b33-4c1f-b1f0-fd37bc984af5 --json
+
       - name: Restart Railway service
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: railway restart --service a672cdd0-2808-4c44-bbc7-f59abf49662c --yes
+        run: railway restart --service a672cdd0-2808-4c44-bbc7-f59abf49662c --environment 7424e81e-7b33-4c1f-b1f0-fd37bc984af5 --yes
