@@ -17,6 +17,17 @@ import os
 import sys
 from pathlib import Path
 
+# 0. FORCE UTF-8 STDOUT/STDERR
+# Windows consoles default to a legacy codepage (e.g. cp1252) that cannot
+# encode the emoji used in status print()s throughout this app (e.g.
+# "[ModuleRegistry] ✅ Registered module: ..."). Without this, any local
+# run outside Docker/Streamlit Cloud (which default to UTF-8) crashes with
+# UnicodeEncodeError the moment such a line is printed. Must run before
+# any other module in this app writes to stdout/stderr.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 # 1. SET ENVIRONMENT VARIABLES (must be before rpy2 is imported)
 os.environ['R_HOME'] = r'C:\Program Files\R\R-4.5.2'
 os.environ['RPY2_CFFI_MODE'] = 'ABI'
