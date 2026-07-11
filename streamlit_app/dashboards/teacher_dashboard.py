@@ -31,6 +31,7 @@ except ImportError:
     _HAS_PLOTLY = False
 
 from core.analytics.datasets.canonical_loader import load_canonical_data
+from modules.registry.discover import discover_all_module_numbers
 from core.analytics.descriptive.score_aggregator import (
     compute_assessment_scores,
     compute_construct_means,
@@ -118,7 +119,7 @@ _ASSESSMENT_LABELS: Dict[str, str] = {
     "precourse_pre_aici_assessment":                 "Pre — AI Conceptual Inventory",
     "postcourse_post_aici_assessment":               "Post — AI Conceptual Inventory",
     **{f"module{n}_content_mcq_assessment": f"Module {n} — Content MCQ"
-       for n in range(1, 8)},
+       for n in discover_all_module_numbers()},
 }
 
 _SURVEY_LABELS: Dict[str, str] = {
@@ -128,7 +129,7 @@ _SURVEY_LABELS: Dict[str, str] = {
 
 # Maps module_id (canonical) → display label
 _MODULE_LABELS: Dict[str, str] = {
-    **{f"module_{n}": f"Module {n}" for n in range(1, 8)},
+    **{f"module_{n}": f"Module {n}" for n in discover_all_module_numbers()},
     "global":       "Global (Pre/Post)",
     "demographics": "Demographics",
 }
@@ -2217,7 +2218,7 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
     col_mod, col_inst = st.columns(2)
     with col_mod:
         _module_opts = {
-            f"Module {n}": f"module_{n}" for n in range(1, 8)
+            f"Module {n}": f"module_{n}" for n in discover_all_module_numbers()
         }
         _module_label = st.selectbox(
             "Module", options=list(_module_opts.keys()), key="cpi_module_sel"
@@ -6256,7 +6257,7 @@ def _report_irt(canonical_df: pd.DataFrame) -> None:
                         "postcourse_post_ai_misconceptions_assessment",
                         "precourse_pre_aici_assessment",
                         "postcourse_post_aici_assessment",
-                    ] + [f"module{n}_content_mcq_assessment" for n in range(1,8)]:
+                    ] + [f"module{n}_content_mcq_assessment" for n in discover_all_module_numbers()]:
                         try:
                             mat, item_ids = build_binary_response_matrix(canonical_df, inst_key)
                             if len(mat) < 3:

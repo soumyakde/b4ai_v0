@@ -40,9 +40,21 @@ from typing import List, Dict, Any
 import modules.definitions
 
 
-def discover_module_definitions() -> List[Dict[str, Any]]:
+def discover_module_definitions(include_inactive: bool = False) -> List[Dict[str, Any]]:
     """
     Discover and validate all module definitions.
+
+    Args:
+        include_inactive:
+            False (default) — skip modules whose meta.status is not
+            "active". This is what the student-facing registry
+            (module_registry, unlock sequencing) must use.
+
+            True — return every module definition found on disk
+            regardless of status. Intended for callers that need the
+            FULL module inventory (e.g. Teacher Dashboard / analytics),
+            which should keep showing paused/disabled modules rather
+            than only what's currently visible to students.
 
     Returns:
         A list of validated MODULE_DEFINITION dictionaries.
@@ -113,7 +125,7 @@ def discover_module_definitions() -> List[Dict[str, Any]]:
         # ------------------------------------------------------------------
         status = meta.get("status", "active")
 
-        if status != "active":
+        if status != "active" and not include_inactive:
             print(f"[ModuleRegistry] ⏸️  Skipped module '{module_id}' (status='{status}')")
             continue
 
@@ -139,3 +151,30 @@ def discover_module_definitions() -> List[Dict[str, Any]]:
         )
 
     return discovered_modules
+
+
+def discover_all_module_numbers() -> List[int]:
+    """
+    Return every numbered module (1..N) with a definition file on disk,
+    regardless of active/disabled status.
+
+    Intended for consumers that must see the FULL module inventory even
+    when some modules are temporarily paused — e.g. the Teacher Dashboard
+    and the analytics pipeline (core/analytics/datasets/canonical_loader.py),
+    which should keep reflecting a disabled module's existing data rather
+    than only what's currently visible to students. Replaces what used to
+    be a hardcoded range(1, 8) in both of those files, so adding module 8+
+    (or removing/re-enabling one) requires no further code changes there.
+
+    pre_course / post_course are intentionally excluded — callers that need
+    those already reference them by fixed name, not by number.
+    """
+    numbers = []
+    for definition in discover_module_definitions(include_inactive=True):
+        module_id = definition["meta"]["module_id"]
+        if module_id.startswith("module_"):
+            try:
+                numbers.append(int(module_id.split("_", 1)[1]))
+            except ValueError:
+                continue
+    return sorted(numbers)

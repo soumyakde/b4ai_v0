@@ -35,6 +35,7 @@ import pandas as pd
 from core.analytics.datasets.dataset_builder import DatasetBuilder
 from core.analytics.filters.demographics_extractor import extract_demographics
 from auth.user_manager import get_user_cohort_map
+from modules.registry.discover import discover_all_module_numbers as _all_module_numbers
 
 # -----------------------------------------------------------------------
 # Project-relative paths (resolved from this file's location)
@@ -84,7 +85,7 @@ def _build_instruments_dict() -> Dict[str, Any]:
     sccces_yaml = _load_yaml("b4ai_sccces_survey.yaml")
     sims_yaml   = _load_yaml("b4ai_sims_survey.yaml")
 
-    for n in range(1, 8):
+    for n in _all_module_numbers():
         instruments[f"module{n}_b4ai_sccces_survey"] = {
             **sccces_yaml,
             "module_id": f"module{n}",   # override YAML global → actual module
@@ -95,7 +96,7 @@ def _build_instruments_dict() -> Dict[str, Any]:
         }
 
     # ---- MCQ content assessments (per-module question bank from scoring YAML) ----
-    for n in range(1, 8):
+    for n in _all_module_numbers():
         try:
             scoring = _load_yaml(f"module{n}_content_mcq_assessment_scoring.yaml")
             question_bank = [
@@ -140,13 +141,13 @@ def _build_instruments_dict() -> Dict[str, Any]:
     # ---- Module reflections (no scoring — module_id only) ----
     try:
         refl_yaml = _load_yaml("module_reflections.yaml")
-        for n in range(1, 8):
+        for n in _all_module_numbers():
             instruments[f"module{n}_module_reflections"] = {
                 **refl_yaml,
                 "module_id": f"module{n}",
             }
     except FileNotFoundError:
-        for n in range(1, 8):
+        for n in _all_module_numbers():
             instruments[f"module{n}_module_reflections"] = {
                 "module_id": f"module{n}",
             }
@@ -180,7 +181,7 @@ def _build_scoring_dict() -> Dict[str, Any]:
         "reverse_scale":    sccces_s["reverse_scale"],
         "reverse_questions": sccces_s.get("reverse_questions", []),
     }
-    for n in range(1, 8):
+    for n in _all_module_numbers():
         scoring[f"module{n}_b4ai_sccces_survey"] = sccces_scoring
 
     # ---- Surveys: SIMS ----
@@ -191,11 +192,11 @@ def _build_scoring_dict() -> Dict[str, Any]:
         "reverse_scale":    sims_s["reverse_scale"],
         "reverse_questions": sims_s.get("reverse_questions", []),
     }
-    for n in range(1, 8):
+    for n in _all_module_numbers():
         scoring[f"module{n}_b4ai_sims_survey"] = sims_scoring
 
     # ---- MCQ content assessments ----
-    for n in range(1, 8):
+    for n in _all_module_numbers():
         try:
             mcq_s = _load_yaml(f"module{n}_content_mcq_assessment_scoring.yaml")
             scoring[f"module{n}_content_mcq_assessment"] = {
