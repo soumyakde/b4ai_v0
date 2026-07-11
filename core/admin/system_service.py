@@ -327,6 +327,53 @@ def clear_cache(admin_user: str) -> None:
 # AUTO-BACKUP SCHEDULER
 # ---------------------------------------------------------
 
+def _auto_backup_job() -> None:
+    """The scheduled job function — uses 'system' as admin_user for automated runs."""
+    try:
+        backup_databases(admin_user="system[auto-backup]")
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).error("Auto-backup failed: %s", exc)
+
+
+def _catch_up_if_stale() -> None:
+    """
+    Run one backup now if the most recent existing backup is older than
+    BACKUP_INTERVAL_HOURS (or none exists at all).
+
+    Why this exists: BackgroundScheduler's "interval" trigger counts from
+    when the scheduler starts, not from the last real backup — so on a
+    process that restarts more often than BACKUP_INTERVAL_HOURS (e.g. a
+    nightly scheduled restart), the interval can keep resetting before it
+    ever completes, and backups silently stop happening. Calling this once
+    on every startup, before the interval schedule takes over, closes
+    that gap.
+    """
+    import logging
+    try:
+        existing = list_backups()
+        if not existing:
+            logging.getLogger(__name__).info(
+                "No existing backups found — running an initial backup now."
+            )
+            _auto_backup_job()
+            return
+
+        latest = datetime.strptime(existing[0]["timestamp"], "%Y%m%d_%H%M%S")
+        age_hours = (datetime.utcnow() - latest).total_seconds() / 3600
+        if age_hours >= BACKUP_INTERVAL_HOURS:
+            logging.getLogger(__name__).info(
+                "Most recent backup is %.1f hour(s) old (interval: %d) — "
+                "running a catch-up backup now.",
+                age_hours, BACKUP_INTERVAL_HOURS,
+            )
+            _auto_backup_job()
+    except Exception as exc:
+        logging.getLogger(__name__).error(
+            "Backup catch-up check failed: %s", exc
+        )
+
+
 def start_auto_backup_scheduler() -> bool:
     """
     Start a background thread that backs up both databases every
@@ -340,6 +387,9 @@ def start_auto_backup_scheduler() -> bool:
 
     Uses APScheduler BackgroundScheduler (runs in a daemon thread).
     If APScheduler is not installed, logs a warning and returns False.
+
+    Reliability: calls _catch_up_if_stale() before starting the interval
+    schedule — see that function's docstring for why this matters.
 
     Returns:
         True  — scheduler started successfully
@@ -356,15 +406,7 @@ def start_auto_backup_scheduler() -> bool:
         )
         return False
 
-    def _auto_backup_job():
-        """The job function — uses 'system' as admin_user for automated runs."""
-        try:
-            backup_databases(admin_user="system[auto-backup]")
-        except Exception as exc:
-            import logging
-            logging.getLogger(__name__).error(
-                "Auto-backup failed: %s", exc
-            )
+    _catch_up_if_stale()
 
     scheduler = BackgroundScheduler(daemon=True)
     scheduler.add_job(

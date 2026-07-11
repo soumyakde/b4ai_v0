@@ -736,6 +736,44 @@ def show_admin_dashboard(username: str):
                 st.error(f"Error: {e}")
 
         st.divider()
+        st.subheader("⬇️ Download Databases Now")
+        st.caption(
+            "Creates a fresh backup, then packages both databases into a single "
+            "ZIP for you to download directly to your own computer. This is the "
+            "only backup path that leaves Railway entirely — same-volume backups "
+            "protect against admin mistakes, but not against a platform-level "
+            "problem with the volume itself. Keep this off-platform copy somewhere "
+            "safe (e.g. your own drive), especially before or after important "
+            "pilot sessions."
+        )
+        if st.button("📦 Prepare Download", key="prep_download_btn"):
+            try:
+                import io as _io
+                import zipfile as _zipfile
+
+                _fresh = system_service.backup_databases(username)
+                _zip_buf = _io.BytesIO()
+                with _zipfile.ZipFile(_zip_buf, "w", _zipfile.ZIP_DEFLATED) as _zf:
+                    for _label, _path in _fresh.items():
+                        _zf.write(_path, arcname=_path.name)
+                st.session_state["_db_download_zip"] = _zip_buf.getvalue()
+                st.session_state["_db_download_name"] = (
+                    f"b4ai_databases_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.zip"
+                )
+                st.success("Ready — click below to download.")
+            except Exception as e:
+                st.error(f"Error preparing download: {e}")
+
+        if st.session_state.get("_db_download_zip"):
+            st.download_button(
+                label="⬇️ Download ZIP (responses.db + users.db)",
+                data=st.session_state["_db_download_zip"],
+                file_name=st.session_state["_db_download_name"],
+                mime="application/zip",
+                key="db_zip_download_btn",
+            )
+
+        st.divider()
         if st.button("Clone Databases"):
             try:
                 clones = system_service.clone_databases(username)
