@@ -29,3 +29,20 @@ users.db
 
 # SQL dumps (may contain participant data — same protection as the .db files above)
 *.sql
+
+# Dev-only tooling and one-time scripts — not needed for the app to run
+.devcontainer/
+.yamllint.yml
+check_dashboard.py
+diagnose_env.py
+docker-compose.yml
+launch.py
+migrations/
+smoke_test.py
+
+# Stale/backup packaging files — superseded by Dockerfile / requirements.txt
+Dockerfile_0.txt
+requirements_0.txt
+
+# Test/cache artifacts
+.pytest_cache/
