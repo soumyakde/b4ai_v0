@@ -111,6 +111,76 @@ def reset_instrument(admin_user: str, instrument_name: str) -> None:
 
 
 # ---------------------------------------------------------
+# RESET ONE INSTRUMENT FOR ONE STUDENT
+# ---------------------------------------------------------
+
+def reset_user_instrument(admin_user: str, user_id: str, instrument_name: str) -> None:
+    """
+    Delete data for a single instrument, for a single student only.
+
+    Combines the WHERE clauses of reset_student_data() (user scope) and
+    reset_instrument() (instrument scope) — same four tables, same
+    delete pattern, just intersected. Use this when a participant
+    answered one instrument (e.g. a module they jumped ahead into)
+    that needs to be undone without touching their legitimate data
+    from every other module/instrument.
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "DELETE FROM responses WHERE user_id = ? AND instrument_name = ?",
+        (user_id, instrument_name),
+    )
+    cursor.execute(
+        "DELETE FROM completions WHERE user_id = ? AND instrument_key = ?",
+        (user_id, instrument_name),
+    )
+    cursor.execute(
+        "DELETE FROM survey_scores WHERE user_id = ? AND survey_key = ?",
+        (user_id, instrument_name),
+    )
+    cursor.execute(
+        "DELETE FROM assessment_scores WHERE user_id = ? AND assessment_code = ?",
+        (user_id, instrument_name),
+    )
+
+    conn.commit()
+    conn.close()
+
+    log_admin_action(
+        admin_user,
+        AdminAction.RESET_USER_INSTRUMENT,
+        f"user_id={user_id}, instrument={instrument_name}",
+    )
+
+
+def count_user_instrument_rows(user_id: str, instrument_name: str) -> dict:
+    """
+    Return row counts that reset_user_instrument() would delete, without
+    deleting anything — used for a live preview before the admin confirms.
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+
+    counts = {}
+    for table, col in [
+        ("responses", "instrument_name"),
+        ("completions", "instrument_key"),
+        ("survey_scores", "survey_key"),
+        ("assessment_scores", "assessment_code"),
+    ]:
+        cursor.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE user_id = ? AND {col} = ?",
+            (user_id, instrument_name),
+        )
+        counts[table] = cursor.fetchone()[0]
+
+    conn.close()
+    return counts
+
+
+# ---------------------------------------------------------
 # RESET ENTIRE STUDY
 # ---------------------------------------------------------
 

@@ -465,6 +465,86 @@ def show_admin_dashboard(username: str):
                     st.error(f"Error: {e}")
 
         st.divider()
+        st.subheader("🎯 Reset One Instrument for One Student")
+        st.caption(
+            "For when a participant jumped ahead and answered a module's "
+            "MCQ/survey before it was covered in session — undoes just that "
+            "one instrument, leaving all their other legitimate data intact. "
+            "Use the broader resets below only if you actually need to wipe "
+            "more than one instrument."
+        )
+
+        from modules.registry.discover import discover_all_module_numbers
+
+        try:
+            _ti_users_df = user_service.get_all_users()
+            _ti_candidates = sorted(
+                _ti_users_df[_ti_users_df["role"] == "student"]["username"].tolist()
+            )
+        except Exception:
+            _ti_candidates = []
+
+        _TI_TYPE_SUFFIX = {
+            "Content MCQ Assessment": "content_mcq_assessment",
+            "SCCCES Survey":          "b4ai_sccces_survey",
+            "SIMS Survey":            "b4ai_sims_survey",
+            "Module Reflection":      "module_reflections",
+        }
+
+        _ti_col1, _ti_col2, _ti_col3 = st.columns(3)
+        with _ti_col1:
+            _ti_student = st.selectbox(
+                "Student", options=["(select)"] + _ti_candidates,
+                key="targeted_reset_student",
+            )
+        with _ti_col2:
+            _ti_module_n = st.selectbox(
+                "Module", options=discover_all_module_numbers(),
+                key="targeted_reset_module",
+            )
+        with _ti_col3:
+            _ti_type = st.selectbox(
+                "Instrument", options=list(_TI_TYPE_SUFFIX.keys()),
+                key="targeted_reset_type",
+            )
+
+        _ti_instrument_name = f"module{_ti_module_n}_{_TI_TYPE_SUFFIX[_ti_type]}"
+
+        if _ti_student and _ti_student != "(select)":
+            try:
+                _ti_counts = data_service.count_user_instrument_rows(
+                    _ti_student, _ti_instrument_name
+                )
+                _ti_total = sum(_ti_counts.values())
+                if _ti_total == 0:
+                    st.info(
+                        f"**{_ti_student}** has no data for `{_ti_instrument_name}` "
+                        "— nothing to reset."
+                    )
+                else:
+                    st.warning(
+                        f"Will delete for **{_ti_student}** / `{_ti_instrument_name}`: "
+                        f"{_ti_counts['responses']} response(s), "
+                        f"{_ti_counts['completions']} completion flag(s), "
+                        f"{_ti_counts['survey_scores']} survey score(s), "
+                        f"{_ti_counts['assessment_scores']} assessment score(s)."
+                    )
+            except Exception as _ti_err:
+                st.error(f"Error checking data: {_ti_err}")
+
+            if st.button("🎯 Reset This Instrument for This Student", key="targeted_reset_btn"):
+                try:
+                    data_service.reset_user_instrument(
+                        username, _ti_student, _ti_instrument_name
+                    )
+                    st.success(
+                        f"✅ Reset `{_ti_instrument_name}` for **{_ti_student}** "
+                        "— they can retake it."
+                    )
+                except Exception as _ti_err2:
+                    st.error(f"Reset error: {_ti_err2}")
+
+        st.divider()
         instrument_reset = st.text_input("Instrument ID")
         if st.button("Reset Instrument Data"):
             if instrument_reset:
