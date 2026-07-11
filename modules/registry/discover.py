@@ -109,6 +109,15 @@ def discover_module_definitions() -> List[Dict[str, Any]]:
             )
 
         # ------------------------------------------------------------------
+        # Skip modules explicitly marked inactive
+        # ------------------------------------------------------------------
+        status = meta.get("status", "active")
+
+        if status != "active":
+            print(f"[ModuleRegistry] ⏸️  Skipped module '{module_id}' (status='{status}')")
+            continue
+
+        # ------------------------------------------------------------------
         # Enforce unique module IDs
         # ------------------------------------------------------------------
         if module_id in seen_module_ids:
