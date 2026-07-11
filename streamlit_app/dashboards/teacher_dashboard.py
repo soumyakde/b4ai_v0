@@ -20,6 +20,7 @@ Tab structure:
 from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
+from datetime import datetime
 
 import streamlit as st
 import pandas as pd
@@ -2781,6 +2782,26 @@ def show_teacher_dashboard(username: str) -> None:
     st.title("📊 Teacher Analytics Dashboard")
     st.markdown(f"Welcome **{username}**")
 
+    # ── Data freshness indicator + manual refresh ──────────────────────────
+    # _load_data() below is cached for 5 minutes. Right after a student
+    # finishes a module, the dashboard can transiently show data that
+    # doesn't yet include that submission until the cache expires — with
+    # no visible indication, that's indistinguishable from a real bug.
+    # Show when the data was last loaded and give a one-click way to force
+    # a fresh reload instead of waiting.
+    _refresh_col, _freshness_col = st.columns([1, 5])
+    with _refresh_col:
+        if st.button("🔄 Refresh Data", key="teacher_refresh_data_btn"):
+            _load_data.clear()
+            st.rerun()
+    with _freshness_col:
+        _loaded_at = st.session_state.get("_teacher_data_loaded_at")
+        if _loaded_at:
+            st.caption(
+                f"📅 Data as of **{_loaded_at}** — auto-refreshes every 5 min, "
+                "or click Refresh Data for the latest submissions right now."
+            )
+
     # ── Minimal safe CSS — no pseudo-selectors that block interactions ────────
     st.markdown("""<style>
     /* Left-align all dataframe cells */
@@ -2792,6 +2813,7 @@ def show_teacher_dashboard(username: str) -> None:
     with st.spinner("Loading research dataset…"):
         try:
             canonical_df, demographics_df, cohort_map = _load_data()
+            st.session_state["_teacher_data_loaded_at"] = datetime.now().strftime("%H:%M:%S")
         except Exception as e:
             st.error(f"Failed to load data: {e}")
             st.stop()
