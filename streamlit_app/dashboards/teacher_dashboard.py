@@ -2798,7 +2798,7 @@ def show_teacher_dashboard(username: str) -> None:
         _loaded_at = st.session_state.get("_teacher_data_loaded_at")
         if _loaded_at:
             st.caption(
-                f"📅 Data as of **{_loaded_at}** — auto-refreshes every 5 min, "
+                f"📅 Data as of **{_loaded_at} UTC** — auto-refreshes every 5 min, "
                 "or click Refresh Data for the latest submissions right now."
             )
 
@@ -2813,7 +2813,9 @@ def show_teacher_dashboard(username: str) -> None:
     with st.spinner("Loading research dataset…"):
         try:
             canonical_df, demographics_df, cohort_map = _load_data()
-            st.session_state["_teacher_data_loaded_at"] = datetime.now().strftime("%H:%M:%S")
+            # Explicitly UTC (not the container's local clock) so the
+            # caption below is never ambiguous about which timezone it's in.
+            st.session_state["_teacher_data_loaded_at"] = datetime.utcnow().strftime("%H:%M:%S")
         except Exception as e:
             st.error(f"Failed to load data: {e}")
             st.stop()
