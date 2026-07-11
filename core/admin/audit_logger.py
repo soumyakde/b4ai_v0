@@ -53,6 +53,9 @@ class AdminAction(Enum):
     LOGIN_LOCKOUT    = "LOGIN_LOCKOUT"        # ← NEW: recorded when lockout triggers
     PASSWORD_RESET   = "PASSWORD_RESET"       # ← Admin-initiated password reset
 
+    CLEAR_LOGIN_LOCKOUT = "CLEAR_LOGIN_LOCKOUT"  # ← Admin manually clears one user's lockout
+    TOGGLE_LOCKOUT_MODE = "TOGGLE_LOCKOUT_MODE"  # ← Admin enables/disables lockout platform-wide
+
     RUN_DIAGNOSTICS  = "RUN_DIAGNOSTICS"
 
 

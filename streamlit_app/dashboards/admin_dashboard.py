@@ -351,6 +351,82 @@ def show_admin_dashboard(username: str):
                     st.error(f"Reset error: {_pw_err}")
 
         st.divider()
+        st.subheader("🔒 Login Lockout Management")
+        st.caption(
+            "Participants (especially younger ones) can lose several minutes of "
+            "precious in-person session time after a few mistyped passwords. "
+            "Use these controls to clear a specific lockout on the spot, or "
+            "pause lockout enforcement entirely for a time-boxed session."
+        )
+
+        from auth import login_security as _login_sec
+
+        _lockout_col1, _lockout_col2 = st.columns(2)
+        with _lockout_col1:
+            _pilot_mode_on = st.checkbox(
+                "⏸️ Pause lockout for this session (pilot mode)",
+                value=not _login_sec.is_lockout_enabled(),
+                key="pilot_lockout_toggle",
+                help=(
+                    "While checked, no one can be locked out for failed login "
+                    "attempts, platform-wide. Resets to OFF (lockout enabled — "
+                    "the safe default) automatically on every app restart, so "
+                    "it never stays paused unintentionally."
+                ),
+            )
+            _desired_enabled = not _pilot_mode_on
+            if _desired_enabled != _login_sec.is_lockout_enabled():
+                _login_sec.set_lockout_enabled(_desired_enabled)
+                try:
+                    from core.admin.audit_logger import log_admin_action, AdminAction
+                    log_admin_action(
+                        username,
+                        AdminAction.TOGGLE_LOCKOUT_MODE,
+                        f"lockout_enabled={_desired_enabled}",
+                    )
+                except Exception:
+                    pass
+                st.rerun()
+            st.caption(
+                "🔓 Lockout is currently **paused platform-wide**." if _pilot_mode_on
+                else "🔒 Lockout is currently **active** (normal, safe default)."
+            )
+
+        with _lockout_col2:
+            _clear_target = st.text_input(
+                "Username to clear lockout for", key="clear_lockout_target"
+            )
+            if _clear_target.strip():
+                _is_locked = _login_sec.is_locked_out(_clear_target.strip())
+                st.caption(
+                    f"🔒 **{_clear_target.strip()}** is currently locked out."
+                    if _is_locked else
+                    f"🔓 **{_clear_target.strip()}** is not currently locked out."
+                )
+            if st.button("Clear Lockout for This User", key="clear_lockout_btn"):
+                if not _clear_target.strip():
+                    st.warning("Enter a username first.")
+                else:
+                    _tgt2 = _clear_target.strip()
+                    _n_cleared = _login_sec.clear_lockout(_tgt2)
+                    if _n_cleared:
+                        st.success(
+                            f"✅ Cleared {_n_cleared} failed-attempt record(s) for "
+                            f"**{_tgt2}** — they can log in immediately."
+                        )
+                    else:
+                        st.info(f"**{_tgt2}** had no active lockout to clear.")
+                    try:
+                        from core.admin.audit_logger import log_admin_action, AdminAction
+                        log_admin_action(
+                            username,
+                            AdminAction.CLEAR_LOGIN_LOCKOUT,
+                            f"target_user={_tgt2}, records_cleared={_n_cleared}",
+                        )
+                    except Exception:
+                        pass
+
+        st.divider()
         st.subheader("Impersonation")
         impersonate_user = st.text_input("Username to impersonate")
         if st.button("Impersonate"):
