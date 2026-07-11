@@ -24,3 +24,8 @@ run_docker_b4ai.bat
 # Migration backups
 *.pre_migration1
 *_backup_*.db
+responses.db
+users.db
+
+# SQL dumps (may contain participant data — same protection as the .db files above)
+*.sql
