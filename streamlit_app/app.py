@@ -17,6 +17,17 @@ import os
 import sys
 from pathlib import Path
 
+# 0. FORCE UTF-8 STDOUT/STDERR
+# Windows consoles default to a legacy codepage (e.g. cp1252) that cannot
+# encode the emoji used in status print()s throughout this app (e.g.
+# "[ModuleRegistry] ✅ Registered module: ..."). Without this, any local
+# run outside Docker/Streamlit Cloud (which default to UTF-8) crashes with
+# UnicodeEncodeError the moment such a line is printed. Must run before
+# any other module in this app writes to stdout/stderr.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 # 1. SET ENVIRONMENT VARIABLES (must be before rpy2 is imported)
 os.environ['R_HOME'] = r'C:\Program Files\R\R-4.5.2'
 os.environ['RPY2_CFFI_MODE'] = 'ABI'
@@ -268,6 +279,29 @@ def show_registration():
 
 
 # ----------------------------------------------------------
+# LOCKOUT COUNTDOWN  (auto-refreshing fragment)
+# ----------------------------------------------------------
+# A plain st.error() computed once at click time never updates on its
+# own, so participants (especially younger ones) see a frozen timer
+# and think it's broken. @st.fragment(run_every=1) re-executes just
+# this block every second, independent of the rest of the page, so the
+# countdown actually ticks down in real time without any further clicks.
+@st.fragment(run_every=1)
+def _lockout_countdown_fragment(username: str):
+    if not is_locked_out(username):
+        st.success("✅ You can try logging in again now.")
+        st.session_state.pop("_locked_out_username", None)
+        return
+    remaining = get_lockout_remaining_seconds(username)
+    minutes   = remaining // 60
+    seconds   = remaining % 60
+    st.error(
+        f"🔒 Account temporarily locked after too many failed attempts. "
+        f"Please try again in **{minutes}m {seconds}s**."
+    )
+
+
+# ----------------------------------------------------------
 # LOGIN PAGE  ← MODIFIED for lockout
 # ----------------------------------------------------------
 def show_login():
@@ -278,19 +312,21 @@ def show_login():
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
 
+    # If a previous attempt on this page already found this account
+    # locked out, keep showing the live countdown even without another
+    # click — this is what makes the timer actually tick in real time.
+    _locked_uname = st.session_state.get("_locked_out_username")
+    if _locked_uname and is_locked_out(_locked_uname):
+        _lockout_countdown_fragment(_locked_uname)
+
     if st.button("Login"):
         uname = username.strip()
 
         # ── Step 1: Check lockout BEFORE attempting authentication ────────────
         # Lockout is DB-backed — survives page refreshes and multiple tabs.
         if is_locked_out(uname):
-            remaining = get_lockout_remaining_seconds(uname)
-            minutes   = remaining // 60
-            seconds   = remaining % 60
-            st.error(
-                f"🔒 Account temporarily locked after too many failed attempts. "
-                f"Please try again in **{minutes}m {seconds}s**."
-            )
+            st.session_state["_locked_out_username"] = uname
+            st.rerun()
             return
         # ─────────────────────────────────────────────────────────────────────
 
@@ -327,13 +363,8 @@ def show_login():
 
             if is_locked_out(uname):
                 # This attempt just triggered the lockout threshold
-                remaining = get_lockout_remaining_seconds(uname)
-                minutes   = remaining // 60
-                seconds   = remaining % 60
-                st.error(
-                    f"🔒 Too many failed attempts. Account locked for "
-                    f"**{minutes}m {seconds}s**."
-                )
+                st.session_state["_locked_out_username"] = uname
+                st.rerun()
             else:
                 st.error("Invalid credentials.")
             # ─────────────────────────────────────────────────────────────────

@@ -38,9 +38,10 @@ class AdminAction(Enum):
     UPDATE_COHORT     = "UPDATE_COHORT"
     IMPERSONATE_USER  = "IMPERSONATE_USER"
 
-    RESET_STUDENT_DATA = "RESET_STUDENT_DATA"
-    RESET_INSTRUMENT   = "RESET_INSTRUMENT"
-    RESET_STUDY        = "RESET_STUDY"
+    RESET_STUDENT_DATA   = "RESET_STUDENT_DATA"
+    RESET_INSTRUMENT     = "RESET_INSTRUMENT"
+    RESET_USER_INSTRUMENT = "RESET_USER_INSTRUMENT"  # ← one instrument, one student
+    RESET_STUDY          = "RESET_STUDY"
 
     IMPORT_USERS         = "IMPORT_USERS"
     IMPORT_HUMAN_RATINGS = "IMPORT_HUMAN_RATINGS"
@@ -52,6 +53,9 @@ class AdminAction(Enum):
 
     LOGIN_LOCKOUT    = "LOGIN_LOCKOUT"        # ← NEW: recorded when lockout triggers
     PASSWORD_RESET   = "PASSWORD_RESET"       # ← Admin-initiated password reset
+
+    CLEAR_LOGIN_LOCKOUT = "CLEAR_LOGIN_LOCKOUT"  # ← Admin manually clears one user's lockout
+    TOGGLE_LOCKOUT_MODE = "TOGGLE_LOCKOUT_MODE"  # ← Admin enables/disables lockout platform-wide
 
     RUN_DIAGNOSTICS  = "RUN_DIAGNOSTICS"
 

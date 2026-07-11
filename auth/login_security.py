@@ -58,6 +58,30 @@ WINDOW_MINUTES   = int(os.getenv("LOGIN_WINDOW_MINUTES",   "5"))
 
 
 # ------------------------------------------------------------------
+# Pilot-mode lockout override (in-memory, process-local)
+# ------------------------------------------------------------------
+# Lets an admin disable the lockout mechanism entirely during a
+# time-boxed in-person pilot session, where a participant losing
+# LOCKOUT_MINUTES to a mistyped password is costly. Intentionally
+# process-local, not persisted to the DB: it resets to enabled (the
+# safe default) on every app restart, including any scheduled restart,
+# rather than silently staying off indefinitely.
+
+_LOCKOUT_ENABLED = True
+
+
+def set_lockout_enabled(enabled: bool) -> None:
+    """Globally enable/disable lockout checking for this running process."""
+    global _LOCKOUT_ENABLED
+    _LOCKOUT_ENABLED = enabled
+
+
+def is_lockout_enabled() -> bool:
+    """Whether the lockout mechanism is currently active platform-wide."""
+    return _LOCKOUT_ENABLED
+
+
+# ------------------------------------------------------------------
 # Internal helpers
 # ------------------------------------------------------------------
 
@@ -127,8 +151,11 @@ def is_locked_out(username: str) -> bool:
     the past WINDOW_MINUTES minutes.
 
     Always returns False if the login_attempts table doesn't exist yet
-    (first boot before init_login_attempts_table has run).
+    (first boot before init_login_attempts_table has run), or if the
+    lockout mechanism has been globally disabled via set_lockout_enabled().
     """
+    if not _LOCKOUT_ENABLED:
+        return False
     try:
         window_start = (
             datetime.utcnow() - timedelta(minutes=WINDOW_MINUTES)
@@ -179,6 +206,39 @@ def get_lockout_remaining_seconds(username: str) -> int:
         expires_at    = first_failure + timedelta(minutes=LOCKOUT_MINUTES)
         remaining     = (expires_at - datetime.utcnow()).total_seconds()
         return max(0, int(remaining))
+    except sqlite3.OperationalError:
+        return 0
+
+
+def clear_lockout(username: str) -> int:
+    """
+    Clear a user's current lockout by deleting their recent failed
+    attempts within the rolling window (the ones that count toward
+    is_locked_out()'s MAX_ATTEMPTS threshold).
+
+    Does not touch successful-login rows or failures outside the
+    window — those are already irrelevant to the lockout calculation,
+    so this only removes exactly what's blocking the user right now.
+
+    Returns the number of attempt rows deleted (0 if the user wasn't
+    actually locked out, or the table doesn't exist yet).
+    """
+    try:
+        window_start = (
+            datetime.utcnow() - timedelta(minutes=WINDOW_MINUTES)
+        ).isoformat()
+        conn = _conn()
+        cur = conn.execute(
+            """
+            DELETE FROM login_attempts
+            WHERE username = ? AND success = 0 AND timestamp >= ?
+            """,
+            (username, window_start),
+        )
+        conn.commit()
+        deleted = cur.rowcount
+        conn.close()
+        return deleted
     except sqlite3.OperationalError:
         return 0
 

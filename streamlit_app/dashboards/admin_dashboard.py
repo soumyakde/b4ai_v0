@@ -351,6 +351,82 @@ def show_admin_dashboard(username: str):
                     st.error(f"Reset error: {_pw_err}")
 
         st.divider()
+        st.subheader("🔒 Login Lockout Management")
+        st.caption(
+            "Participants (especially younger ones) can lose several minutes of "
+            "precious in-person session time after a few mistyped passwords. "
+            "Use these controls to clear a specific lockout on the spot, or "
+            "pause lockout enforcement entirely for a time-boxed session."
+        )
+
+        from auth import login_security as _login_sec
+
+        _lockout_col1, _lockout_col2 = st.columns(2)
+        with _lockout_col1:
+            _pilot_mode_on = st.checkbox(
+                "⏸️ Pause lockout for this session (pilot mode)",
+                value=not _login_sec.is_lockout_enabled(),
+                key="pilot_lockout_toggle",
+                help=(
+                    "While checked, no one can be locked out for failed login "
+                    "attempts, platform-wide. Resets to OFF (lockout enabled — "
+                    "the safe default) automatically on every app restart, so "
+                    "it never stays paused unintentionally."
+                ),
+            )
+            _desired_enabled = not _pilot_mode_on
+            if _desired_enabled != _login_sec.is_lockout_enabled():
+                _login_sec.set_lockout_enabled(_desired_enabled)
+                try:
+                    from core.admin.audit_logger import log_admin_action, AdminAction
+                    log_admin_action(
+                        username,
+                        AdminAction.TOGGLE_LOCKOUT_MODE,
+                        f"lockout_enabled={_desired_enabled}",
+                    )
+                except Exception:
+                    pass
+                st.rerun()
+            st.caption(
+                "🔓 Lockout is currently **paused platform-wide**." if _pilot_mode_on
+                else "🔒 Lockout is currently **active** (normal, safe default)."
+            )
+
+        with _lockout_col2:
+            _clear_target = st.text_input(
+                "Username to clear lockout for", key="clear_lockout_target"
+            )
+            if _clear_target.strip():
+                _is_locked = _login_sec.is_locked_out(_clear_target.strip())
+                st.caption(
+                    f"🔒 **{_clear_target.strip()}** is currently locked out."
+                    if _is_locked else
+                    f"🔓 **{_clear_target.strip()}** is not currently locked out."
+                )
+            if st.button("Clear Lockout for This User", key="clear_lockout_btn"):
+                if not _clear_target.strip():
+                    st.warning("Enter a username first.")
+                else:
+                    _tgt2 = _clear_target.strip()
+                    _n_cleared = _login_sec.clear_lockout(_tgt2)
+                    if _n_cleared:
+                        st.success(
+                            f"✅ Cleared {_n_cleared} failed-attempt record(s) for "
+                            f"**{_tgt2}** — they can log in immediately."
+                        )
+                    else:
+                        st.info(f"**{_tgt2}** had no active lockout to clear.")
+                    try:
+                        from core.admin.audit_logger import log_admin_action, AdminAction
+                        log_admin_action(
+                            username,
+                            AdminAction.CLEAR_LOGIN_LOCKOUT,
+                            f"target_user={_tgt2}, records_cleared={_n_cleared}",
+                        )
+                    except Exception:
+                        pass
+
+        st.divider()
         st.subheader("Impersonation")
         impersonate_user = st.text_input("Username to impersonate")
         if st.button("Impersonate"):
@@ -387,6 +463,86 @@ def show_admin_dashboard(username: str):
                     st.success("Student data cleared")
                 except Exception as e:
                     st.error(f"Error: {e}")
+
+        st.divider()
+        st.subheader("🎯 Reset One Instrument for One Student")
+        st.caption(
+            "For when a participant jumped ahead and answered a module's "
+            "MCQ/survey before it was covered in session — undoes just that "
+            "one instrument, leaving all their other legitimate data intact. "
+            "Use the broader resets below only if you actually need to wipe "
+            "more than one instrument."
+        )
+
+        from modules.registry.discover import discover_all_module_numbers
+
+        try:
+            _ti_users_df = user_service.get_all_users()
+            _ti_candidates = sorted(
+                _ti_users_df[_ti_users_df["role"] == "student"]["username"].tolist()
+            )
+        except Exception:
+            _ti_candidates = []
+
+        _TI_TYPE_SUFFIX = {
+            "Content MCQ Assessment": "content_mcq_assessment",
+            "SCCCES Survey":          "b4ai_sccces_survey",
+            "SIMS Survey":            "b4ai_sims_survey",
+            "Module Reflection":      "module_reflections",
+        }
+
+        _ti_col1, _ti_col2, _ti_col3 = st.columns(3)
+        with _ti_col1:
+            _ti_student = st.selectbox(
+                "Student", options=["(select)"] + _ti_candidates,
+                key="targeted_reset_student",
+            )
+        with _ti_col2:
+            _ti_module_n = st.selectbox(
+                "Module", options=discover_all_module_numbers(),
+                key="targeted_reset_module",
+            )
+        with _ti_col3:
+            _ti_type = st.selectbox(
+                "Instrument", options=list(_TI_TYPE_SUFFIX.keys()),
+                key="targeted_reset_type",
+            )
+
+        _ti_instrument_name = f"module{_ti_module_n}_{_TI_TYPE_SUFFIX[_ti_type]}"
+
+        if _ti_student and _ti_student != "(select)":
+            try:
+                _ti_counts = data_service.count_user_instrument_rows(
+                    _ti_student, _ti_instrument_name
+                )
+                _ti_total = sum(_ti_counts.values())
+                if _ti_total == 0:
+                    st.info(
+                        f"**{_ti_student}** has no data for `{_ti_instrument_name}` "
+                        "— nothing to reset."
+                    )
+                else:
+                    st.warning(
+                        f"Will delete for **{_ti_student}** / `{_ti_instrument_name}`: "
+                        f"{_ti_counts['responses']} response(s), "
+                        f"{_ti_counts['completions']} completion flag(s), "
+                        f"{_ti_counts['survey_scores']} survey score(s), "
+                        f"{_ti_counts['assessment_scores']} assessment score(s)."
+                    )
+            except Exception as _ti_err:
+                st.error(f"Error checking data: {_ti_err}")
+
+            if st.button("🎯 Reset This Instrument for This Student", key="targeted_reset_btn"):
+                try:
+                    data_service.reset_user_instrument(
+                        username, _ti_student, _ti_instrument_name
+                    )
+                    st.success(
+                        f"✅ Reset `{_ti_instrument_name}` for **{_ti_student}** "
+                        "— they can retake it."
+                    )
+                except Exception as _ti_err2:
+                    st.error(f"Reset error: {_ti_err2}")
 
         st.divider()
         instrument_reset = st.text_input("Instrument ID")
@@ -734,6 +890,44 @@ def show_admin_dashboard(username: str):
                 st.write(backups if DEBUG else list(backups.keys()))
             except Exception as e:
                 st.error(f"Error: {e}")
+
+        st.divider()
+        st.subheader("⬇️ Download Databases Now")
+        st.caption(
+            "Creates a fresh backup, then packages both databases into a single "
+            "ZIP for you to download directly to your own computer. This is the "
+            "only backup path that leaves Railway entirely — same-volume backups "
+            "protect against admin mistakes, but not against a platform-level "
+            "problem with the volume itself. Keep this off-platform copy somewhere "
+            "safe (e.g. your own drive), especially before or after important "
+            "pilot sessions."
+        )
+        if st.button("📦 Prepare Download", key="prep_download_btn"):
+            try:
+                import io as _io
+                import zipfile as _zipfile
+
+                _fresh = system_service.backup_databases(username)
+                _zip_buf = _io.BytesIO()
+                with _zipfile.ZipFile(_zip_buf, "w", _zipfile.ZIP_DEFLATED) as _zf:
+                    for _label, _path in _fresh.items():
+                        _zf.write(_path, arcname=_path.name)
+                st.session_state["_db_download_zip"] = _zip_buf.getvalue()
+                st.session_state["_db_download_name"] = (
+                    f"b4ai_databases_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.zip"
+                )
+                st.success("Ready — click below to download.")
+            except Exception as e:
+                st.error(f"Error preparing download: {e}")
+
+        if st.session_state.get("_db_download_zip"):
+            st.download_button(
+                label="⬇️ Download ZIP (responses.db + users.db)",
+                data=st.session_state["_db_download_zip"],
+                file_name=st.session_state["_db_download_name"],
+                mime="application/zip",
+                key="db_zip_download_btn",
+            )
 
         st.divider()
         if st.button("Clone Databases"):

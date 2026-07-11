@@ -16,7 +16,7 @@ MODULE_DEFINITION = {
         "version": "1.0.0",
         "description": "Teaching computers to learn like you.",
         "author": "Soumya De",
-        "status": "active",
+        "status": "disabled",  # Paused for this pilot only — flip back to "active" to re-enable
         "order": 7,
     },
 
