@@ -46,3 +46,8 @@ requirements_0.txt
 
 # Test/cache artifacts
 .pytest_cache/
+
+# Local project-status notes (mirrors Claude's memory — internal infra details,
+# not meant for the public repo)
+PROJECT_STATUS.md
+PROJECT_INFRASTRUCTURE.md
