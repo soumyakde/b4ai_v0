@@ -48,8 +48,13 @@ _HERE = Path(__file__).resolve()
 # Above line replaced b/c docker build test failed, smoke_test.py
 DB_PATH = Path(os.getenv("USERS_DB_PATH", str(_HERE.parents[1] / "users.db")))
 
-SUPER_ADMIN_USERNAME         = "skde"
-SUPER_ADMIN_DEFAULT_PASSWORD = "ChangeMe@2025!"   # <- change after first login
+SUPER_ADMIN_USERNAME = "skde"
+# No hardcoded default password (previously a plaintext literal here, which
+# is a standing risk in a public repo). See seed_super_admin() below: on an
+# environment's first-ever boot, it uses SUPER_ADMIN_DEFAULT_PASSWORD from
+# the environment if set, otherwise generates and logs a random one-time
+# password. Existing accounts are never affected — this only matters the
+# moment the account is first created.
 
 # ---------------------------------------------------------------------
 #  Connection helper
@@ -154,11 +159,26 @@ def seed_super_admin() -> None:
             )
         else:
             # First boot — insert with role='admin' and is_super_admin=1
+            env_password = os.getenv("SUPER_ADMIN_DEFAULT_PASSWORD")
+            if env_password:
+                initial_password = env_password
+            else:
+                initial_password = generate_password()
+                print(
+                    f"[seed_super_admin] SUPER_ADMIN_DEFAULT_PASSWORD not set — "
+                    f"generated a one-time password for '{SUPER_ADMIN_USERNAME}': "
+                    f"{initial_password}"
+                )
+                print(
+                    "[seed_super_admin] Save this now — it will not be shown again. "
+                    "Change it via Admin Dashboard > User Management > Reset Password "
+                    "after first login."
+                )
             cursor.execute(
                 """INSERT INTO users
                        (username, password, role, cohort_id, status, is_super_admin)
                    VALUES (?, ?, 'admin', NULL, 'approved', 1)""",
-                (SUPER_ADMIN_USERNAME, hash_password(SUPER_ADMIN_DEFAULT_PASSWORD)),
+                (SUPER_ADMIN_USERNAME, hash_password(initial_password)),
             )
         conn.commit()
 
