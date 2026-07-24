@@ -429,9 +429,45 @@ def _histogram(
         )
         fig.update_xaxes(title=x_label)
         fig.update_yaxes(title="Count")
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, width='stretch', config={"displayModeBar": False})
     else:
         st.bar_chart(values.dropna())
+
+
+def _grouped_distribution_chart(
+    df: pd.DataFrame,
+    value_col: str,
+    group_col: str,
+    title: str,
+    y_label: str,
+    y_range: Optional[list] = None,
+) -> None:
+    """Render a box-plot distribution of value_col, one box per group_col value
+    (e.g. one box per cohort) — the "By Cohort (Distribution)" chart pattern,
+    shared across Assessment Scores and Survey Construct Means."""
+    plot_df = df[[value_col, group_col]].dropna()
+    if plot_df.empty:
+        st.caption("No cohort data to display.")
+        return
+
+    if _HAS_PLOTLY:
+        fig = px.box(
+            plot_df,
+            x=group_col,
+            y=value_col,
+            points="all",
+            title=title,
+        )
+        fig.update_layout(
+            margin=dict(t=40, b=10, l=10, r=10),
+            height=350,
+            showlegend=False,
+        )
+        fig.update_xaxes(title="Cohort")
+        fig.update_yaxes(title=y_label, range=y_range)
+        st.plotly_chart(fig, width='stretch', config={"displayModeBar": False})
+    else:
+        st.bar_chart(plot_df.groupby(group_col)[value_col].mean())
 
 
 def _stat_row(row: pd.Series, score_col: str, unit: str = "") -> None:
@@ -629,7 +665,7 @@ def _render_assessment_scores(canonical_df: pd.DataFrame) -> None:
     with col_view:
         asc_view = st.radio(
             "View by",
-            options=["Question", "Student"],
+            options=["Question", "Student", "Cohort (Distribution)"],
             horizontal=True,
             key="asc_view_radio",
         )
@@ -776,7 +812,7 @@ def _render_assessment_scores(canonical_df: pd.DataFrame) -> None:
             _render_bland_altman_expander(_ba_result, score_label="% Correct")
         # ─────────────────────────────────────────────────────────────────
 
-    else:
+    elif asc_view == "Student":
         # Per-student: distribution of total % correct
         _histogram(
             asc_filtered["pct_correct"],
@@ -790,6 +826,35 @@ def _render_assessment_scores(canonical_df: pd.DataFrame) -> None:
             display["% Correct"] = display["% Correct"].round(1)
             st.dataframe(display.sort_values("% Correct", ascending=False),
                          hide_index=True, width="stretch")
+
+    else:
+        # Per-cohort: compare cohorts' % correct distributions for this instrument
+        if "cohort_id" not in asc_filtered.columns or asc_filtered["cohort_id"].dropna().empty:
+            st.info("No cohort data available for the current filters.")
+        else:
+            cohort_summary = summarize_scores(asc_filtered, group_by_col="cohort_id")
+            if not cohort_summary.empty:
+                display_cs = cohort_summary[
+                    ["cohort_id", "n_users", "mean_pct", "median_pct", "mode_pct"]
+                ].copy()
+                display_cs.columns = ["Cohort", "N", "Mean %", "Median %", "Mode %"]
+                for col in ["Mean %", "Median %", "Mode %"]:
+                    display_cs[col] = display_cs[col].round(1)
+                st.dataframe(display_cs, hide_index=True, width="stretch")
+
+            _grouped_distribution_chart(
+                asc_filtered,
+                value_col="pct_correct",
+                group_col="cohort_id",
+                title=f"% Correct by Cohort — {selected_label}",
+                y_label="% Correct",
+                y_range=[0, 100],
+            )
+            st.caption(
+                "Each box shows the spread of % Correct scores for students in that "
+                "cohort, for the selected instrument. Individual student scores are "
+                "plotted as points alongside the box."
+            )
 
 
 
@@ -1125,28 +1190,87 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
 
     cm_filtered = cm_display[cm_display["construct"].isin(selected_constructs)]
 
-    # Summary table across users for each construct
+    # Summary across users for each construct — scoped to the current
+    # Aggregate/Per-module selection above. Kept for the interpretation
+    # guide expander below (per-construct mean lookup), independent of the
+    # cross-module table rendered next.
     summary_cm = summarize_scores(cm_filtered)
 
     if not summary_cm.empty:
-        st.markdown("**Summary Statistics per Construct**")
-        display_summary = summary_cm[["construct","n_users","mean_score","median_score","mode_score"]].copy()
-        display_summary.columns = ["Construct", "N", "Mean", "Median", "Mode"]
-        for col in ["Mean", "Median", "Mode"]:
-            display_summary[col] = display_summary[col].apply(
-                lambda x: f"{x:.2f}" if x is not None else "—"
+        # ── Summary Statistics per Construct — always spans every module ──
+        # (Module | Construct | N | Mean), independent of the Aggregate/
+        # Per-module toggle above, so every construct's module is always
+        # visible without needing to flip the module selector repeatedly.
+        cm_for_table = cm_survey[cm_survey["construct"].isin(selected_constructs)]
+        table_summary = summarize_scores(cm_for_table, group_by_col="module_id")
+
+        if not table_summary.empty:
+            st.markdown("**Summary Statistics per Construct**")
+
+            import re as _re_mod
+            def _mod_num(m):
+                _mn = _re_mod.search(r"(\d+)", str(m))
+                return int(_mn.group(1)) if _mn else 999  # non-numeric (e.g. "global") sorts last
+
+            module_ids = sorted(table_summary["module_id"].dropna().unique(), key=_mod_num)
+
+            # N per module = distinct students who answered ANY selected
+            # construct in that module — NOT a sum of per-construct Ns,
+            # which would double-count students who answered multiple
+            # constructs.
+            n_per_module = cm_for_table.groupby("module_id")["user_id"].nunique()
+
+            _rows = []
+            _band_flags = []
+            _subtotal_flags = []
+            _shade = False
+            for _mid in module_ids:
+                _mod_label = _MODULE_LABELS.get(_mid, _mid)
+                _mod_rows = table_summary[table_summary["module_id"] == _mid].sort_values("construct")
+                for _, _r in _mod_rows.iterrows():
+                    _rows.append({
+                        "Module": _mod_label,
+                        "Construct": str(_r["construct"]).replace("_", " ").title(),
+                        "N": int(_r["n_users"]),
+                        "Mean": round(_r["mean_score"], 2) if pd.notna(_r["mean_score"]) else None,
+                    })
+                    _band_flags.append(_shade)
+                    _subtotal_flags.append(False)
+                # Subtotal row: mean of that module's construct means (per
+                # your confirmed choice — each construct counts equally).
+                _mod_mean = _mod_rows["mean_score"].mean()
+                _rows.append({
+                    "Module": _mod_label,
+                    "Construct": f"{_mod_label} — Summary",
+                    "N": int(n_per_module.get(_mid, 0)),
+                    "Mean": round(_mod_mean, 2) if pd.notna(_mod_mean) else None,
+                })
+                _band_flags.append(_shade)
+                _subtotal_flags.append(True)
+                _shade = not _shade
+
+            display_summary = pd.DataFrame(_rows)
+            _band = pd.Series(_band_flags)
+            _is_subtotal = pd.Series(_subtotal_flags)
+
+            def _row_style(row):
+                bg = "background-color: rgba(76, 155, 232, 0.10);" if _band.iloc[row.name] else ""
+                bold = "font-weight: 700;" if _is_subtotal.iloc[row.name] else ""
+                style = f"{bg} {bold}".strip()
+                return [style] * len(row)
+
+            styled_summary = display_summary.style.apply(_row_style, axis=1)
+
+            st.dataframe(
+                styled_summary,
+                hide_index=True, width="stretch",
+                column_config={
+                    "Module":    st.column_config.TextColumn("Module", width="small"),
+                    "Construct": st.column_config.TextColumn("Construct", width="medium"),
+                    "N":         st.column_config.NumberColumn("N", format="%d", width="small"),
+                    "Mean":      st.column_config.NumberColumn("Mean", format="%.2f", width="small"),
+                }
             )
-        st.dataframe(
-            display_summary,
-            hide_index=True, width="stretch",
-            column_config={
-                "Construct": st.column_config.TextColumn("Construct", width="medium"),
-                "N":         st.column_config.NumberColumn("N", format="%d", width="small"),
-                "Mean":      st.column_config.TextColumn("Mean", width="small"),
-                "Median":    st.column_config.TextColumn("Median", width="small"),
-                "Mode":      st.column_config.TextColumn("Mode", width="small"),
-            }
-        )
 
         # Reverse-coding alerts: construct-level (External Reg, Amotivation)
         rev_coded = [c for c in selected_constructs
@@ -1214,7 +1338,7 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
     # View toggle: per-question or per-student
     survey_item_view = st.radio(
         "Chart view",
-        options=["By Question Item", "By Student (distribution)"],
+        options=["By Question Item", "By Student (distribution)", "By Cohort (distribution)"],
         horizontal=True,
         key="survey_item_view",
     )
@@ -1351,7 +1475,7 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
                             }
                         )
 
-    else:
+    elif survey_item_view == "By Student (distribution)":
         # Original per-student distribution histograms
         n_constructs = len(selected_constructs)
         cols_per_row = min(3, n_constructs)
@@ -1371,6 +1495,45 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
                         x_label="Mean Score",
                         x_range=[1, 4],
                         color="#F4845F",
+                    )
+
+    else:
+        # By Cohort (distribution): compare cohorts' mean scores per construct.
+        # cm_filtered loses cohort_id in "Aggregate (all modules)" view mode
+        # (aggregate_construct_means() intentionally collapses across modules
+        # and doesn't carry demographic columns through). Fall back to
+        # cm_survey — the un-collapsed, per-module-per-user data, which does
+        # carry cohort_id — pooling all modules' responses for that construct
+        # in that case, rather than erroring.
+        if "cohort_id" in cm_filtered.columns:
+            cm_cohort_source = cm_filtered
+        else:
+            cm_cohort_source = cm_survey[cm_survey["construct"].isin(selected_constructs)]
+            st.caption(
+                "ℹ️ Aggregate view pools all modules' responses together for "
+                "this cohort comparison. Switch to \"Per module\" for a "
+                "single module's cohort comparison instead."
+            )
+
+        n_constructs = len(selected_constructs)
+        cols_per_row = min(2, n_constructs)
+        rows = (n_constructs + cols_per_row - 1) // cols_per_row
+
+        construct_list = selected_constructs
+        for row_i in range(rows):
+            cols = st.columns(cols_per_row)
+            for col_i, construct in enumerate(
+                construct_list[row_i * cols_per_row : (row_i + 1) * cols_per_row]
+            ):
+                with cols[col_i]:
+                    cm_c = cm_cohort_source[cm_cohort_source["construct"] == construct]
+                    _grouped_distribution_chart(
+                        cm_c,
+                        value_col="mean_score",
+                        group_col="cohort_id",
+                        title=construct.replace("_", " ").title(),
+                        y_label="Mean Score",
+                        y_range=[1, 4],
                     )
 
 
