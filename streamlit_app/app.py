@@ -204,7 +204,7 @@ def _render_header():
         )
     st.divider()
 
-    diagram_path = _asset("Basics4ai_Overview_diagram.png")
+    diagram_path = _asset("Integrated_Dashboard_for_Data_infographic_2K.jpeg")
     if diagram_path:
         _, col_mid, _ = st.columns([0.5, 9, 0.5])
         with col_mid:

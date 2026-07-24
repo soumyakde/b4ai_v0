@@ -12,7 +12,7 @@ MODULE_DEFINITION = {
     # ======================================================
     "meta": {
         "module_id": "module_4",
-        "title": "Natural Language Concepts",
+        "title": "Module 4: Natural Language Concepts",
         "version": "1.0.0",
         "description": "Introduction to sources of Bias and Hallucinations in AI outputs.",
         "author": "Soumya De",

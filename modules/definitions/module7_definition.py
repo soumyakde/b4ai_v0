@@ -12,7 +12,7 @@ MODULE_DEFINITION = {
     # ======================================================
     "meta": {
         "module_id": "module_7",
-        "title": "Introduction to Machine Learning (ML)",
+        "title": "Module 7: Introduction to Machine Learning (ML)",
         "version": "1.0.0",
         "description": "Teaching computers to learn like you.",
         "author": "Soumya De",

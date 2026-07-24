@@ -491,24 +491,40 @@ def show_admin_dashboard(username: str):
             "Module Reflection":      "module_reflections",
         }
 
-        _ti_col1, _ti_col2, _ti_col3 = st.columns(3)
+        # Non-module-scoped instruments (pre/post-course) — full instrument_name,
+        # not composed with a module number. Same keys used elsewhere in
+        # _ASSESSMENT_LABELS (teacher_dashboard.py).
+        _TI_NONMODULE_INSTRUMENTS = {
+            "Pre — AI Misconceptions":              "precourse_pre_ai_misconceptions_assessment",
+            "Post — AI Misconceptions":             "postcourse_post_ai_misconceptions_assessment",
+            "Pre — AI Conceptual Inventory":        "precourse_pre_aici_assessment",
+            "Post — AI Conceptual Inventory":       "postcourse_post_aici_assessment",
+        }
+
+        _ti_col1, _ti_col2 = st.columns(2)
         with _ti_col1:
             _ti_student = st.selectbox(
                 "Student", options=["(select)"] + _ti_candidates,
                 key="targeted_reset_student",
             )
         with _ti_col2:
+            _ti_type = st.selectbox(
+                "Instrument",
+                options=list(_TI_TYPE_SUFFIX.keys()) + list(_TI_NONMODULE_INSTRUMENTS.keys()),
+                key="targeted_reset_type",
+            )
+
+        _ti_is_module_scoped = _ti_type in _TI_TYPE_SUFFIX
+
+        if _ti_is_module_scoped:
             _ti_module_n = st.selectbox(
                 "Module", options=discover_all_module_numbers(),
                 key="targeted_reset_module",
             )
-        with _ti_col3:
-            _ti_type = st.selectbox(
-                "Instrument", options=list(_TI_TYPE_SUFFIX.keys()),
-                key="targeted_reset_type",
-            )
-
-        _ti_instrument_name = f"module{_ti_module_n}_{_TI_TYPE_SUFFIX[_ti_type]}"
+            _ti_instrument_name = f"module{_ti_module_n}_{_TI_TYPE_SUFFIX[_ti_type]}"
+        else:
+            st.caption("This assessment isn't tied to a specific module — no Module selector needed.")
+            _ti_instrument_name = _TI_NONMODULE_INSTRUMENTS[_ti_type]
 
         if _ti_student and _ti_student != "(select)":
             try:

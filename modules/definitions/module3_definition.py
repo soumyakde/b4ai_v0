@@ -12,7 +12,7 @@ MODULE_DEFINITION = {
     # ======================================================
     "meta": {
         "module_id": "module_3",
-        "title": "How Does AI Work?",
+        "title": "Module 3: How Does AI Work?",
         "version": "1.0.0",
         "description": "Uncover hidden rules, explore decision paths, and master clever strategies.",
         "author": "Soumya De",

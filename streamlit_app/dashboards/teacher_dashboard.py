@@ -189,6 +189,7 @@ def _apply_filters(
     selected_lang: str,
     selected_cohorts: List[str],
     selected_user: str,
+    cohort_map: dict,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Apply sidebar filter selections to canonical_df and demographics_df.
@@ -208,6 +209,11 @@ def _apply_filters(
         demo = demo[demo["first_language_english"] == True]
     elif selected_lang == "Non-English only":
         demo = demo[demo["first_language_english"] == False]
+
+    if selected_cohorts:
+        demo = demo.copy()
+        demo["cohort_id"] = demo["user_id"].map(cohort_map)
+        demo = demo[demo["cohort_id"].isin(selected_cohorts)]
 
     if selected_user and selected_user != "All students":
         demo = demo[demo["user_id"] == selected_user]
@@ -329,6 +335,7 @@ def _render_sidebar(
         canonical_df, demographics_df,
         selected_module_ids, selected_grades, selected_genders,
         selected_lang, selected_cohorts, selected_user,
+        cohort_map,
     )
 
 

@@ -12,7 +12,7 @@ MODULE_DEFINITION = {
     # ======================================================
     "meta": {
         "module_id": "module_2",
-        "title": "Goal-based Problem-solving",
+        "title": "Module 2: Goal-based Problem-solving",
         "version": "1.0.0",
         "description": "Introduction to Problem-solving steps, Learning, and Planning.",
         "author": "Soumya De",

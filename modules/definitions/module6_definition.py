@@ -12,7 +12,7 @@ MODULE_DEFINITION = {
     # ======================================================
     "meta": {
         "module_id": "module_6",
-        "title": "Uncertainty in Problem-solving",
+        "title": "Module 6: Uncertainty in Problem-solving",
         "version": "1.0.0",
         "description": "Introduction to Problem-solving in the real-world with uncertainties.",
         "author": "Soumya De",

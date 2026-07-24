@@ -5,7 +5,7 @@ version: 1.0
 
 module_id: global
 scope: pre_post
-title: B4AI SCCCES Survey
+title: "C: B4AI Cognitive Engagement Survey"
 
 sections:
   - name: Engagement_with_task

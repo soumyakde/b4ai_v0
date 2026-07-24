@@ -128,7 +128,7 @@ def render_content_mcq(assessment_def, assessment_key, username):
     Renders randomized MCQ assessment using JSON question bank.
     """
 
-    st.subheader("Content Assessment")
+    st.subheader("A: MCQ Content Assessment")
 
     question_bank_path = assessment_def.get("question_bank_path")
     num_questions = assessment_def.get("num_questions", 10)
@@ -234,7 +234,7 @@ def render_content_mcq(assessment_def, assessment_key, username):
 
 def render_reflection(assessment_def, assessment_key, username):
 
-    st.subheader("Reflection")
+    st.subheader("B: Reflections")
 
     questions = assessment_def.get("questions", [])
 

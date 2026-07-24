@@ -12,7 +12,7 @@ MODULE_DEFINITION = {
     # ======================================================
     "meta": {
         "module_id": "module_5",
-        "title": "Constraints in Problem-solving",
+        "title": "Module 5: Constraints in Problem-solving",
         "version": "1.0.0",
         "description": "Introduction to Problem-solving in the real-world.",
         "author": "Soumya De",

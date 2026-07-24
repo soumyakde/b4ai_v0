@@ -12,7 +12,7 @@ MODULE_DEFINITION = {
     # ======================================================
     "meta": {
         "module_id": "module_1",
-        "title": "Introduction to Natural and Artificial Intelligence",
+        "title": "Module 1: Introduction to Natural and Artificial Intelligence",
         "version": "1.0.0",
         "description": "Foundational exploration of individual and collective natural and artificial intelligence.",
         "author": "Soumya De",
