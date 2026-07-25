@@ -57,6 +57,36 @@ def reset_student_data(admin_user: str, user_id: str) -> None:
 
 
 # ---------------------------------------------------------
+# COUNT STUDENT DATA FOOTPRINT (no deletion — preview only)
+# ---------------------------------------------------------
+
+def count_student_data_footprint(user_id: str) -> dict:
+    """
+    Return row counts across all four data tables for a single student,
+    without deleting anything. Same table list as reset_student_data() —
+    used to detect "zero saved data" candidates and to preview exactly
+    what a bulk cleanup would remove before it happens.
+    """
+    conn   = get_connection()
+    cursor = conn.cursor()
+
+    tables = [
+        "responses",
+        "completions",
+        "survey_scores",
+        "assessment_scores",
+    ]
+
+    counts = {}
+    for table in tables:
+        cursor.execute(f"SELECT COUNT(*) FROM {table} WHERE user_id = ?", (user_id,))
+        counts[table] = cursor.fetchone()[0]
+
+    conn.close()
+    return counts
+
+
+# ---------------------------------------------------------
 # RESET INSTRUMENT DATA
 # ---------------------------------------------------------
 

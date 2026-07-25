@@ -138,7 +138,12 @@ def show_admin_dashboard(username: str):
         st.subheader("User Governance")
         try:
             users = user_service.get_all_users()
-            st.dataframe(users, width="stretch")
+            _status_options = ["All"] + sorted(users["status"].dropna().unique().tolist())
+            _status_filter = st.selectbox(
+                "Filter by status", options=_status_options, key="user_gov_status_filter",
+            )
+            _users_display = users if _status_filter == "All" else users[users["status"] == _status_filter]
+            st.dataframe(_users_display, width="stretch")
         except Exception as e:
             st.error(f"Error fetching users: {e}")
             st.stop()
@@ -216,19 +221,14 @@ def show_admin_dashboard(username: str):
         if delete_user_input and delete_user_input.strip():
             _du_prev = delete_user_input.strip()
             try:
-                from core.db_utils import get_connection as _get_res_conn
-                _rc = _get_res_conn()
-                _resp_count = _rc.execute(
-                    "SELECT COUNT(*) FROM responses WHERE user_id=?", (_du_prev,)
-                ).fetchone()[0]
-                _comp_count = _rc.execute(
-                    "SELECT COUNT(*) FROM completions WHERE user_id=?", (_du_prev,)
-                ).fetchone()[0]
-                _rc.close()
+                from core.admin.data_service import count_student_data_footprint as _du_footprint
+                _fp = _du_footprint(_du_prev)
                 st.info(
                     f"User **{_du_prev}**: "
-                    f"{_resp_count} response rows · "
-                    f"{_comp_count} completion records will also be deleted."
+                    f"{_fp['responses']} response rows · "
+                    f"{_fp['completions']} completion records · "
+                    f"{_fp['survey_scores']} survey score(s) · "
+                    f"{_fp['assessment_scores']} assessment score(s) will also be deleted."
                 )
             except Exception:
                 pass
@@ -254,6 +254,125 @@ def show_admin_dashboard(username: str):
                     st.rerun()
                 except Exception as e:
                     st.error(f"Delete error: {e}")
+
+        st.divider()
+        st.subheader("🧹 Bulk Cleanup")
+        st.caption(
+            "Bulk-delete withdrawn/duplicate **student** registrations — either "
+            "rejected registrations, or student accounts with zero saved data "
+            "(e.g. abandoned duplicate sign-ups in community settings where "
+            "students register multiple times without waiting for approval). "
+            "Restricted to student accounts only — teacher/admin accounts are "
+            "never eligible here, use \"Delete User\" above for those. Same "
+            "hard delete as above, applied to multiple accounts: review the "
+            "list, export it, then confirm."
+        )
+
+        from core.admin.data_service import count_student_data_footprint as _bc_footprint
+
+        _bc_source = st.radio(
+            "Candidate source",
+            options=["Rejected students", "Students with zero saved data"],
+            horizontal=True,
+            key="bulk_cleanup_source",
+        )
+
+        try:
+            _bc_all_users = user_service.get_all_users()
+            _bc_students = _bc_all_users[_bc_all_users["role"] == "student"]
+        except Exception as e:
+            _bc_students = None
+            st.error(f"Could not load users: {e}")
+
+        _bc_candidates = []
+        if _bc_students is not None:
+            if _bc_source == "Rejected students":
+                _bc_candidates = sorted(
+                    _bc_students[_bc_students["status"] == "rejected"]["username"].tolist()
+                )
+            else:
+                with st.spinner("Scanning student accounts for zero saved data…"):
+                    for _u in _bc_students["username"].tolist():
+                        if sum(_bc_footprint(_u).values()) == 0:
+                            _bc_candidates.append(_u)
+                _bc_candidates = sorted(_bc_candidates)
+
+        if not _bc_candidates:
+            st.info("No candidates found for this source.")
+        else:
+            st.write(f"**{len(_bc_candidates)} candidate(s) found.**")
+
+            _bc_selected = [
+                _cand for _cand in _bc_candidates
+                if st.checkbox(_cand, key=f"bulk_cleanup_cb_{_bc_source}_{_cand}")
+            ]
+
+            if _bc_selected:
+                st.write(f"**{len(_bc_selected)} selected.**")
+
+                import pandas as _bc_pd
+                _bc_preview_rows = []
+                for _u in _bc_selected:
+                    _fp = _bc_footprint(_u)
+                    _bc_preview_rows.append({
+                        "Username": _u,
+                        "Responses": _fp["responses"],
+                        "Completions": _fp["completions"],
+                        "Survey Scores": _fp["survey_scores"],
+                        "Assessment Scores": _fp["assessment_scores"],
+                    })
+                _bc_preview_df = _bc_pd.DataFrame(_bc_preview_rows)
+                st.dataframe(_bc_preview_df, hide_index=True, width="stretch")
+
+                import io as _bc_io
+                _bc_csv_buf = _bc_io.StringIO()
+                _bc_preview_df.to_csv(_bc_csv_buf, index=False)
+                _bc_export_clicked = st.download_button(
+                    "📥 Export selected list to CSV (required before deletion unlocks)",
+                    data=_bc_csv_buf.getvalue(),
+                    file_name=f"bulk_cleanup_candidates_{_bc_source.replace(' ', '_')}.csv",
+                    mime="text/csv",
+                    key=f"bulk_cleanup_export_{_bc_source}",
+                )
+
+                if _bc_export_clicked:
+                    st.session_state["bulk_cleanup_exported"] = True
+
+                if not st.session_state.get("bulk_cleanup_exported", False):
+                    st.warning("Export the list above before the delete button unlocks.")
+                else:
+                    _bc_confirm_phrase = st.text_input(
+                        "Type DELETE to confirm bulk deletion",
+                        key="bulk_cleanup_confirm_phrase",
+                    )
+                    _bc_armed = _bc_confirm_phrase.strip() == "DELETE"
+                    if st.button(
+                        f"🗑 Delete {len(_bc_selected)} Selected Student(s) + All Data",
+                        key="bulk_cleanup_delete_btn",
+                        type="primary",
+                        disabled=not _bc_armed,
+                    ):
+                        from core.admin.data_service import reset_student_data as _bc_reset
+                        _bc_deleted, _bc_failed = [], []
+                        for _u in _bc_selected:
+                            try:
+                                _bc_reset(username, _u)
+                                user_service.delete_user(username, _u)
+                                _bc_deleted.append(_u)
+                            except Exception as _bc_err:
+                                _bc_failed.append(f"{_u} ({_bc_err})")
+                        st.session_state["bulk_cleanup_exported"] = False
+                        if _bc_deleted:
+                            st.success(
+                                f"✅ Deleted {len(_bc_deleted)} student(s): "
+                                f"{', '.join(_bc_deleted)}"
+                            )
+                        if _bc_failed:
+                            st.error(
+                                f"❌ Failed to delete {len(_bc_failed)} student(s): "
+                                f"{'; '.join(_bc_failed)}"
+                            )
+                        st.rerun()
 
         st.divider()
         st.subheader("Reset Password")

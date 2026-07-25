@@ -33,7 +33,7 @@ def get_all_users():
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT id, username, role, cohort_id
+        SELECT id, username, role, cohort_id, status
         FROM users
         ORDER BY role, username
         """
@@ -42,7 +42,7 @@ def get_all_users():
     conn.close()
 
     import pandas as pd
-    return pd.DataFrame(rows, columns=["id", "username", "role", "cohort_id"])
+    return pd.DataFrame(rows, columns=["id", "username", "role", "cohort_id", "status"])
 
 
 # ---------------------------------------------------------
