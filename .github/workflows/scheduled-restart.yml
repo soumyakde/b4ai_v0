@@ -2,7 +2,12 @@ name: Scheduled Railway Restart
 
 on:
   schedule:
-    - cron: '0 1,7,13,19 * * *'
+    # UTC times below correspond to 8:00 AM / 3:00 PM / 11:00 PM US Eastern
+    # (EDT, UTC-4). Deliberately placed OUTSIDE the 9am-2pm ET pilot window,
+    # with a 1-hour safety buffer on each side (8am = 1hr before pilot start,
+    # 3pm = 1hr after pilot end). Do not schedule anything between 13:00 and
+    # 18:00 UTC -- that is 9am-2pm ET, active pilot hours.
+    - cron: '0 3,12,19 * * *'
   workflow_dispatch: {}
 
 jobs:
