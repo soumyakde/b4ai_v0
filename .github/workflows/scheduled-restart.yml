@@ -2,12 +2,26 @@ name: Scheduled Railway Restart
 
 on:
   schedule:
-    # UTC times below correspond to 8:00 AM / 3:00 PM / 11:00 PM US Eastern
-    # (EDT, UTC-4). Deliberately placed OUTSIDE the 9am-2pm ET pilot window,
-    # with a 1-hour safety buffer on each side (8am = 1hr before pilot start,
-    # 3pm = 1hr after pilot end). Do not schedule anything between 13:00 and
-    # 18:00 UTC -- that is 9am-2pm ET, active pilot hours.
-    - cron: '0 3,12,19 * * *'
+    # UTC times below correspond to 2:00 AM / 3:00 PM / 8:00 PM US Eastern
+    # (EDT, UTC-4).
+    #
+    # IMPORTANT -- GitHub Actions' free-tier scheduler for this repo has a
+    # real, consistent 2-4 hour delay: every single `schedule`-triggered run
+    # since this workflow existed has fired 2-4 hours after its nominal cron
+    # time (verified via the Actions API run history, 19/19 runs, no
+    # exceptions -- e.g. a nominal 07:00 UTC time consistently fired between
+    # 08:50-10:46 UTC). Delay only pushes a run LATER, never earlier.
+    #
+    # The pilot's active window is 9am-2pm ET (13:00-18:00 UTC). The
+    # pre-pilot slot below (06:00 UTC / 2am ET) is chosen so that even a
+    # worst-case ~4-hour delay lands by ~10:00 UTC (6am ET) -- still 3 hours
+    # of margin before the 13:00 UTC pilot start. The other two slots are
+    # inherently safe regardless of delay, since delay only pushes them
+    # further AWAY from the pilot window, never into it.
+    #
+    # Do not move the pre-pilot slot later than ~08:00-09:00 UTC without
+    # re-deriving the margin against the then-current observed delay range.
+    - cron: '0 0,6,19 * * *'
   workflow_dispatch: {}
 
 jobs:
