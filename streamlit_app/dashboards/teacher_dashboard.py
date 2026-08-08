@@ -4014,30 +4014,25 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
             st.warning("Select at least one source above.")
         else:
             st.divider()
+            # Cohort-scoped counts (bug fixed 2026-08-08: this block used to run
+            # its own cohort-unaware raw SQL/get_transcript_count() calls, so it
+            # kept showing the unfiltered total even with a cohort filter active
+            # in the same step. Now reuses the same cohort-aware helper Step 5
+            # already uses, so both places agree.)
+            _step1_counts = _count_available_sources(cohort_ids=_ita_cohort_sel or None)
+            _step1_suffix = f" ({'/'.join(_ita_cohort_sel)})" if _ita_cohort_sel else ""
+
             if "responses" in sources:
-                import sqlite3 as _sq2
-                from pathlib import Path as _P2
-                #db2 = next(
-                #    (p / "responses.db" for p in _P2(__file__).resolve().parents #replace both next(...) path searches in this function with a direct env var lookup. 
-                #     if (p / "responses.db").exists()), None
-                #)
-                db2 = _get_responses_db_path()
-                n_avail_ref = 0
-                if db2:
-                    with _sq2.connect(db2) as _c2:
-                        n_avail_ref = _c2.execute(
-                            "SELECT COUNT(DISTINCT user_id) FROM responses "
-                            "WHERE instrument_name LIKE '%module_reflections%'"
-                        ).fetchone()[0]
-                st.metric("Students with reflection notes", n_avail_ref)
+                st.metric(f"Students with reflection notes{_step1_suffix}",
+                          _step1_counts["reflections"])
 
             if "persistent" in sources:
-                n_avail_int = get_transcript_count("interview")
-                st.metric("Interviews in store", n_avail_int)
+                st.metric(f"Interviews in store{_step1_suffix}",
+                          _step1_counts["interviews"])
 
             if "observer" in sources:
-                n_avail_obs = get_transcript_count("observer")
-                st.metric("Observer/instructor transcripts in store", n_avail_obs)
+                st.metric(f"Observer/instructor transcripts in store{_step1_suffix}",
+                          _step1_counts["observer"])
 
             st.info(
                 "✅ Sources confirmed. Proceed to Step 2 to select a model, "
