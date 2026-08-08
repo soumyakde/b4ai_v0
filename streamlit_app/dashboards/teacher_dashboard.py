@@ -3608,38 +3608,57 @@ def _get_responses_db_path(): #cgpt replaced for syntax errors
 # Multi-source loader (shared by ITA and DTA)
 # -----------------------------------------------------------------------
 
-def _count_available_sources() -> dict:
+def _count_available_sources(cohort_ids: list = None) -> dict:
     """
     Return available counts without loading full text content.
     Returns {"reflections": int, "interviews": int, "observer": int}.
+
+    cohort_ids: optional list — when non-empty, counts are scoped to only
+    those cohorts (reflections via the registered-user cohort_map,
+    interviews/observer via their own cohort_id tag), matching how
+    _load_combined_transcripts() filters the actual run data. Without
+    this, the displayed "available" counts would always show the
+    unfiltered total even when a cohort filter is active in Step 1.
     """
     import sqlite3 as _sq
-    from pathlib import Path as _Pth
     counts = {"reflections": 0, "interviews": 0, "observer": 0}
-    # Reflections — count distinct users with reflection responses
-    #db = next(
-    #    (p / "responses.db" for p in _Pth(__file__).resolve().parents # replace both next(...) path searches in this function with a direct env var lookup.
-    #     if (p / "responses.db").exists()), None
-    #)
     db = _get_responses_db_path()
     if db:
         try:
             with _sq.connect(db) as _c:
-                counts["reflections"] = _c.execute(
-                    "SELECT COUNT(DISTINCT user_id) FROM responses "
+                rows = _c.execute(
+                    "SELECT DISTINCT user_id FROM responses "
                     "WHERE instrument_name LIKE '%module_reflections%' "
                     "AND response_value IS NOT NULL"
-                ).fetchone()[0] or 0
+                ).fetchall()
+            if cohort_ids:
+                from auth.user_manager import get_user_cohort_map
+                _cmap = get_user_cohort_map()
+                counts["reflections"] = sum(
+                    1 for (uid,) in rows if _cmap.get(uid) in cohort_ids
+                )
+            else:
+                counts["reflections"] = len(rows)
         except Exception:
             pass
-    # Interviews — count persistent transcripts
+    # Interviews — count persistent transcripts (cohort-scoped when a filter is active)
     try:
-        counts["interviews"] = get_transcript_count("interview") or 0
+        if cohort_ids:
+            counts["interviews"] = len(load_for_analysis(
+                source="persistent", source_type="interview", cohort_ids=cohort_ids
+            ) or [])
+        else:
+            counts["interviews"] = get_transcript_count("interview") or 0
     except Exception:
         pass
-    # Observer/instructor transcripts — count persistent transcripts
+    # Observer/instructor transcripts — count persistent transcripts (cohort-scoped when a filter is active)
     try:
-        counts["observer"] = get_transcript_count("observer") or 0
+        if cohort_ids:
+            counts["observer"] = len(load_for_analysis(
+                source="persistent", source_type="observer", cohort_ids=cohort_ids
+            ) or [])
+        else:
+            counts["observer"] = get_transcript_count("observer") or 0
     except Exception:
         pass
     return counts
@@ -4346,21 +4365,23 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
         st.divider()
         st.markdown("**How many texts to include in this run?**")
         st.caption(
-            "The counts below show what is currently available in the database. "
-            "Use a smaller number to keep costs low when testing a paid model — "
+            "The counts below show what is currently available in the database"
+            + (f", scoped to **{', '.join(_ita_cohort_ids)}**" if _ita_cohort_ids else "")
+            + ". Use a smaller number to keep costs low when testing a paid model — "
             "for example, 2 reflections + 1 interview is enough to confirm the "
             "full pipeline works end-to-end. Set to the full count for a production run."
         )
 
-        _avail_counts = _count_available_sources()
+        _avail_counts = _count_available_sources(cohort_ids=_ita_cohort_ids or None)
         n_avail_ref = _avail_counts["reflections"]
         n_avail_int = _avail_counts["interviews"]
         n_avail_obs = _avail_counts["observer"]
 
+        _cohort_suffix = f" ({'/'.join(_ita_cohort_ids)})" if _ita_cohort_ids else ""
         ca, cb, ce = st.columns(3)
-        ca.metric("Reflections available", n_avail_ref)
-        cb.metric("Interviews available",  n_avail_int)
-        ce.metric("Observer/instructor transcripts available", n_avail_obs)
+        ca.metric(f"Reflections available{_cohort_suffix}", n_avail_ref)
+        cb.metric(f"Interviews available{_cohort_suffix}",  n_avail_int)
+        ce.metric(f"Observer/instructor transcripts available{_cohort_suffix}", n_avail_obs)
         if "observer" in sources and n_avail_obs > 0:
             st.caption(
                 f"All {n_avail_obs} observer/instructor transcript(s) will be "
@@ -5171,20 +5192,22 @@ def _render_dta_run_panel(username: str, canonical_df: pd.DataFrame) -> None:
     st.divider()
     st.markdown("**How many texts to include in this run?**")
     st.caption(
-        "Showing what is currently available. "
-        "Use smaller numbers to test with a paid model before committing to a full run — "
+        "Showing what is currently available"
+        + (f", scoped to **{', '.join(dta_cohort_ids)}**" if dta_cohort_ids else "")
+        + ". Use smaller numbers to test with a paid model before committing to a full run — "
         "even 2 reflections + 1 interview is enough to verify the pipeline and output quality."
     )
 
-    _dta_counts = _count_available_sources()
+    _dta_counts = _count_available_sources(cohort_ids=dta_cohort_ids or None)
     n_dta_avail_ref = _dta_counts["reflections"]
     n_dta_avail_int = _dta_counts["interviews"]
     n_dta_avail_obs = _dta_counts["observer"]
 
+    _dta_cohort_suffix = f" ({'/'.join(dta_cohort_ids)})" if dta_cohort_ids else ""
     dc1, dc2, dc3 = st.columns(3)
-    dc1.metric("Reflections available", n_dta_avail_ref)
-    dc2.metric("Interviews available",  n_dta_avail_int)
-    dc3.metric("Observer/instructor transcripts available", n_dta_avail_obs)
+    dc1.metric(f"Reflections available{_dta_cohort_suffix}", n_dta_avail_ref)
+    dc2.metric(f"Interviews available{_dta_cohort_suffix}",  n_dta_avail_int)
+    dc3.metric(f"Observer/instructor transcripts available{_dta_cohort_suffix}", n_dta_avail_obs)
     if "observer" in sources and n_dta_avail_obs > 0:
         st.caption(
             f"All {n_dta_avail_obs} observer/instructor transcript(s) will be "
