@@ -55,6 +55,24 @@ import math
 # DB path
 # -----------------------------------------------------------------------
 def _find_db() -> Path:
+    """Return the real responses.db path.
+
+    Bug fixed 2026-08-08: same bug as transcript_store.py's _find_db()
+    (fixed 2026-08-04) — this only searched parent directories for a file
+    literally named "responses.db", never finding the real persistent-volume
+    path on Railway (SQLITE_PATH=/app/data/responses.db, not a parent of
+    this file's location). It was silently resolving to a file in the
+    container's ephemeral filesystem instead, so every ITA run record
+    (ita_runs/ita_results) would vanish on the next scheduled redeploy.
+    SQLITE_PATH is now checked first, matching every other part of the app.
+    """
+    import os
+    env_path = os.getenv("SQLITE_PATH")
+    if env_path:
+        p = Path(env_path)
+        if p.exists():
+            return p
+
     here = Path(__file__).resolve()
     for parent in here.parents:
         candidate = parent / "responses.db"
