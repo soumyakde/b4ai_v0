@@ -10,6 +10,7 @@ pytest
 openai
 anthropic
 google-genai
+groq
 tqdm
 altair
 numpy==1.26.4

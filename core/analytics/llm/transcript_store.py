@@ -25,6 +25,25 @@ import pandas as pd
 # DB path
 # -----------------------------------------------------------------------
 def _find_db() -> Path:
+    """Return the real responses.db path.
+
+    Bug fixed 2026-08-04: this used to only search parent directories for a
+    file literally named "responses.db", which never found the real
+    persistent-volume path on Railway (SQLITE_PATH=/app/data/responses.db,
+    not a parent of this file's location). It was silently resolving to a
+    file in the container's ephemeral filesystem instead, so anything
+    written through this module (interview / observer transcripts) never
+    actually persisted across a redeploy. SQLITE_PATH is now checked first,
+    matching how every other part of the app resolves this same file
+    (see core/db_utils.py, teacher_dashboard.py:_get_responses_db_path()).
+    """
+    import os
+    env_path = os.getenv("SQLITE_PATH")
+    if env_path:
+        p = Path(env_path)
+        if p.exists():
+            return p
+
     here = Path(__file__).resolve()
     for parent in here.parents:
         candidate = parent / "responses.db"

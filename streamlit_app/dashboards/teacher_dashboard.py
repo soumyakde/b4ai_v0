@@ -124,7 +124,7 @@ _ASSESSMENT_LABELS: Dict[str, str] = {
 }
 
 _SURVEY_LABELS: Dict[str, str] = {
-    "b4ai_sccces_survey": "SCCCES (Conceptual Change)",
+    "b4ai_sccces_survey": "Cognitive Engagement",
     "b4ai_sims_survey":   "SIMS (Motivation)",
 }
 
@@ -1740,9 +1740,9 @@ def _render_bland_altman_expander(
 
         # ── Interpretation ────────────────────────────────────────────
         bias_dir = (
-            "Pre scores exceeded post on average (improvement post-intervention)."
-            if d_bar > 0 else
             "Post scores exceeded pre on average (gain post-intervention)."
+            if d_bar > 0 else
+            "Pre scores exceeded post on average (decline post-intervention)."
             if d_bar < 0 else
             "No average systematic difference between pre and post."
         )
@@ -1789,7 +1789,7 @@ def _render_bland_altman_expander(
                     "Participant",
                     f"Pre ({score_label})",
                     f"Post ({score_label})",
-                    "Diff (Pre−Post)",
+                    "Diff (Post−Pre)",
                     "Mean (Pre+Post)/2",
                 ]
                 st.dataframe(display, hide_index=True, width="stretch")
@@ -3007,9 +3007,9 @@ def show_teacher_dashboard(username: str) -> None:
     _TAB_OPTIONS = [
         "📊 Basic Statistics",
         "📈 Inferential Statistics",
-        "🔬 IRT Analysis",
         "🤖 LLM Analysis",
         "📉 Competency Progression",
+        "🔬 IRT Analysis",
         "📄 Report Generation",
     ]
     if "teacher_dash_tab" not in st.session_state:
@@ -3024,9 +3024,9 @@ def show_teacher_dashboard(username: str) -> None:
     _TAB_COLORS = {
         "📊 Basic Statistics":       ("#0077BB", "#E6F3FB"),
         "📈 Inferential Statistics": ("#EE7733", "#FFF3E6"),
-        "🔬 IRT Analysis":           ("#009E73", "#E6F7F1"),
         "🤖 LLM Analysis":           ("#CC79A7", "#F9EEF5"),
         "📉 Competency Progression": ("#534AB7", "#EEEDFE"),
+        "🔬 IRT Analysis":           ("#009E73", "#E6F7F1"),
         "📄 Report Generation":      ("#888888", "#F0F0F0"),
     }
     _tc, _tbg = _TAB_COLORS.get(active_tab, ("#333", "#F8F8F8"))
@@ -3068,6 +3068,7 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
     """Tab 2 — IRT Analysis using mirt via rpy2."""
 
     st.subheader("🔬 IRT Analysis")
+    st.info("🚧 This section is functional but earmarked for further development.")
 
     if not _IRT_AVAILABLE:
         st.error(
@@ -3610,11 +3611,11 @@ def _get_responses_db_path(): #cgpt replaced for syntax errors
 def _count_available_sources() -> dict:
     """
     Return available counts without loading full text content.
-    Returns {"reflections": int, "interviews": int}.
+    Returns {"reflections": int, "interviews": int, "observer": int}.
     """
     import sqlite3 as _sq
     from pathlib import Path as _Pth
-    counts = {"reflections": 0, "interviews": 0}
+    counts = {"reflections": 0, "interviews": 0, "observer": 0}
     # Reflections — count distinct users with reflection responses
     #db = next(
     #    (p / "responses.db" for p in _Pth(__file__).resolve().parents # replace both next(...) path searches in this function with a direct env var lookup.
@@ -3636,6 +3637,11 @@ def _count_available_sources() -> dict:
         counts["interviews"] = get_transcript_count("interview") or 0
     except Exception:
         pass
+    # Observer/instructor transcripts — count persistent transcripts
+    try:
+        counts["observer"] = get_transcript_count("observer") or 0
+    except Exception:
+        pass
     return counts
 
 
@@ -3645,7 +3651,7 @@ def _load_combined_transcripts(
 ) -> list:
     """
     Load and merge transcripts from one or more sources.
-    sources: list containing any of "responses", "persistent", "per_run"
+    sources: list containing any of "responses", "persistent", "observer", "per_run"
     When a participant appears in multiple sources their texts are concatenated.
     """
     import sqlite3 as _sq, re as _re
@@ -3689,6 +3695,19 @@ def _load_combined_transcripts(
             except Exception:
                 pass
 
+        elif source_key == "observer":
+            try:
+                trans = load_for_analysis(source="persistent", source_type="observer")
+                for t in (trans or []):
+                    pid  = t.get("participant_id", "unknown")
+                    text = str(t.get("content", "")).strip()
+                    if text:
+                        combined[pid]["content"].append(text)
+                        if "observer" not in combined[pid]["source_types"]:
+                            combined[pid]["source_types"].append("observer")
+            except Exception:
+                pass
+
         elif source_key == "per_run" and per_run_files:
             for f_obj in per_run_files:
                 raw = f_obj.read()
@@ -3713,18 +3732,22 @@ def _load_combined_transcripts(
 
 
 def _source_checkboxes(prefix: str, default_reflections: bool = True):
-    """Render 2-way source checkboxes. Returns (sources_list, None)."""
+    """Render 3-way source checkboxes. Returns (sources_list, None)."""
     st.markdown("**Data sources** (select one or more):")
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     use_ref = c1.checkbox("Module reflections (DB)", value=default_reflections,
                           key=f"{prefix}_src_ref",
                           help="End-of-module reflection notes from responses.db")
     use_int = c2.checkbox("Interview transcripts (store)", value=False,
                           key=f"{prefix}_src_int",
                           help="Semi-structured transcripts uploaded via Admin dashboard")
+    use_obs = c3.checkbox("Observer/instructor transcript(s) (store)", value=False,
+                          key=f"{prefix}_src_obs",
+                          help="Observer/instructor session notes uploaded via Admin dashboard")
     sources = []
     if use_ref: sources.append("responses")
     if use_int: sources.append("persistent")
+    if use_obs: sources.append("observer")
     return sources, None
 
 
@@ -3901,7 +3924,8 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
         st.caption(
             "Choose which data to include in the analysis. "
             "**Reflections** are short written responses students submit after each module. "
-            "**Interviews** are longer semi-structured conversations uploaded by the teacher."
+            "**Interviews** are longer semi-structured conversations uploaded by the teacher. "
+            "**Observer/instructor transcripts** are session notes or recordings uploaded by the teacher."
         )
         sources, per_run_files = _source_checkboxes("ita_g")
 
@@ -3912,6 +3936,7 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
         # across step navigation so Step 5 can read them reliably.
         st.session_state["ita_src_responses"]  = "responses"  in sources
         st.session_state["ita_src_persistent"] = "persistent" in sources
+        st.session_state["ita_src_observer"]   = "observer"   in sources
         st.session_state["ita_src_per_run"]    = "per_run"    in sources
         if per_run_files:
             #st.session_state["ita_g_upload"] = per_run_files #the code tries to write to a session state key that's already bound to a widget. 
@@ -3942,6 +3967,10 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
             if "persistent" in sources:
                 n_avail_int = get_transcript_count("interview")
                 st.metric("Interviews in store", n_avail_int)
+
+            if "observer" in sources:
+                n_avail_obs = get_transcript_count("observer")
+                st.metric("Observer/instructor transcripts in store", n_avail_obs)
 
             st.info(
                 "✅ Sources confirmed. Proceed to Step 2 to select a model, "
@@ -4225,6 +4254,7 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
         sources = []
         if st.session_state.get("ita_src_responses",  True):  sources.append("responses")
         if st.session_state.get("ita_src_persistent", False): sources.append("persistent")
+        if st.session_state.get("ita_src_observer",   False): sources.append("observer")
         if st.session_state.get("ita_src_per_run",    False): sources.append("per_run")
         #per_run_files = st.session_state.get("ita_g_upload") #remove upload now in llm analysis, ITA
         per_run_files = st.session_state.get("ita_g_upload_store")
@@ -4232,6 +4262,7 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
         _src_labels = {
             "responses":  "Module reflections (DB)",
             "persistent": "Interview transcripts (store)",
+            "observer":   "Observer/instructor transcript(s) (store)",
             "per_run":    "Uploaded files (this run)",
         }
         if sources:
@@ -4271,10 +4302,18 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
         _avail_counts = _count_available_sources()
         n_avail_ref = _avail_counts["reflections"]
         n_avail_int = _avail_counts["interviews"]
+        n_avail_obs = _avail_counts["observer"]
 
-        ca, cb = st.columns(2)
+        ca, cb, ce = st.columns(3)
         ca.metric("Reflections available", n_avail_ref)
         cb.metric("Interviews available",  n_avail_int)
+        ce.metric("Observer/instructor transcripts available", n_avail_obs)
+        if "observer" in sources and n_avail_obs > 0:
+            st.caption(
+                f"All {n_avail_obs} observer/instructor transcript(s) will be "
+                "included automatically (no separate count control yet, "
+                "unlike reflections/interviews above)."
+            )
 
         cc, cd = st.columns(2)
         n_ref_use = cc.number_input(
@@ -5083,10 +5122,18 @@ def _render_dta_run_panel(username: str, canonical_df: pd.DataFrame) -> None:
     _dta_counts = _count_available_sources()
     n_dta_avail_ref = _dta_counts["reflections"]
     n_dta_avail_int = _dta_counts["interviews"]
+    n_dta_avail_obs = _dta_counts["observer"]
 
-    dc1, dc2 = st.columns(2)
+    dc1, dc2, dc3 = st.columns(3)
     dc1.metric("Reflections available", n_dta_avail_ref)
     dc2.metric("Interviews available",  n_dta_avail_int)
+    dc3.metric("Observer/instructor transcripts available", n_dta_avail_obs)
+    if "observer" in sources and n_dta_avail_obs > 0:
+        st.caption(
+            f"All {n_dta_avail_obs} observer/instructor transcript(s) will be "
+            "included automatically (no separate count control yet, "
+            "unlike reflections/interviews above)."
+        )
 
     di1, di2 = st.columns(2)
     dta_n_ref = di1.number_input(

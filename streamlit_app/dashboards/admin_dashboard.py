@@ -12,6 +12,7 @@ import os
 import streamlit as st
 import sqlite3
 import pandas as pd
+from pathlib import Path
 
 from core.admin import (
     user_service,
@@ -981,6 +982,249 @@ def show_admin_dashboard(username: str):
                         st.warning(
                             f"Skipped {len(_skipped)}: "
                             + "; ".join(_skipped)
+                        )
+                    st.rerun()
+
+        st.divider()
+
+        # ── Observer/Instructor Transcript Store ────────────────────────────
+        st.subheader("📂 Observer/Instructor Transcript Store")
+        st.caption(
+            "Manage the persistent observer/instructor transcript store used by the "
+            "Teacher Dashboard for ITA and DTA analysis — session notes or recordings "
+            "from an observer or instructor, kept separate from interview transcripts. "
+            "Transcripts are matched to student reflection data by "
+            "**participant ID** — the ID here must exactly match the student "
+            "username in the responses database for the two sources to align."
+        )
+
+        if not _TRANSCRIPT_STORE_AVAILABLE:
+            st.warning(
+                f"Transcript store unavailable: {_TRANSCRIPT_STORE_ERR}. "
+                "Ensure core/analytics/llm/transcript_store.py is installed."
+            )
+        else:
+            # ── Current store contents (observer type only) ────────────────────
+            try:
+                _raw_obs = get_persistent_transcripts(source_type="observer")
+                if hasattr(_raw_obs, "to_dict"):
+                    _obs_transcripts = _raw_obs.to_dict("records") if not _raw_obs.empty else []
+                elif isinstance(_raw_obs, list):
+                    _obs_transcripts = _raw_obs
+                else:
+                    _obs_transcripts = []
+                _obs_count = len(_obs_transcripts)
+            except Exception as _te:
+                _obs_transcripts = []
+                _obs_count       = 0
+                st.error(f"Could not load transcript store: {_te}")
+
+            col_obs_cnt, col_obs_clr = st.columns([3, 1])
+            col_obs_cnt.metric("Observer/instructor transcripts in store", _obs_count)
+
+            if _obs_count > 0:
+                _obs_rows = []
+                for t in _obs_transcripts:
+                    _obs_rows.append({
+                        "Participant ID": t.get("participant_id", "—"),
+                        "Source type":    t.get("source_type", "—"),
+                        "Characters":     t.get("char_count", "—"),
+                        "Uploaded by":    t.get("uploaded_by", "—"),
+                        "Uploaded at":    t.get("uploaded_at", "—"),
+                        "Transcript ID":  t.get("transcript_id",
+                                          t.get("id", "—")),
+                    })
+                _obs_df = pd.DataFrame(_obs_rows)
+                st.dataframe(_obs_df, hide_index=True, width="stretch")
+
+                st.divider()
+
+                # ── Delete individual observer transcript ───────────────────
+                st.markdown("**Delete a transcript**")
+                st.caption(
+                    "Use this when you need to re-upload a transcript with a "
+                    "corrected participant ID to match the reflection data."
+                )
+                _obs_del_opts = {
+                    f"{t.get('participant_id', t.get('id', '—'))}  "
+                    f"[{t.get('source_type', 'observer')}]": (
+                        str(t.get("participant_id", t.get("id", ""))),
+                        str(t.get("source_type", "observer")),
+                    )
+                    for t in _obs_transcripts
+                }
+                _obs_del_label = st.selectbox(
+                    "Select transcript to delete",
+                    options=list(_obs_del_opts.keys()),
+                    key="admin_obs_del_transcript_id",
+                )
+                if st.button("🗑 Delete selected transcript",
+                             key="admin_obs_del_transcript_btn"):
+                    try:
+                        _obs_del_pid, _obs_del_src = _obs_del_opts[_obs_del_label]
+                        delete_transcript(_obs_del_pid, _obs_del_src)
+                        st.success(f"Transcript for '{_obs_del_pid}' deleted.")
+                        st.rerun()
+                    except Exception as _de:
+                        st.error(f"Delete failed: {_de}")
+
+                st.divider()
+
+                # ── Delete ALL observer transcripts ──────────────────────────
+                st.markdown("**Clear entire observer/instructor transcript store**")
+                st.caption(
+                    "Removes all observer/instructor transcripts only — interview "
+                    "transcripts and reflections are untouched. "
+                    "Use before a fresh bulk upload when participant IDs have "
+                    "changed across the cohort."
+                )
+                _obs_confirm_clear = st.text_input(
+                    "Type DELETE ALL to confirm",
+                    key="admin_obs_clear_transcripts_confirm",
+                )
+                if st.button("🗑 Clear all observer/instructor transcripts",
+                             key="admin_obs_clear_all_btn",
+                             type="secondary"):
+                    if _obs_confirm_clear == "DELETE ALL":
+                        _obs_deleted = 0
+                        _obs_errors  = []
+                        for t in _obs_transcripts:
+                            _pid = str(t.get("participant_id", t.get("id", "")))
+                            _src = str(t.get("source_type", "observer"))
+                            try:
+                                delete_transcript(_pid, _src)
+                                _obs_deleted += 1
+                            except Exception as _ce:
+                                _obs_errors.append(f"{_pid}: {_ce}")
+                        if _obs_errors:
+                            st.warning(
+                                f"Deleted {_obs_deleted}, "
+                                f"{len(_obs_errors)} error(s): "
+                                + "; ".join(_obs_errors)
+                            )
+                        else:
+                            st.success(
+                                f"All {_obs_deleted} transcript(s) cleared."
+                            )
+                        st.rerun()
+                    else:
+                        st.warning("Type DELETE ALL (exactly) to confirm.")
+            else:
+                st.info("No observer/instructor transcripts in store. Upload below.")
+
+            st.divider()
+
+            # ── Upload new observer/instructor transcripts ──────────────────
+            st.markdown("**Upload observer/instructor transcripts**")
+            st.caption(
+                "Upload one or more transcript files. "
+                "Each file is assigned a **participant ID** that must match "
+                "the student's username in the responses database exactly — "
+                "this is how reflections and observer/instructor notes are linked in analysis. "
+                "Accepted formats: `.txt`, `.vtt` (WebVTT), `.pdf`."
+            )
+
+            _obs_upload_files = st.file_uploader(
+                "Select transcript files",
+                type=["txt", "vtt", "pdf"],
+                accept_multiple_files=True,
+                key="admin_obs_transcript_upload",
+                help="Upload multiple files at once. "
+                     "Participant IDs are set below.",
+            )
+
+            if _obs_upload_files:
+                st.markdown(
+                    "**Map each file to a participant ID** "
+                    "(must match the student username exactly):"
+                )
+
+                try:
+                    _obs_users = user_service.get_all_users()
+                    if hasattr(_obs_users, "to_dict"):
+                        _obs_usernames = list(
+                            _obs_users["username"].dropna().tolist()
+                        )
+                    elif isinstance(_obs_users, list):
+                        _obs_usernames = [
+                            u.get("username", "") for u in _obs_users
+                        ]
+                    else:
+                        _obs_usernames = []
+                except Exception:
+                    _obs_usernames = []
+
+                try:
+                    from core.analytics.llm.transcript_store import _infer_pid as _obs_infer_pid
+                except Exception:
+                    _obs_infer_pid = lambda fn: Path(fn).stem
+
+                _obs_mappings = {}
+                for _uf in _obs_upload_files:
+                    _obs_default_id = _obs_infer_pid(_uf.name)
+                    _obs_pid = st.text_input(
+                        f"Participant ID for **{_uf.name}**",
+                        value=_obs_default_id,
+                        key=f"admin_obs_pid_{_uf.name}",
+                        help=(
+                            "Type or paste the exact student username. "
+                            "E.g. if the student's login is 'student01', "
+                            "enter 'student01'."
+                        ),
+                    )
+                    _obs_mappings[_uf.name] = (_uf, _obs_pid.strip())
+
+                if st.button(
+                    "📤 Upload transcripts to store",
+                    key="admin_obs_upload_submit",
+                    type="primary",
+                    disabled=not _obs_mappings,
+                ):
+                    _obs_unknown = [
+                        _pid for (_fobj, _pid) in _obs_mappings.values()
+                        if _obs_usernames and _pid and _pid not in _obs_usernames
+                    ]
+                    if _obs_unknown:
+                        st.warning(
+                            "⚠️ The following participant IDs are not registered "
+                            "usernames — double-check spelling before proceeding:\n"
+                            + "\n".join(f"• `{p}`" for p in _obs_unknown)
+                        )
+
+                    _obs_saved   = 0
+                    _obs_skipped = []
+                    for _fname, (_fobj, _pid) in _obs_mappings.items():
+                        if not _pid:
+                            _obs_skipped.append(f"{_fname} (no participant ID set)")
+                            continue
+                        try:
+                            _raw = _fobj.read()
+                            try:
+                                _text = _raw.decode("utf-8", errors="replace")
+                            except Exception:
+                                _text = _raw.decode("latin-1", errors="replace")
+
+                            from core.analytics.llm.transcript_store \
+                                import save_transcript
+                            save_transcript(
+                                participant_id=_pid,
+                                content=_text,
+                                source_type="observer",
+                                filename=_fname,
+                                uploaded_by=username,
+                            )
+                            _obs_saved += 1
+                        except Exception as _ue:
+                            _obs_skipped.append(f"{_fname}: {_ue}")
+
+                    if _obs_saved:
+                        st.success(
+                            f"✅ {_obs_saved} transcript(s) saved to store."
+                        )
+                    if _obs_skipped:
+                        st.warning(
+                            f"Skipped {len(_obs_skipped)}: "
+                            + "; ".join(_obs_skipped)
                         )
                     st.rerun()
 

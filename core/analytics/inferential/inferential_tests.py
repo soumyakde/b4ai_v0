@@ -747,7 +747,7 @@ def run_bland_altman(
     ------------------
     For each subject i with pre score A_i and post score B_i:
 
-        diff_i   = A_i - B_i            (pre minus post)
+        diff_i   = B_i - A_i            (post minus pre)
         mean_i   = (A_i + B_i) / 2
 
     Summary statistics:
@@ -778,7 +778,7 @@ def run_bland_altman(
     dict with keys:
         pre_instrument, post_instrument, use_pct,
         n_pairs,
-        mean_diff       -- d_bar (systematic bias; +ve = pre > post on average),
+        mean_diff       -- d_bar (systematic bias; +ve = post > pre on average, i.e. a gain),
         sd_diff         -- s (random error),
         loa_lower       -- d_bar - 2s,
         loa_upper       -- d_bar + 2s,
@@ -827,8 +827,8 @@ def run_bland_altman(
             return result
 
         # Per-pair statistics (Bland-Altman 1990)
-        diff     = paired["pre"] - paired["post"]        # A - B
-        mean_val = (paired["pre"] + paired["post"]) / 2  # (A + B) / 2
+        diff     = paired["post"] - paired["pre"]         # B - A (post minus pre; +ve = gain)
+        mean_val = (paired["pre"] + paired["post"]) / 2   # (A + B) / 2
 
         d_bar = float(diff.mean())
         s     = float(diff.std(ddof=1))
