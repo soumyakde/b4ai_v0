@@ -56,6 +56,44 @@ DEBUG = st.session_state.DEBUG_MODE
 
 
 # ---------------------------------------------------------
+# COHORT SELECTOR — shared by both transcript upload sections
+# ---------------------------------------------------------
+
+_COHORT_NONE = "— none —"
+_COHORT_CREATE_NEW = "+ Create new cohort…"
+
+
+def _cohort_selector(key_prefix: str, label: str = "Cohort") -> str | None:
+    """
+    Render a cohort-picker selectbox with an inline "create new cohort"
+    escape hatch. Returns the resolved cohort_id, or None if "— none —".
+
+    The "create new" path calls user_service.add_cohort() — the same
+    function the existing Cohort Management section (User Management tab)
+    uses — so a cohort created here is immediately usable everywhere else
+    in the app too, not a parallel/duplicate mechanism.
+    """
+    cohorts = user_service.get_all_cohorts()
+    options = [_COHORT_NONE] + cohorts + [_COHORT_CREATE_NEW]
+    choice = st.selectbox(label, options=options, key=f"{key_prefix}_choice")
+
+    if choice == _COHORT_CREATE_NEW:
+        new_id = st.text_input("New cohort ID", key=f"{key_prefix}_new_id")
+        if st.button("Create cohort", key=f"{key_prefix}_new_btn"):
+            if new_id.strip():
+                user_service.add_cohort(new_id)
+                st.success(f"Cohort '{new_id.strip()}' created — select it above.")
+                st.rerun()
+            else:
+                st.warning("Enter a cohort ID first.")
+        return None  # not yet selected — admin must pick it after creating
+
+    if choice == _COHORT_NONE:
+        return None
+    return choice
+
+
+# ---------------------------------------------------------
 # MAIN DASHBOARD FUNCTION
 # ---------------------------------------------------------
 def show_admin_dashboard(username: str):
@@ -560,11 +598,7 @@ def show_admin_dashboard(username: str):
         if st.button("Create Cohort"):
             if new_cohort_input:
                 try:
-                    conn = user_service.get_connection()
-                    cursor = conn.cursor()
-                    cursor.execute("INSERT OR IGNORE INTO cohorts (cohort_id) VALUES (?)", (new_cohort_input.strip(),))
-                    conn.commit()
-                    conn.close()
+                    user_service.add_cohort(new_cohort_input)
                     st.success(f"Cohort '{new_cohort_input}' created.")
                     st.rerun()
                 except Exception as e:
@@ -783,6 +817,7 @@ def show_admin_dashboard(username: str):
                     _rows.append({
                         "Participant ID": t.get("participant_id", "—"),
                         "Source type":    t.get("source_type", "—"),
+                        "Cohort":         t.get("cohort_id") or "—",
                         "Characters":     t.get("char_count", "—"),
                         "Uploaded by":    t.get("uploaded_by", "—"),
                         "Uploaded at":    t.get("uploaded_at", "—"),
@@ -803,7 +838,8 @@ def show_admin_dashboard(username: str):
                 # Build label → (participant_id, source_type) map
                 _del_opts = {
                     f"{t.get('participant_id', t.get('id', '—'))}  "
-                    f"[{t.get('source_type', 'interview')}]": (
+                    f"[{t.get('source_type', 'interview')}]"
+                    f"{'  · ' + t['cohort_id'] if t.get('cohort_id') else ''}": (
                         str(t.get("participant_id", t.get("id", ""))),
                         str(t.get("source_type", "interview")),
                     )
@@ -889,6 +925,15 @@ def show_admin_dashboard(username: str):
 
             if _upload_files:
                 st.markdown(
+                    "**Cohort for this batch** — applies to every file below by "
+                    "default; each file can still be set to a different cohort "
+                    "individually. Use this for pre-pilot interviews recorded "
+                    "before the platform existed, or any transcript you want "
+                    "grouped by cohort for LLM Analysis comparisons."
+                )
+                _bulk_cohort = _cohort_selector("admin_int_bulk_cohort", label="Cohort (applies to all files below)")
+
+                st.markdown(
                     "**Map each file to a participant ID** "
                     "(must match the student username exactly):"
                 )
@@ -915,10 +960,14 @@ def show_admin_dashboard(username: str):
                 except Exception:
                     _ts_infer_pid = lambda fn: Path(fn).stem
 
+                _cohort_options = [_COHORT_NONE] + user_service.get_all_cohorts()
+                _bulk_index = _cohort_options.index(_bulk_cohort) if _bulk_cohort in _cohort_options else 0
+
                 _mappings = {}
                 for _uf in _upload_files:
                     _default_id = _ts_infer_pid(_uf.name)
-                    _pid = st.text_input(
+                    _col_pid, _col_cohort = st.columns([2, 1])
+                    _pid = _col_pid.text_input(
                         f"Participant ID for **{_uf.name}**",
                         value=_default_id,
                         key=f"admin_pid_{_uf.name}",
@@ -928,7 +977,15 @@ def show_admin_dashboard(username: str):
                             "enter 'student01'."
                         ),
                     )
-                    _mappings[_uf.name] = (_uf, _pid.strip())
+                    _file_cohort_choice = _col_cohort.selectbox(
+                        "Cohort",
+                        options=_cohort_options,
+                        index=_bulk_index,
+                        key=f"admin_cohort_{_uf.name}",
+                        help="Defaults to the batch cohort above — change to override for just this file.",
+                    )
+                    _file_cohort = None if _file_cohort_choice == _COHORT_NONE else _file_cohort_choice
+                    _mappings[_uf.name] = (_uf, _pid.strip(), _file_cohort)
 
                 if st.button(
                     "📤 Upload transcripts to store",
@@ -938,19 +995,21 @@ def show_admin_dashboard(username: str):
                 ):
                     # Validate participant IDs before writing anything
                     _unknown = [
-                        _pid for (_fobj, _pid) in _mappings.values()
+                        _pid for (_fobj, _pid, _coh) in _mappings.values()
                         if _usernames and _pid and _pid not in _usernames
                     ]
                     if _unknown:
                         st.warning(
                             "⚠️ The following participant IDs are not registered "
-                            "usernames — double-check spelling before proceeding:\n"
+                            "usernames — double-check spelling before proceeding "
+                            "(this is expected/fine for pre-pilot participants "
+                            "who never registered on the platform):\n"
                             + "\n".join(f"• `{p}`" for p in _unknown)
                         )
 
                     _saved   = 0
                     _skipped = []
-                    for _fname, (_fobj, _pid) in _mappings.items():
+                    for _fname, (_fobj, _pid, _coh) in _mappings.items():
                         if not _pid:
                             _skipped.append(f"{_fname} (no participant ID set)")
                             continue
@@ -969,6 +1028,7 @@ def show_admin_dashboard(username: str):
                                 source_type="interview",
                                 filename=_fname,
                                 uploaded_by=username,
+                                cohort_id=_coh,
                             )
                             _saved += 1
                         except Exception as _ue:
@@ -1028,6 +1088,7 @@ def show_admin_dashboard(username: str):
                     _obs_rows.append({
                         "Participant ID": t.get("participant_id", "—"),
                         "Source type":    t.get("source_type", "—"),
+                        "Cohort":         t.get("cohort_id") or "—",
                         "Characters":     t.get("char_count", "—"),
                         "Uploaded by":    t.get("uploaded_by", "—"),
                         "Uploaded at":    t.get("uploaded_at", "—"),
@@ -1047,7 +1108,8 @@ def show_admin_dashboard(username: str):
                 )
                 _obs_del_opts = {
                     f"{t.get('participant_id', t.get('id', '—'))}  "
-                    f"[{t.get('source_type', 'observer')}]": (
+                    f"[{t.get('source_type', 'observer')}]"
+                    f"{'  · ' + t['cohort_id'] if t.get('cohort_id') else ''}": (
                         str(t.get("participant_id", t.get("id", ""))),
                         str(t.get("source_type", "observer")),
                     )
@@ -1135,6 +1197,13 @@ def show_admin_dashboard(username: str):
 
             if _obs_upload_files:
                 st.markdown(
+                    "**Cohort for this batch** — applies to every file below by "
+                    "default; each file can still be set to a different cohort "
+                    "individually."
+                )
+                _obs_bulk_cohort = _cohort_selector("admin_obs_bulk_cohort", label="Cohort (applies to all files below)")
+
+                st.markdown(
                     "**Map each file to a participant ID** "
                     "(must match the student username exactly):"
                 )
@@ -1159,10 +1228,14 @@ def show_admin_dashboard(username: str):
                 except Exception:
                     _obs_infer_pid = lambda fn: Path(fn).stem
 
+                _obs_cohort_options = [_COHORT_NONE] + user_service.get_all_cohorts()
+                _obs_bulk_index = _obs_cohort_options.index(_obs_bulk_cohort) if _obs_bulk_cohort in _obs_cohort_options else 0
+
                 _obs_mappings = {}
                 for _uf in _obs_upload_files:
                     _obs_default_id = _obs_infer_pid(_uf.name)
-                    _obs_pid = st.text_input(
+                    _obs_col_pid, _obs_col_cohort = st.columns([2, 1])
+                    _obs_pid = _obs_col_pid.text_input(
                         f"Participant ID for **{_uf.name}**",
                         value=_obs_default_id,
                         key=f"admin_obs_pid_{_uf.name}",
@@ -1172,7 +1245,15 @@ def show_admin_dashboard(username: str):
                             "enter 'student01'."
                         ),
                     )
-                    _obs_mappings[_uf.name] = (_uf, _obs_pid.strip())
+                    _obs_file_cohort_choice = _obs_col_cohort.selectbox(
+                        "Cohort",
+                        options=_obs_cohort_options,
+                        index=_obs_bulk_index,
+                        key=f"admin_obs_cohort_{_uf.name}",
+                        help="Defaults to the batch cohort above — change to override for just this file.",
+                    )
+                    _obs_file_cohort = None if _obs_file_cohort_choice == _COHORT_NONE else _obs_file_cohort_choice
+                    _obs_mappings[_uf.name] = (_uf, _obs_pid.strip(), _obs_file_cohort)
 
                 if st.button(
                     "📤 Upload transcripts to store",
@@ -1181,19 +1262,21 @@ def show_admin_dashboard(username: str):
                     disabled=not _obs_mappings,
                 ):
                     _obs_unknown = [
-                        _pid for (_fobj, _pid) in _obs_mappings.values()
+                        _pid for (_fobj, _pid, _coh) in _obs_mappings.values()
                         if _obs_usernames and _pid and _pid not in _obs_usernames
                     ]
                     if _obs_unknown:
                         st.warning(
                             "⚠️ The following participant IDs are not registered "
-                            "usernames — double-check spelling before proceeding:\n"
+                            "usernames — double-check spelling before proceeding "
+                            "(this is expected/fine for pre-pilot participants "
+                            "who never registered on the platform):\n"
                             + "\n".join(f"• `{p}`" for p in _obs_unknown)
                         )
 
                     _obs_saved   = 0
                     _obs_skipped = []
-                    for _fname, (_fobj, _pid) in _obs_mappings.items():
+                    for _fname, (_fobj, _pid, _coh) in _obs_mappings.items():
                         if not _pid:
                             _obs_skipped.append(f"{_fname} (no participant ID set)")
                             continue
@@ -1212,6 +1295,7 @@ def show_admin_dashboard(username: str):
                                 source_type="observer",
                                 filename=_fname,
                                 uploaded_by=username,
+                                cohort_id=_coh,
                             )
                             _obs_saved += 1
                         except Exception as _ue:

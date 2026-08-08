@@ -154,6 +154,7 @@ def _init_dta_schema(db_path: Optional[Path] = None) -> None:
     # Safe migrations: add missing columns
     for table, col, typedef in [
         ("dta_runs",    "notes",              "TEXT"),
+        ("dta_runs",    "cohort_scope",       "TEXT"),  # 2026-08-08 — see ita_pipeline.py's equivalent
         ("dta_results", "instances_json",     "TEXT"),
         ("dta_results", "raw_prompt",         "TEXT"),
         ("dta_results", "raw_response",       "TEXT"),
@@ -1324,8 +1325,13 @@ def create_dta_run(
     created_by: str,
     notes: str = "",
     db_path: Optional[Path] = None,
+    cohort_scope: str = "All cohorts",
 ) -> str:
-    """Create a new DTA run record. Returns run_id."""
+    """Create a new DTA run record. Returns run_id.
+
+    cohort_scope: "All cohorts" if no cohort filter was applied, otherwise
+    a comma-joined list of the cohort(s) this run was scoped to.
+    """
     _init_dta_schema(db_path)
     run_id = str(uuid.uuid4())
     now    = datetime.utcnow().isoformat()
@@ -1333,11 +1339,11 @@ def create_dta_run(
     conn.execute(
         """INSERT INTO dta_runs
            (run_id, created_by, created_at, model, temperature,
-            source_type, construct_groups, status, phase_reached, notes)
-           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            source_type, construct_groups, status, phase_reached, notes, cohort_scope)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
         (run_id, created_by, now, model, temperature,
          source_type, json.dumps(construct_groups),
-         "created", 0, notes)
+         "created", 0, notes, cohort_scope)
     )
     conn.commit()
     conn.close()
@@ -1445,19 +1451,19 @@ def list_dta_runs(
     if created_by:
         rows = conn.execute(
             """SELECT run_id, created_by, created_at, model, temperature,
-                      source_type, construct_groups, status, phase_reached
+                      source_type, construct_groups, status, phase_reached, cohort_scope
                FROM dta_runs WHERE created_by=? ORDER BY created_at DESC""",
             (created_by,)
         ).fetchall()
     else:
         rows = conn.execute(
             """SELECT run_id, created_by, created_at, model, temperature,
-                      source_type, construct_groups, status, phase_reached
+                      source_type, construct_groups, status, phase_reached, cohort_scope
                FROM dta_runs ORDER BY created_at DESC"""
         ).fetchall()
     conn.close()
     cols = ["run_id","created_by","created_at","model","temperature",
-            "source_type","construct_groups","status","phase_reached"]
+            "source_type","construct_groups","status","phase_reached","cohort_scope"]
     return [dict(zip(cols, r)) for r in rows]
 
 

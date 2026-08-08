@@ -9,7 +9,14 @@ Two storage modes:
     Per-run    — uploaded fresh each run
 
 DB schema (added to responses.db):
-    transcripts(id, participant_id, source_type, content, uploaded_by, uploaded_at)
+    transcripts(id, participant_id, source_type, content, uploaded_by, uploaded_at, cohort_id)
+
+cohort_id (added 2026-08-08) tags a transcript with a cohort directly,
+independent of any registered user record — needed for pre-pilot interview
+transcripts recorded before the platform existed, whose participants have
+no row in `users` at all and therefore no way to derive a cohort via the
+normal users.cohort_id join. Nullable; existing/older rows without one are
+simply untagged (no filter applies to them, they're not excluded either).
 """
 
 from __future__ import annotations
@@ -63,7 +70,12 @@ def _get_ts_conn(db_path: Optional[Path] = None) -> sqlite3.Connection:
 # -----------------------------------------------------------------------
 
 def init_transcript_table(db_path: Optional[Path] = None) -> None:
-    """Create transcripts table if not present. Safe to call multiple times."""
+    """Create transcripts table if not present. Safe to call multiple times.
+
+    Also idempotently migrates in the cohort_id column (added 2026-08-08)
+    for tables created before it existed — ALTER TABLE ADD COLUMN, guarded
+    by a check so re-running this never errors on an already-migrated table.
+    """
     conn = _get_ts_conn(db_path)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS transcripts (
@@ -72,9 +84,13 @@ def init_transcript_table(db_path: Optional[Path] = None) -> None:
             source_type    TEXT NOT NULL,
             content        TEXT NOT NULL,
             uploaded_by    TEXT NOT NULL,
-            uploaded_at    TEXT NOT NULL
+            uploaded_at    TEXT NOT NULL,
+            cohort_id      TEXT
         )
     """)
+    existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(transcripts)").fetchall()}
+    if "cohort_id" not in existing_cols:
+        conn.execute("ALTER TABLE transcripts ADD COLUMN cohort_id TEXT")
     conn.commit()
     conn.close()
 
@@ -167,6 +183,7 @@ def upload_transcripts_persistent(
     source_type: str,
     uploaded_by: str,
     db_path: Optional[Path] = None,
+    cohort_id: Optional[str] = None,
 ) -> Dict:
     """
     Upload transcript files to the persistent DB store.
@@ -177,6 +194,7 @@ def upload_transcripts_persistent(
     source_type  : "interview" or "reflection"
     uploaded_by  : username of uploader
     db_path      : optional path to responses.db
+    cohort_id    : optional cohort tag applied to every file in this batch
 
     Returns
     -------
@@ -208,17 +226,17 @@ def upload_transcripts_persistent(
             if existing:
                 conn.execute(
                     """UPDATE transcripts
-                       SET content=?, uploaded_by=?, uploaded_at=?
+                       SET content=?, uploaded_by=?, uploaded_at=?, cohort_id=?
                        WHERE participant_id=? AND source_type=?""",
-                    (text, uploaded_by, now, pid, source_type)
+                    (text, uploaded_by, now, cohort_id, pid, source_type)
                 )
                 skipped += 1
             else:
                 conn.execute(
                     """INSERT INTO transcripts
-                       (participant_id, source_type, content, uploaded_by, uploaded_at)
-                       VALUES (?,?,?,?,?)""",
-                    (pid, source_type, text, uploaded_by, now)
+                       (participant_id, source_type, content, uploaded_by, uploaded_at, cohort_id)
+                       VALUES (?,?,?,?,?,?)""",
+                    (pid, source_type, text, uploaded_by, now, cohort_id)
                 )
                 uploaded += 1
 
@@ -249,26 +267,22 @@ def get_persistent_transcripts(
     if source_type:
         rows = conn.execute(
             "SELECT id, participant_id, source_type, uploaded_by, uploaded_at, "
-            "length(content) as char_count "
+            "length(content) as char_count, cohort_id "
             "FROM transcripts WHERE source_type=? ORDER BY participant_id",
             (source_type,)
         ).fetchall()
     else:
         rows = conn.execute(
             "SELECT id, participant_id, source_type, uploaded_by, uploaded_at, "
-            "length(content) as char_count "
+            "length(content) as char_count, cohort_id "
             "FROM transcripts ORDER BY source_type, participant_id"
         ).fetchall()
     conn.close()
+    cols = ["id", "participant_id", "source_type",
+            "uploaded_by", "uploaded_at", "char_count", "cohort_id"]
     if not rows:
-        return pd.DataFrame(columns=[
-            "id", "participant_id", "source_type",
-            "uploaded_by", "uploaded_at", "char_count"
-        ])
-    return pd.DataFrame(rows, columns=[
-        "id", "participant_id", "source_type",
-        "uploaded_by", "uploaded_at", "char_count"
-    ])
+        return pd.DataFrame(columns=cols)
+    return pd.DataFrame(rows, columns=cols)
 
 
 def get_transcript_count(
@@ -316,6 +330,7 @@ def save_transcript(
     filename: str = "",
     uploaded_by: str = "admin",
     db_path: Optional[Path] = None,
+    cohort_id: Optional[str] = None,
 ) -> None:
     """
     Save or update a single transcript with an explicitly supplied participant ID.
@@ -328,11 +343,15 @@ def save_transcript(
     Parameters
     ----------
     participant_id : str  — must match the student's username in responses.db
+                      (or, for pre-pilot transcripts with no registered user,
+                      any consistent identifier — cohort_id is what makes
+                      those usable for cohort-scoped analysis regardless)
     content        : str  — full plain-text transcript content
-    source_type    : str  — 'interview' (default) | 'reflection'
+    source_type    : str  — 'interview' (default) | 'reflection' | 'observer'
     filename       : str  — original filename, stored for audit purposes
     uploaded_by    : str  — username of the admin who uploaded the file
     db_path        : Path | None — optional override for responses.db location
+    cohort_id      : str | None — cohort tag, independent of any user record
     """
     init_transcript_table(db_path)
     conn = _get_ts_conn(db_path)
@@ -346,16 +365,16 @@ def save_transcript(
     if existing:
         conn.execute(
             """UPDATE transcripts
-               SET content=?, uploaded_by=?, uploaded_at=?
+               SET content=?, uploaded_by=?, uploaded_at=?, cohort_id=?
                WHERE participant_id=? AND source_type=?""",
-            (content, uploaded_by, now, participant_id, source_type)
+            (content, uploaded_by, now, cohort_id, participant_id, source_type)
         )
     else:
         conn.execute(
             """INSERT INTO transcripts
-               (participant_id, source_type, content, uploaded_by, uploaded_at)
-               VALUES (?,?,?,?,?)""",
-            (participant_id, source_type, content, uploaded_by, now)
+               (participant_id, source_type, content, uploaded_by, uploaded_at, cohort_id)
+               VALUES (?,?,?,?,?,?)""",
+            (participant_id, source_type, content, uploaded_by, now, cohort_id)
         )
 
     conn.commit()
@@ -402,6 +421,7 @@ def load_for_analysis(
     per_run_files: Optional[List] = None,
     module_id: Optional[str] = None,
     db_path: Optional[Path] = None,
+    cohort_ids: Optional[List[str]] = None,
 ) -> List[Dict]:
     """
     Load transcripts from a named source.
@@ -409,30 +429,35 @@ def load_for_analysis(
     Parameters
     ----------
     source       : "persistent" | "per_run" | "responses"
-    source_type  : "interview" | "reflection"
+    source_type  : "interview" | "reflection" | "observer"
     per_run_files: list of Streamlit file objects (required when source="per_run")
     module_id    : optional filter for "responses" source
     db_path      : optional path to responses.db
+    cohort_ids   : optional list — when provided, only "persistent"-source
+                   transcripts tagged with one of these cohort_id values are
+                   returned. Untagged transcripts (cohort_id IS NULL) are
+                   excluded when a filter is active, since they can't be
+                   attributed to any of the selected cohorts.
 
     Returns
     -------
-    List of {"participant_id": str, "source_type": str, "content": str}
+    List of {"participant_id": str, "source_type": str, "content": str, "cohort_id": str|None}
     """
     if source == "persistent":
         init_transcript_table(db_path)
         conn = _get_ts_conn(db_path)
+        query = "SELECT participant_id, source_type, content, cohort_id FROM transcripts WHERE 1=1"
+        params: list = []
         if source_type:
-            rows = conn.execute(
-                "SELECT participant_id, source_type, content FROM transcripts "
-                "WHERE source_type=?",
-                (source_type,)
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT participant_id, source_type, content FROM transcripts"
-            ).fetchall()
+            query += " AND source_type=?"
+            params.append(source_type)
+        if cohort_ids:
+            placeholders = ",".join("?" for _ in cohort_ids)
+            query += f" AND cohort_id IN ({placeholders})"
+            params.extend(cohort_ids)
+        rows = conn.execute(query, params).fetchall()
         conn.close()
-        return [{"participant_id": r[0], "source_type": r[1], "content": r[2]}
+        return [{"participant_id": r[0], "source_type": r[1], "content": r[2], "cohort_id": r[3]}
                 for r in rows]
 
     elif source == "per_run":

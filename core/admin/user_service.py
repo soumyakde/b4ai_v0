@@ -84,6 +84,36 @@ def get_all_cohorts():
 
 
 # ---------------------------------------------------------
+# ADD COHORT
+# ---------------------------------------------------------
+
+def add_cohort(cohort_id: str) -> None:
+    """
+    Register a new cohort_id in the cohorts table.
+
+    Extracted 2026-08-08 from inline SQL that used to live only in
+    admin_dashboard.py's "Cohort Management" section, so a second call
+    site (the transcript-upload cohort tagging UI) can create a cohort
+    without duplicating the insert logic. Idempotent — INSERT OR IGNORE,
+    safe to call with a cohort_id that already exists.
+    """
+    cohort_id = (cohort_id or "").strip()
+    if not cohort_id:
+        return
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cohorts (
+            cohort_id TEXT PRIMARY KEY
+        )
+    """)
+    cursor.execute("INSERT OR IGNORE INTO cohorts (cohort_id) VALUES (?)", (cohort_id,))
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------
 # CREATE USER
 # ---------------------------------------------------------
 

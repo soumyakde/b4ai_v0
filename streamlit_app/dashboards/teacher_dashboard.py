@@ -3648,11 +3648,18 @@ def _count_available_sources() -> dict:
 def _load_combined_transcripts(
     sources: list,
     per_run_files=None,
+    cohort_ids: list = None,
 ) -> list:
     """
     Load and merge transcripts from one or more sources.
     sources: list containing any of "responses", "persistent", "observer", "per_run"
     When a participant appears in multiple sources their texts are concatenated.
+
+    cohort_ids: optional list — when non-empty, scopes this run to only
+    those cohorts. Reflections are filtered via the registered-user
+    cohort_map (auth.user_manager.get_user_cohort_map()); interview/
+    observer transcripts are filtered via their own cohort_id tag, which
+    works even for pre-pilot participants with no user record at all.
     """
     import sqlite3 as _sq, re as _re
     from pathlib import Path as _Pth
@@ -3676,7 +3683,16 @@ def _load_combined_transcripts(
                 "AND response_value IS NOT NULL"
             ).fetchall()
             conn.close()
+            _reflection_cohort_map = {}
+            if cohort_ids:
+                try:
+                    from auth.user_manager import get_user_cohort_map
+                    _reflection_cohort_map = get_user_cohort_map()
+                except Exception:
+                    _reflection_cohort_map = {}
             for uid, rval in rows:
+                if cohort_ids and _reflection_cohort_map.get(uid) not in cohort_ids:
+                    continue
                 if rval and str(rval).strip():
                     combined[uid]["content"].append(str(rval))
                     if "reflections" not in combined[uid]["source_types"]:
@@ -3684,7 +3700,8 @@ def _load_combined_transcripts(
 
         elif source_key == "persistent":
             try:
-                trans = load_for_analysis(source="persistent", source_type="interview")
+                trans = load_for_analysis(source="persistent", source_type="interview",
+                                           cohort_ids=cohort_ids or None)
                 for t in (trans or []):
                     pid  = t.get("participant_id", "unknown")
                     text = str(t.get("content", "")).strip()
@@ -3697,7 +3714,8 @@ def _load_combined_transcripts(
 
         elif source_key == "observer":
             try:
-                trans = load_for_analysis(source="persistent", source_type="observer")
+                trans = load_for_analysis(source="persistent", source_type="observer",
+                                           cohort_ids=cohort_ids or None)
                 for t in (trans or []):
                     pid  = t.get("participant_id", "unknown")
                     text = str(t.get("content", "")).strip()
@@ -3729,6 +3747,34 @@ def _load_combined_transcripts(
         for pid, data in combined.items()
         if "".join(data["content"]).strip()
     ]
+
+
+def _cohort_filter_multiselect(prefix: str) -> list:
+    """
+    Cohort filter for LLM Analysis data sources. Empty selection = no
+    filter (all cohorts included). Uses the full cohort registry
+    (core.admin.user_service.get_all_cohorts()) rather than only cohorts
+    with registered users, since pre-pilot interview/observer transcripts
+    can be tagged with a cohort that has zero registered participants.
+    """
+    from core.admin import user_service as _us
+    try:
+        all_cohorts = _us.get_all_cohorts()
+    except Exception:
+        all_cohorts = []
+    if not all_cohorts:
+        return []
+    return st.multiselect(
+        "Filter by cohort (optional — leave empty to include all cohorts)",
+        options=all_cohorts,
+        default=[],
+        key=f"{prefix}_cohort_filter_widget",
+        help=(
+            "Scopes this analysis run to only the selected cohort(s). "
+            "Applies to reflections (via registered students' cohort) and "
+            "to interview/observer transcripts (via their own cohort tag)."
+        ),
+    )
 
 
 def _source_checkboxes(prefix: str, default_reflections: bool = True):
@@ -3928,6 +3974,7 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
             "**Observer/instructor transcripts** are session notes or recordings uploaded by the teacher."
         )
         sources, per_run_files = _source_checkboxes("ita_g")
+        _ita_cohort_sel = _cohort_filter_multiselect("ita_g")
 
         # ── Persist source selections to stable (non-widget) keys ─────
         # Checkbox widget keys are wiped by Streamlit when the widget is
@@ -3938,6 +3985,7 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
         st.session_state["ita_src_persistent"] = "persistent" in sources
         st.session_state["ita_src_observer"]   = "observer"   in sources
         st.session_state["ita_src_per_run"]    = "per_run"    in sources
+        st.session_state["ita_cohort_filter"]  = _ita_cohort_sel
         if per_run_files:
             #st.session_state["ita_g_upload"] = per_run_files #the code tries to write to a session state key that's already bound to a widget. 
             # Replaced with, which use a different key for the stored value
@@ -4275,6 +4323,11 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
             st.warning("No data sources selected — go back to Step 1.")
             return
 
+        _ita_cohort_ids = st.session_state.get("ita_cohort_filter", [])
+        st.caption(
+            "**Cohort scope:** " + (", ".join(_ita_cohort_ids) if _ita_cohort_ids else "All cohorts (no filter)")
+        )
+
         models = st.session_state.get("ita_g_models", [])
 
         temperature = float(st.session_state.get("ita_g_temp", 0.0))
@@ -4408,6 +4461,7 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
                 n_themes=n_themes, n_codes=n_codes, dedup_threshold=dedup_thr,
                 max_reflections=int(n_ref_use),
                 max_interviews=int(n_int_use),
+                cohort_ids=_ita_cohort_ids,
                 custom_sys_prompt=st.session_state.get("ita_g_sys_saved"),
                 custom_p2_prompt=st.session_state.get("ita_g_p2_saved"),
                 custom_p3_prompt=st.session_state.get("ita_g_p3_saved"),
@@ -4647,11 +4701,12 @@ def _run_ita_pipeline(
     custom_sys_prompt=None,
     custom_p2_prompt=None,
     custom_p3_prompt=None,
+    cohort_ids=None,
 ):
     src_label = " + ".join(sources) if sources else "none"
     with st.spinner(f"Loading transcripts from: {src_label}..."):
         try:
-            transcripts = _load_combined_transcripts(sources, per_run_files)
+            transcripts = _load_combined_transcripts(sources, per_run_files, cohort_ids=cohort_ids)
         except Exception as e:
             st.error(f"Could not load transcripts: {e}"); return
 
@@ -4703,6 +4758,7 @@ def _run_ita_pipeline(
             source_type="+".join(sources),
             created_by=username,
             notes=f"n_themes={n_themes}, n_codes={n_codes}",
+            cohort_scope=", ".join(cohort_ids) if cohort_ids else "All cohorts",
         )
 
         with st.status("Phase 1 — Chunking...", expanded=False) as s:
@@ -5070,6 +5126,7 @@ def _render_dta_run_panel(username: str, canonical_df: pd.DataFrame) -> None:
 
     st.divider()
     sources, per_run_files = _source_checkboxes("dta")
+    dta_cohort_ids = _cohort_filter_multiselect("dta")
 
     st.divider()
     st.markdown("**Construct groups:**")
@@ -5243,6 +5300,7 @@ def _render_dta_run_panel(username: str, canonical_df: pd.DataFrame) -> None:
             custom_sys_prompt=st.session_state.get("dta_sys_saved"),
             custom_p2_prompt=st.session_state.get("dta_p2_saved"),
             custom_p5_prompt=st.session_state.get("dta_p5_saved"),
+            cohort_ids=dta_cohort_ids,
         )
     if run_lo:
         _execute_lo_run(
@@ -5260,11 +5318,12 @@ def _execute_dta_run(username, sources, per_run_files,
                      max_interviews=None,
                      custom_sys_prompt=None,
                      custom_p2_prompt=None,
-                     custom_p5_prompt=None):
+                     custom_p5_prompt=None,
+                     cohort_ids=None):
     src_label = " + ".join(sources)
     with st.spinner(f"Loading data from: {src_label}..."):
         try:
-            transcripts = _load_combined_transcripts(sources, per_run_files)
+            transcripts = _load_combined_transcripts(sources, per_run_files, cohort_ids=cohort_ids)
         except Exception as e:
             st.error(f"Could not load data: {e}"); return
 
@@ -5314,6 +5373,7 @@ def _execute_dta_run(username, sources, per_run_files,
             source_type="+".join(sources),
             construct_groups=construct_groups,
             created_by=username,
+            cohort_scope=", ".join(cohort_ids) if cohort_ids else "All cohorts",
         )
         st.caption(f"Run ID: `{run_id[:8]}...`")
 
@@ -6578,7 +6638,8 @@ def _report_llm() -> None:
                 st.info("No completed ITA runs found. Run ITA first.")
             else:
                 ita_opts = {
-                    f"{r['model'].upper()} T={r['temperature']} {r['created_at'][:10]}":
+                    f"{r['model'].upper()} T={r['temperature']} {r['created_at'][:10]}"
+                    f" — {r.get('cohort_scope') or 'All cohorts'}":
                     r["run_id"] for r in completed[:8]
                 }
                 sel_ita = st.selectbox("Select ITA run", list(ita_opts.keys()),
@@ -6596,7 +6657,8 @@ def _report_llm() -> None:
                             "body":    (
                                 f"Model: {_llm_display_name(run['model'])}  |  "
                                 f"Temperature: {run['temperature']}  |  "
-                                f"Source: {run.get('source_type','—')}"
+                                f"Source: {run.get('source_type','—')}  |  "
+                                f"Cohort scope: {run.get('cohort_scope') or 'All cohorts'}"
                             ),
                         }]
 
@@ -6656,7 +6718,8 @@ def _report_llm() -> None:
                 st.info("No DTA runs found. Run DTA first.")
             else:
                 dta_opts = {
-                    f"{r['model'].upper()} T={r['temperature']} {r['created_at'][:10]}":
+                    f"{r['model'].upper()} T={r['temperature']} {r['created_at'][:10]}"
+                    f" — {r.get('cohort_scope') or 'All cohorts'}":
                     r["run_id"] for r in dta_runs[:8]
                 }
                 sel_dta = st.selectbox("Select DTA run", list(dta_opts.keys()),
@@ -6672,7 +6735,8 @@ def _report_llm() -> None:
                             "body":    (
                                 f"Model: {_llm_display_name(run_rec['model'])}  |  "
                                 f"Temperature: {run_rec['temperature']}  |  "
-                                f"Source: {run_rec.get('source_type','—')}"
+                                f"Source: {run_rec.get('source_type','—')}  |  "
+                                f"Cohort scope: {run_rec.get('cohort_scope') or 'All cohorts'}"
                             ),
                         }]
 

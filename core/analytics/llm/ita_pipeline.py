@@ -163,6 +163,12 @@ def _init_schema(db_path: Optional[Path] = None) -> None:
     if "notes" not in existing_cols:
         conn.execute("ALTER TABLE ita_runs ADD COLUMN notes TEXT")
 
+    # Migration 3: add cohort_scope column (2026-08-08) — records which
+    # cohort(s) this run was filtered to, e.g. "All cohorts" or a
+    # comma-joined list, so Report Generation can show it in the run picker.
+    if "cohort_scope" not in existing_cols:
+        conn.execute("ALTER TABLE ita_runs ADD COLUMN cohort_scope TEXT")
+
     # Migration 2: ensure UNIQUE index on ita_results(run_id, phase)
     # Required for ON CONFLICT upsert. Table may exist without this index
     # if created before this migration was added.
@@ -972,9 +978,17 @@ def create_run(
     created_by: str,
     notes: str = "",
     db_path: Optional[Path] = None,
+    cohort_scope: str = "All cohorts",
 ) -> str:
     """
     Create a new ITA run record in the DB.
+
+    Parameters
+    ----------
+    cohort_scope : str — "All cohorts" if no cohort filter was applied,
+        otherwise a comma-joined list of the cohort(s) this run was
+        scoped to. Shown in Report Generation's run picker so runs from
+        different cohorts can be told apart and compared.
 
     Returns
     -------
@@ -987,10 +1001,10 @@ def create_run(
     conn.execute(
         """INSERT INTO ita_runs
            (run_id, created_by, created_at, model, temperature,
-            source_type, status, phase_reached, notes)
-           VALUES (?,?,?,?,?,?,?,?,?)""",
+            source_type, status, phase_reached, notes, cohort_scope)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
         (run_id, created_by, now, model, temperature,
-         source_type, "created", 0, notes)
+         source_type, "created", 0, notes, cohort_scope)
     )
     conn.commit()
     conn.close()
@@ -1087,7 +1101,7 @@ def list_runs(
     if created_by:
         rows = conn.execute(
             """SELECT run_id, created_by, created_at, model, temperature,
-                      source_type, status, phase_reached, notes
+                      source_type, status, phase_reached, notes, cohort_scope
                FROM ita_runs WHERE created_by=?
                ORDER BY created_at DESC""",
             (created_by,)
@@ -1095,12 +1109,12 @@ def list_runs(
     else:
         rows = conn.execute(
             """SELECT run_id, created_by, created_at, model, temperature,
-                      source_type, status, phase_reached, notes
+                      source_type, status, phase_reached, notes, cohort_scope
                FROM ita_runs ORDER BY created_at DESC"""
         ).fetchall()
     conn.close()
     cols = ["run_id","created_by","created_at","model","temperature",
-            "source_type","status","phase_reached","notes"]
+            "source_type","status","phase_reached","notes","cohort_scope"]
     return [dict(zip(cols, r)) for r in rows]
 
 
