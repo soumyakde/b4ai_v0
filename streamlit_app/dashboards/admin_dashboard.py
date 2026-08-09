@@ -619,15 +619,61 @@ def show_admin_dashboard(username: str):
 
         st.divider()
         st.subheader("Cohort Management")
+
+        # Same flash-message fix as _cohort_selector() -- a st.success()
+        # called right before st.rerun() never reaches the screen, since
+        # the rerun happens before the browser paints it (fixed 2026-08-09).
+        if st.session_state.get("cohort_mgmt_flash"):
+            st.success(st.session_state.pop("cohort_mgmt_flash"))
+
         new_cohort_input = st.text_input("New Cohort ID")
         if st.button("Create Cohort"):
             if new_cohort_input:
                 try:
                     user_service.add_cohort(new_cohort_input)
-                    st.success(f"Cohort '{new_cohort_input}' created.")
+                    st.session_state["cohort_mgmt_flash"] = f"Cohort '{new_cohort_input}' created."
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {e}")
+
+        st.markdown("**Delete a cohort**")
+        st.caption(
+            "Only allowed when nothing currently references the cohort — "
+            "reassign or clear any users/transcripts tagged with it first, "
+            "so deleting it never silently orphans their data."
+        )
+        _existing_cohorts = user_service.get_all_cohorts()
+        if _existing_cohorts:
+            _del_cohort_choice = st.selectbox(
+                "Cohort to delete", options=["— select —"] + _existing_cohorts,
+                key="cohort_mgmt_delete_choice",
+            )
+            if _del_cohort_choice != "— select —":
+                _usage = user_service.count_cohort_usage(_del_cohort_choice)
+                if _usage["users"] or _usage["transcripts"]:
+                    st.warning(
+                        f"⚠️ Can't delete '{_del_cohort_choice}' — still in use: "
+                        f"{_usage['users']} user(s), {_usage['transcripts']} transcript(s). "
+                        "Reassign/clear those first."
+                    )
+                else:
+                    st.caption(f"'{_del_cohort_choice}' is unused — safe to delete.")
+                    if st.button(f"🗑 Delete '{_del_cohort_choice}'", key="cohort_mgmt_delete_btn"):
+                        _result = user_service.delete_cohort(_del_cohort_choice)
+                        if _result["deleted"]:
+                            st.session_state["cohort_mgmt_flash"] = f"Cohort '{_del_cohort_choice}' deleted."
+                            st.rerun()
+                        else:
+                            # Defensive only -- the button above is already
+                            # gated on zero usage, so this means the cohort
+                            # was used by something between the check above
+                            # and this click.
+                            st.warning(
+                                f"'{_del_cohort_choice}' became in-use just now — "
+                                f"{_result['users']} user(s), {_result['transcripts']} transcript(s)."
+                            )
+        else:
+            st.caption("No cohorts registered yet.")
 
     # ---------------------------------------------------------
     # DATA MANAGEMENT

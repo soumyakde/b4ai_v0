@@ -114,6 +114,72 @@ def add_cohort(cohort_id: str) -> None:
 
 
 # ---------------------------------------------------------
+# COHORT USAGE / DELETE
+# ---------------------------------------------------------
+
+def count_cohort_usage(cohort_id: str) -> dict:
+    """
+    Count how many users and transcripts currently reference cohort_id.
+
+    Checks both DBs a cohort_id can appear in: users.db (registered
+    students assigned to this cohort) and responses.db's transcripts
+    table (interview/observer transcripts tagged with this cohort,
+    added in Task E). A cohort with non-zero counts here can't be
+    safely deleted without orphaning those references.
+
+    Returns {"users": int, "transcripts": int}.
+    """
+    cohort_id = (cohort_id or "").strip()
+    counts = {"users": 0, "transcripts": 0}
+    if not cohort_id:
+        return counts
+
+    conn = get_connection()
+    counts["users"] = conn.execute(
+        "SELECT COUNT(*) FROM users WHERE cohort_id = ?", (cohort_id,)
+    ).fetchone()[0]
+    conn.close()
+
+    try:
+        from core.db_utils import get_connection as _get_responses_conn
+        rconn = _get_responses_conn()
+        try:
+            counts["transcripts"] = rconn.execute(
+                "SELECT COUNT(*) FROM transcripts WHERE cohort_id = ?", (cohort_id,)
+            ).fetchone()[0]
+        except Exception:
+            pass  # transcripts table may not exist yet on a fresh DB
+        rconn.close()
+    except Exception:
+        pass
+
+    return counts
+
+
+def delete_cohort(cohort_id: str) -> dict:
+    """
+    Delete cohort_id from the registry, but only if nothing currently
+    references it (see count_cohort_usage) -- deleting an in-use cohort
+    would silently orphan any user or transcript still tagged with it
+    (they'd keep the tag, but it would vanish from every picker built
+    from get_all_cohorts()).
+
+    Returns {"deleted": bool, "users": int, "transcripts": int} -- the
+    usage counts are always included so the caller can explain a
+    refusal without a second query.
+    """
+    usage = count_cohort_usage(cohort_id)
+    if usage["users"] or usage["transcripts"]:
+        return {"deleted": False, **usage}
+
+    conn = get_connection()
+    conn.execute("DELETE FROM cohorts WHERE cohort_id = ?", (cohort_id,))
+    conn.commit()
+    conn.close()
+    return {"deleted": True, **usage}
+
+
+# ---------------------------------------------------------
 # CREATE USER
 # ---------------------------------------------------------
 
