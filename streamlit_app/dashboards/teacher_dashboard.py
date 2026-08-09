@@ -6918,7 +6918,14 @@ def _report_llm() -> None:
                                 codes_df = pd.DataFrame([
                                     {"Participant": c.get("participant_id",""),
                                      "Code Name":   c.get("name",""),
-                                     "Description": c.get("description","")[:80]}
+                                     # Was hard-truncated to [:80] chars, which
+                                     # read as a broken mid-sentence cutoff once
+                                     # _build_pdf() started wrapping cells
+                                     # properly (fixed 2026-08-09) -- the PDF
+                                     # table now wraps full text correctly, so
+                                     # there's no longer a reason to pre-truncate
+                                     # the underlying data itself.
+                                     "Description": c.get("description","")}
                                     for c in codes[:50]
                                 ])
                                 sections.append({
