@@ -3783,7 +3783,7 @@ def _cohort_filter_multiselect(prefix: str) -> list:
         all_cohorts = []
     if not all_cohorts:
         return []
-    return st.multiselect(
+    _selected = st.multiselect(
         "Filter by cohort (optional — leave empty to include all cohorts)",
         options=all_cohorts,
         default=[],
@@ -3794,6 +3794,13 @@ def _cohort_filter_multiselect(prefix: str) -> list:
             "to interview/observer transcripts (via their own cohort tag)."
         ),
     )
+    st.caption(
+        "ℹ️ This filter is independent of the **Cohort** filter in the sidebar — "
+        "the sidebar filter doesn't affect LLM Analysis, since it can't reach "
+        "interview/observer transcripts that have no registered-user record. "
+        "Use this control to scope this analysis by cohort."
+    )
+    return _selected
 
 
 def _source_checkboxes(prefix: str, default_reflections: bool = True):
