@@ -205,9 +205,19 @@ def register_user(
                 'approved' (use when an admin creates the account directly)
     """
     hashed_pw = hash_password(password)
-    try:
-        with get_connection() as conn:
-            cursor = conn.cursor()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        # Case-insensitive duplicate check (added 2026-08-09): the UNIQUE
+        # constraint on username is case-sensitive by default, so without
+        # this, "Priya" and "priya" would silently register as two
+        # separate valid accounts -- a real duplicate-account vector found
+        # during the impatient-re-registration investigation.
+        cursor.execute(
+            "SELECT 1 FROM users WHERE LOWER(username) = LOWER(?)", (username,)
+        )
+        if cursor.fetchone():
+            raise UserAlreadyExistsError(f"Username '{username}' already exists.")
+        try:
             cursor.execute(
                 """INSERT INTO users
                        (username, password, role, cohort_id, status, is_super_admin)
@@ -215,8 +225,8 @@ def register_user(
                 (username, hashed_pw, role, cohort_id, status),
             )
             conn.commit()
-    except sqlite3.IntegrityError:
-        raise UserAlreadyExistsError(f"Username '{username}' already exists.")
+        except sqlite3.IntegrityError:
+            raise UserAlreadyExistsError(f"Username '{username}' already exists.")
 
 # ---------------------------------------------------------------------
 #  Authentication

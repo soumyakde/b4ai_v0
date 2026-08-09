@@ -260,10 +260,21 @@ def show_registration():
                 cohort_id=cohort_id,
                 status="pending",
             )
-            st.success(
-                "✅ Registration submitted! Your account is **pending approval**. "
-                "Please check back after the administrator has reviewed your request."
-            )
+            # Bug fixed 2026-08-09: st.success() here never reliably reached
+            # the screen -- the st.rerun() below fires before the browser
+            # paints it, AND the sidebar Navigation radio (main(), no
+            # explicit key) recomputed mode="register" from its own
+            # persisted widget state on the very next run anyway, silently
+            # overwriting mode="login" set here. Net effect: students landed
+            # back on a blank-looking registration page with no visible
+            # confirmation and assumed it failed -- the likely actual cause
+            # of the impatient-duplicate-account problem. Fixed with a
+            # one-shot flash flag (mirroring _locked_out_username) shown on
+            # the login page after the redirect, plus bumping _nav_gen so
+            # the radio widget is freshly created and actually honors the
+            # "Login" default instead of clinging to its stale state.
+            st.session_state["_just_registered_username"] = username.strip()
+            st.session_state["_nav_gen"] = st.session_state.get("_nav_gen", 0) + 1
             st.session_state.mode = "login"
             st.rerun()
         except Exception as e:
@@ -309,6 +320,19 @@ def show_login():
         "<h2 style='font-size:1.6rem;font-weight:700;'>Login</h2>",
         unsafe_allow_html=True,
     )
+
+    # One-shot confirmation after a successful registration (see the fix
+    # note in show_registration()) -- shown once here, then popped, so a
+    # plain page reload doesn't bring it back.
+    _just_registered = st.session_state.pop("_just_registered_username", None)
+    if _just_registered:
+        st.success(
+            f"✅ Registration successful for **'{_just_registered}'**! "
+            "Please wait for **Admin approval** before logging in — "
+            "you don't need to register again.",
+            icon="🎉",
+        )
+
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
 
@@ -429,7 +453,24 @@ def main():
     _render_header()
 
     if not st.session_state.logged_in:
-        choice = st.sidebar.radio("Navigation", ["Register", "Login"])
+        # Bug fixed 2026-08-09: this radio had no explicit key=, so once
+        # Streamlit created its widget state, index= was only honored on
+        # the very first render -- a later programmatic mode="login" (e.g.
+        # right after registering) had no effect, since the widget just
+        # replayed its own last-clicked value ("Register") and immediately
+        # overwrote mode back on the next line. Folding a generation
+        # counter into the key (bumped by show_registration() on success)
+        # forces a genuinely fresh widget when we need to redirect, the
+        # same fix pattern already used for the admin dashboard's cohort
+        # selectors this session.
+        st.session_state.setdefault("_nav_gen", 0)
+        _nav_gen = st.session_state["_nav_gen"]
+        _nav_options = ["Register", "Login"]
+        _nav_index = _nav_options.index(st.session_state.mode.capitalize()) \
+            if st.session_state.mode.capitalize() in _nav_options else 0
+        choice = st.sidebar.radio(
+            "Navigation", _nav_options, index=_nav_index, key=f"_nav_radio_{_nav_gen}"
+        )
         st.session_state.mode = choice.lower()
         if st.session_state.mode == "register":
             show_registration()
