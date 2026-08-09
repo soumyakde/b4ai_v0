@@ -6903,16 +6903,44 @@ def _report_llm() -> None:
                                 "body":    p6["report_text"],
                             })
 
+                        # codes is needed both for the per-theme quotes below and
+                        # the Phase 2 table further down -- compute it once here.
+                        codes = (p2 or {}).get("codes", [])
+
                         themes = (p5 or {}).get("themes_defined") or (p5 or {}).get("themes", [])
                         if themes:
+                            # Phase 6's own prompt only asks the LLM to include
+                            # quotes "where available" in free-flowing prose --
+                            # a soft instruction the model doesn't reliably
+                            # honor. Fixed 2026-08-09: deterministically list up
+                            # to 3 attributed, verbatim quotes per theme in the
+                            # PDF itself (the same "most significant" cap Phase
+                            # 6 already uses when building its own prompt), so
+                            # citation doesn't depend on the narrative prose
+                            # choosing to include them.
+                            try:
+                                from core.analytics.llm.ita_pipeline import _get_theme_codes
+                            except ImportError:
+                                _get_theme_codes = None
+
                             for i, t in enumerate(themes):
+                                _body = t.get("summary", t.get("description", ""))
+                                if _get_theme_codes and codes:
+                                    _t_codes = _get_theme_codes(t, codes)
+                                    _quotes = [
+                                        (c.get("quote", "").strip(), c.get("participant_id", ""))
+                                        for c in _t_codes if c.get("quote", "").strip()
+                                    ][:3]
+                                    if _quotes:
+                                        _body += "\n\nRepresentative quotes:\n" + "\n".join(
+                                            f'  "{q}" — {pid or "participant"}' for q, pid in _quotes
+                                        )
                                 sections.append({
                                     "heading": f"Theme {i+1}: {t.get('name','')}",
-                                    "body":    t.get("summary", t.get("description","")),
+                                    "body":    _body,
                                 })
 
                         if p2:
-                            codes = p2.get("codes", [])
                             dedup = p2.get("dedup", {})
                             if codes:
                                 codes_df = pd.DataFrame([
