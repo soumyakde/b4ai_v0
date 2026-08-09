@@ -2331,6 +2331,7 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
         from core.analytics.cpi.cpi_engine import (
             compute_cpi_quant_ctt,
             compute_cpi_quant_irt,
+            compute_cpi_outcome,
             get_reflection_texts,
             score_reflection_llm,
             compute_cpi_qual_from_scores,
@@ -2386,33 +2387,98 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
     # ── Step 1: Configuration ──────────────────────────────────────────────
     st.markdown("### Step 1 — Configure")
 
-    col_mod, col_inst = st.columns(2)
-    with col_mod:
-        _module_opts = {
-            f"Module {n}": f"module_{n}" for n in discover_all_module_numbers()
-        }
-        _module_label = st.selectbox(
-            "Module", options=list(_module_opts.keys()), key="cpi_module_sel"
-        )
-        _module_id = _module_opts[_module_label]
+    _all_module_ids  = [f"module_{n}" for n in discover_all_module_numbers()]
+    _module_display  = {mid: mid.replace("module_", "Module ") for mid in _all_module_ids}
+    _selected_labels = st.multiselect(
+        "Modules — combine one or more (defaults to all)",
+        options=list(_module_display.values()),
+        default=list(_module_display.values()),
+        key="cpi_module_multisel",
+    )
+    _module_ids = sorted(
+        (mid for mid, label in _module_display.items() if label in _selected_labels),
+        key=lambda m: int(m.split("_")[-1]) if m.split("_")[-1].isdigit() else 0,
+    )
+    _module_labels_combined = ", ".join(_module_display[m] for m in _module_ids) or "(none selected)"
 
-    with col_inst:
-        _inst_key = f"module{_module_id.split('_')[1]}_content_mcq_assessment"
-        st.text_input(
-            "MCQ instrument key", value=_inst_key,
-            key="cpi_inst_key", disabled=True
-        )
+    st.markdown("**Instrument types for CPI_quant** (select one or more):")
+    _c1, _c2, _c3 = st.columns(3)
+    _use_mcq  = _c1.checkbox("Content MCQ", value=True, key="cpi_use_mcq")
+    _use_misc = _c2.checkbox("AI Misconceptions gain (Post−Pre)", value=False, key="cpi_use_misc")
+    _use_aici = _c3.checkbox("AICI gain (Post−Pre)", value=False, key="cpi_use_aici")
+    _instrument_types = [t for use, t in (
+        (_use_mcq, "content_mcq"),
+        (_use_misc, "misconceptions_gain"),
+        (_use_aici, "aici_gain"),
+    ) if use]
 
-    col_q, col_irt = st.columns(2)
-    with col_q:
-        _quant_method = st.radio(
-            "CPI_quant method",
-            options=["CTT (proportion correct)", "IRT (Rasch)", "IRT (2PL, n≥50)",
-                     "Both — show side by side"],
-            horizontal=False,
-            key="cpi_quant_method",
+    # Cohort scope: read-only, driven entirely by the sidebar's existing
+    # Cohort filter (already applied to canonical_df before this tab
+    # renders) -- no separate CPI-local selector, per the confirmed design
+    # (CPI only ever deals with registered users, unlike LLM Analysis).
+    _active_cohorts = (
+        sorted(canonical_df["cohort_id"].dropna().unique())
+        if "cohort_id" in canonical_df.columns else []
+    )
+    st.caption(
+        "**Cohort scope:** "
+        + (", ".join(_active_cohorts) if _active_cohorts else "All cohorts")
+        + "  _(set via the sidebar's Cohort filter)_"
+    )
+
+    if not _module_ids:
+        st.warning("Select at least one module.")
+        return
+    if not _instrument_types:
+        st.warning("Select at least one instrument type.")
+        return
+
+    # "Legacy" path = the original single-module/MCQ-only behavior,
+    # preserved exactly (including IRT support) for backward compatibility.
+    # Any multi-module or multi-instrument-type selection routes through
+    # the newer, configurable compute_cpi_outcome() instead -- CTT-style
+    # % correct / gain-score blending only. Pooling heterogeneous
+    # instruments into a single IRT fit is a separate, larger question the
+    # user didn't ask for and is out of scope this round.
+    _is_legacy = (len(_module_ids) == 1 and _instrument_types == ["content_mcq"])
+    _module_id    = _module_ids[0]
+    _module_label = _module_display[_module_id]
+    _inst_key     = f"module{_module_id.split('_')[-1]}_content_mcq_assessment"
+
+    # Scope strings used consistently for session-state, run storage, and
+    # the past-runs filter, whichever path is active.
+    _module_scope_str = _module_id if _is_legacy else ",".join(_module_ids)
+    _inst_scope_str   = _inst_key if _is_legacy else ",".join(_instrument_types)
+
+    if _is_legacy:
+        col_mod, col_inst = st.columns(2)
+        with col_mod:
+            st.text_input("Module", value=_module_label, disabled=True)
+        with col_inst:
+            st.text_input(
+                "MCQ instrument key", value=_inst_key,
+                key="cpi_inst_key", disabled=True
+            )
+
+        col_q, col_irt = st.columns(2)
+        with col_q:
+            _quant_method = st.radio(
+                "CPI_quant method",
+                options=["CTT (proportion correct)", "IRT (Rasch)", "IRT (2PL, n≥50)",
+                         "Both — show side by side"],
+                horizontal=False,
+                key="cpi_quant_method",
+            )
+        with col_irt:
+            _w1 = st.slider("Weight w₁ (CPI_quant)", 0.0, 1.0, 0.5, 0.05, key="cpi_w1")
+            _w2 = round(1.0 - _w1, 2)
+            st.caption(f"Weight w₂ (CPI_qual) = {_w2:.2f}  (w₁ + w₂ = 1.0)")
+    else:
+        st.caption(
+            f"**Combining:** {_module_labels_combined} — "
+            + ", ".join(t.replace('_', ' ') for t in _instrument_types)
         )
-    with col_irt:
+        _quant_method = None
         _w1 = st.slider("Weight w₁ (CPI_quant)", 0.0, 1.0, 0.5, 0.05, key="cpi_w1")
         _w2 = round(1.0 - _w1, 2)
         st.caption(f"Weight w₂ (CPI_qual) = {_w2:.2f}  (w₁ + w₂ = 1.0)")
@@ -2420,58 +2486,82 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
     st.divider()
 
     # ── Step 2: CPI_quant (immediate, no LLM needed) ──────────────────────
-    st.markdown("### Step 2 — CPI_quant (MCQ performance)")
+    st.markdown("### Step 2 — CPI_quant (MCQ / gain-score performance)")
 
     if st.button("Compute CPI_quant", key="cpi_compute_quant", type="primary"):
-        with st.spinner("Computing MCQ performance scores…"):
-            _ctt_df = compute_cpi_quant_ctt(canonical_df, _inst_key)
+        with st.spinner("Computing performance scores…"):
+            if _is_legacy:
+                _ctt_df = compute_cpi_quant_ctt(canonical_df, _inst_key)
 
-            _irt_rasch = None
-            _irt_2pl   = None
-            _run_rasch = _quant_method in (
-                "IRT (Rasch)", "Both — show side by side"
-            )
-            _run_2pl   = _quant_method in (
-                "IRT (2PL, n≥50)", "Both — show side by side"
-            )
+                _irt_rasch = None
+                _irt_2pl   = None
+                _run_rasch = _quant_method in (
+                    "IRT (Rasch)", "Both — show side by side"
+                )
+                _run_2pl   = _quant_method in (
+                    "IRT (2PL, n≥50)", "Both — show side by side"
+                )
 
-            if _run_rasch:
-                _irt_rasch = compute_cpi_quant_irt(
-                    canonical_df, _inst_key, irt_model="rasch"
+                if _run_rasch:
+                    _irt_rasch = compute_cpi_quant_irt(
+                        canonical_df, _inst_key, irt_model="rasch"
+                    )
+                if _run_2pl:
+                    _irt_2pl = compute_cpi_quant_irt(
+                        canonical_df, _inst_key, irt_model="2pl"
+                    )
+            else:
+                _outcome_df = compute_cpi_outcome(
+                    canonical_df, module_ids=_module_ids,
+                    instrument_types=_instrument_types,
                 )
-            if _run_2pl:
-                _irt_2pl = compute_cpi_quant_irt(
-                    canonical_df, _inst_key, irt_model="2pl"
+                _ctt_df = _outcome_df.rename(columns={"cpi_outcome": "cpi_quant_ctt"}).copy()
+                _ctt_df["n_items"] = _outcome_df["n_modules_mcq"]
+                _ctt_df["method"]  = "Outcome (" + ", ".join(_instrument_types) + ")"
+                _ctt_df = (
+                    _ctt_df[["user_id", "cpi_quant_ctt", "n_items", "method"]]
+                    .dropna(subset=["cpi_quant_ctt"])
+                    .reset_index(drop=True)
                 )
+                _irt_rasch = None
+                _irt_2pl   = None
 
         st.session_state["_cpi_ctt_df"]    = _ctt_df
         st.session_state["_cpi_irt_rasch"] = _irt_rasch
         st.session_state["_cpi_irt_2pl"]   = _irt_2pl
-        st.session_state["_cpi_inst_key"]  = _inst_key
-        st.session_state["_cpi_module_id"] = _module_id
+        st.session_state["_cpi_inst_key"]  = _inst_scope_str
+        st.session_state["_cpi_module_id"] = _module_scope_str
+        st.session_state["_cpi_is_legacy"] = _is_legacy
 
     _ctt_df    = st.session_state.get("_cpi_ctt_df")
     _irt_rasch = st.session_state.get("_cpi_irt_rasch")
     _irt_2pl   = st.session_state.get("_cpi_irt_2pl")
 
+    _ctt_is_legacy = st.session_state.get("_cpi_is_legacy", True)
+    _ctt_short_label = "CTT" if _ctt_is_legacy else "Outcome"
+
     if _ctt_df is not None and not _ctt_df.empty:
 
-        # CTT display
-        with st.expander("CTT — proportion correct per student", expanded=True):
+        # CTT / Outcome display
+        with st.expander(
+            f"{_ctt_short_label} — "
+            + ("proportion correct" if _ctt_is_legacy else "combined score")
+            + " per student", expanded=True,
+        ):
             _n_ctt = len(_ctt_df)
             col1, col2, col3 = st.columns(3)
-            col1.metric("Students (CTT)", _n_ctt)
-            col2.metric("Mean CPI_quant (CTT)",
+            col1.metric(f"Students ({_ctt_short_label})", _n_ctt)
+            col2.metric(f"Mean CPI_quant ({_ctt_short_label})",
                         f"{_ctt_df['cpi_quant_ctt'].mean():.3f}")
             col3.metric("SD",
                         f"{_ctt_df['cpi_quant_ctt'].std(ddof=1):.3f}"
                         if _n_ctt > 1 else "—")
             _display_ctt = _ctt_df.copy()
             _display_ctt.columns = [
-                "Student", "CPI_quant (CTT)", "Items answered", "Method"
+                "Student", f"CPI_quant ({_ctt_short_label})", "Items/modules", "Method"
             ]
             st.dataframe(
-                _display_ctt.sort_values("CPI_quant (CTT)", ascending=False),
+                _display_ctt.sort_values(f"CPI_quant ({_ctt_short_label})", ascending=False),
                 hide_index=True, width="stretch",
             )
 
@@ -2551,12 +2641,12 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
                 help="0.0 = fully deterministic scoring (recommended).",
             )
 
-        _refl_df = get_reflection_texts(canonical_df, module_id=_module_id)
+        _refl_df = get_reflection_texts(canonical_df, module_ids=_module_ids)
         n_refl   = len(_refl_df["user_id"].unique()) if not _refl_df.empty else 0
 
         if _refl_df.empty:
             st.info(
-                f"No reflection responses found for {_module_label}. "
+                f"No reflection responses found for {_module_labels_combined}. "
                 "Reflections must be submitted by students before "
                 "CPI_qual can be computed."
             )
@@ -2564,7 +2654,7 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
             n_resp = len(_refl_df)
             st.caption(
                 f"Found {n_resp} reflection response(s) from "
-                f"{n_refl} student(s) in {_module_label}."
+                f"{n_refl} student(s), pooled across: {_module_labels_combined}."
             )
 
             if st.button(
@@ -2576,10 +2666,10 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
                     created_by=username,
                     model=_cpi_model,
                     module_id=st.session_state.get(
-                        "_cpi_module_id", _module_id
+                        "_cpi_module_id", _module_scope_str
                     ),
                     instrument_key=st.session_state.get(
-                        "_cpi_inst_key", _inst_key
+                        "_cpi_inst_key", _inst_scope_str
                     ),
                     temperature=_cpi_temp,
                     w1=_w1,
@@ -2636,19 +2726,24 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
                 st.rerun()
 
     # ── Past runs selector ────────────────────────────────────────────────
+    # Matches against the same module/instrument scope string this session
+    # would itself save (see _module_scope_str above) -- runs from before
+    # Task F (2026-08-09) are single "module_N" values, indistinguishable
+    # from a 1-item comma-joined list, so old runs still match correctly.
     _past_runs = [
         r for r in list_cpi_runs()
-        if r["module_id"] == _module_id
+        if r["module_id"] == _module_scope_str
     ]
     if _past_runs:
         st.divider()
         with st.expander(
-            f"Load past CPI_qual run ({len(_past_runs)} available)",
+            f"Load past CPI_qual run for {_module_labels_combined} "
+            f"({len(_past_runs)} available)",
             expanded=False
         ):
             _run_labels = {
                 f"{r['created_at'][:16]}  {r['model'].upper()}  "
-                f"[{r['status']}]  {r['run_id'][:8]}": r["run_id"]
+                f"[{r['status']}]  {r['module_id']}  {r['run_id'][:8]}": r["run_id"]
                 for r in _past_runs
             }
             _sel_label = st.selectbox(
@@ -2690,15 +2785,20 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
     elif _qual_df_stored is None:
         st.info("Complete Step 3 first to compute CPI_qual.")
     else:
-        # Choose quant source
-        if _quant_method.startswith("IRT (Rasch)") and _irt_r_stored and not _irt_r_stored.get("error"):
+        # Choose quant source. _quant_method is None on the newer
+        # multi-module/multi-instrument path (compute_cpi_outcome has no
+        # IRT option), so guard before calling .startswith() on it.
+        if (
+            _quant_method and _quant_method.startswith("IRT (Rasch)")
+            and _irt_r_stored and not _irt_r_stored.get("error")
+        ):
             _quant_src = _irt_r_stored["person_df"][["user_id", "cpi_quant_irt"]].rename(
                 columns={"cpi_quant_irt": "cpi_quant_ctt"}
             )
             _quant_label = "IRT (Rasch)"
         else:
             _quant_src   = _ctt_df_stored
-            _quant_label = "CTT"
+            _quant_label = "CTT" if st.session_state.get("_cpi_is_legacy", True) else "Outcome"
 
         _combined = compute_cpi_combined(
             _quant_src, _qual_df_stored,
@@ -2774,8 +2874,8 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
                         save_cpi_summary(
                             run_id=_run_id_store,
                             participant_id=uid,
-                            module_id=st.session_state.get("_cpi_module_id", _module_id),
-                            instrument_key=st.session_state.get("_cpi_inst_key", _inst_key),
+                            module_id=st.session_state.get("_cpi_module_id", _module_scope_str),
+                            instrument_key=st.session_state.get("_cpi_inst_key", _inst_scope_str),
                             cpi_quant_ctt=_ctt_lookup.get(uid),
                             cpi_quant_irt=_irt_lookup.get(uid),
                             cpi_quant=row.get("cpi_quant"),
@@ -2825,6 +2925,38 @@ def _report_cpi(canonical_df: pd.DataFrame) -> None:
     st.markdown("### v. Competency Progression Report")
     st.caption("Generates a PDF of CPI+ scores per student with component breakdown.")
 
+    # Explicit run picker (added 2026-08-09, Task F) -- previously this
+    # always silently used whichever run was globally most recent
+    # (list_cpi_runs()[0]), with no way to pick a specific one. Now that a
+    # run's module_id/instrument_key can cover any combination of modules
+    # and instrument types, "just take the latest" is no longer a safe
+    # default -- the teacher needs to see and choose which scope they're
+    # reporting on.
+    _selected_run_id = None
+    try:
+        from core.analytics.cpi.cpi_store import list_cpi_runs
+        _all_runs = list_cpi_runs()
+    except Exception:
+        _all_runs = []
+
+    if _all_runs:
+        _run_choice_labels = {"Most recent run": None}
+        for r in _all_runs:
+            _run_choice_labels[
+                f"{r['created_at'][:16]}  {r['model'].upper()}  "
+                f"[{r['status']}]  scope: {r['module_id']}  {r['run_id'][:8]}"
+            ] = r["run_id"]
+        _picked_label = st.selectbox(
+            "Which stored CPI run to report on:",
+            options=list(_run_choice_labels.keys()),
+            key="rpt_cpi_run_choice",
+            help="Runs now show their module/instrument scope, since a run can "
+                 "cover any combination the teacher configured in the CPI tab.",
+        )
+        _selected_run_id = _run_choice_labels[_picked_label]
+    else:
+        st.caption("No stored CPI runs yet — will compute the 3-component fallback below.")
+
     st.session_state.setdefault("rpt_cpi_include_chart", True)
     st.multiselect(
         "Include in report:",
@@ -2841,13 +2973,17 @@ def _report_cpi(canonical_df: pd.DataFrame) -> None:
         with st.spinner("Loading CPI data and building PDF…"):
             # Try to load saved CPI summaries from cpi_store
             cpi_df = None
+            _picked_run_meta = None
             try:
                 from core.analytics.cpi.cpi_store import list_cpi_runs, load_cpi_summary
                 from core.analytics.cpi.cpi_engine import cpi_summary_stats
                 runs = list_cpi_runs()
                 if runs:
-                    latest = runs[0]
-                    cpi_df = load_cpi_summary(latest["run_id"])
+                    _run_id_to_load = _selected_run_id or runs[0]["run_id"]
+                    _picked_run_meta = next(
+                        (r for r in runs if r["run_id"] == _run_id_to_load), runs[0]
+                    )
+                    cpi_df = load_cpi_summary(_picked_run_meta["run_id"])
             except Exception:
                 pass
 
@@ -2876,12 +3012,17 @@ def _report_cpi(canonical_df: pd.DataFrame) -> None:
                 cpi_col = "cpi_plus" if "cpi_plus" in cpi_df.columns else cpi_df.columns[-1]
                 mean_cpi = cpi_df[cpi_col].mean()
                 std_cpi  = cpi_df[cpi_col].std()
+                _scope_line = (
+                    f"  |  Scope: {_picked_run_meta['module_id']} "
+                    f"({_picked_run_meta['instrument_key']})"
+                    if _picked_run_meta else ""
+                )
                 sections.append({
                     "heading": "Group Summary",
                     "body":    (
                         f"N = {len(cpi_df)}  |  "
-                        f"Mean CPI+ = {mean_cpi:.3f}  |  SD = {std_cpi:.3f}"
-                        if not pd.isna(mean_cpi) else f"N = {len(cpi_df)}"
+                        f"Mean CPI+ = {mean_cpi:.3f}  |  SD = {std_cpi:.3f}{_scope_line}"
+                        if not pd.isna(mean_cpi) else f"N = {len(cpi_df)}{_scope_line}"
                     ),
                 })
 
@@ -2915,13 +3056,48 @@ def _report_cpi(canonical_df: pd.DataFrame) -> None:
                 })
 
             if "Methodology note" in selected:
+                # Dynamic per selected run, since a run's module/instrument
+                # scope can now be anything the teacher configured in the
+                # CPI tab -- a hardcoded "single module, MCQ only" string
+                # would be actively wrong for a multi-module/gain-score run
+                # (fixed 2026-08-09, Task F).
+                if _picked_run_meta:
+                    _scope_desc = (
+                        f"This report covers modules/instruments: "
+                        f"**{_picked_run_meta['module_id']}** "
+                        f"({_picked_run_meta['instrument_key']}).\n\n"
+                    )
+                    _quant_desc = (
+                        "CPI_quant: "
+                        + ("MCQ performance via CTT (proportion correct) or IRT "
+                           "(Rasch/2PL sigmoid-normalised θ). References: "
+                           "Crocker & Algina (1986); Baker (1985)."
+                           if _picked_run_meta["instrument_key"].strip() in (
+                               "content_mcq",
+                           ) or "_content_mcq_assessment" in _picked_run_meta["instrument_key"]
+                           else "a teacher-selected combination of Content MCQ "
+                           "performance and/or normalised gain (Hake, 1998) on "
+                           "AI Misconceptions and/or AI Conceptual Inventory "
+                           "(AICI), blended per the instrument types shown above.")
+                    )
+                else:
+                    _scope_desc = (
+                        "No stored CPI run was selected — this report uses the "
+                        "3-component fallback formula computed fresh over the "
+                        "currently filtered data.\n\n"
+                    )
+                    _quant_desc = (
+                        "CPI_outcome: a blend of Content MCQ performance and "
+                        "normalised gain (Hake, 1998) on AI Misconceptions and "
+                        "AI Conceptual Inventory (AICI), unconditionally over "
+                        "every module."
+                    )
                 sections.append({
                     "heading": "Methodology",
                     "body":    (
-                        "CPI_quant: MCQ performance via CTT (proportion correct) or "
-                        "IRT (Rasch/2PL sigmoid-normalised θ). "
-                        "References: Crocker & Algina (1986); Baker (1985).\n\n"
-                        "CPI_qual: LLM-as-judge scores on reflection quality "
+                        _scope_desc
+                        + _quant_desc
+                        + "\n\nCPI_qual: LLM-as-judge scores on reflection quality "
                         "(depth of insight, conceptual grounding, personal connection, 1–4 scale). "
                         "Reference: Zheng et al. (2023).\n\n"
                         "CPI+ = w₁ × CPI_quant + w₂ × CPI_qual. "

@@ -235,6 +235,7 @@ def compute_cpi_quant_irt(
 def get_reflection_texts(
     canonical_df: pd.DataFrame,
     module_id: Optional[str] = None,
+    module_ids: Optional[List[str]] = None,
     question_ids: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """
@@ -248,8 +249,14 @@ def get_reflection_texts(
     Parameters
     ----------
     canonical_df : pd.DataFrame
-    module_id    : str | None — filter to this module (e.g. "module_1").
-                               None = all modules.
+    module_id    : str | None  — filter to this single module (e.g.
+                                "module_1"). None = all modules. Kept for
+                                backward compatibility; module_ids takes
+                                precedence if both are given.
+    module_ids   : list | None — filter to these modules (pools
+                                reflections across all of them). Added
+                                2026-08-09 so CPI_qual can span the same
+                                multi-module selection as CPI_quant.
     question_ids : list | None — filter to these question IDs.
                                 None = all questions.
 
@@ -263,7 +270,9 @@ def get_reflection_texts(
     )
     subset = canonical_df[mask].copy()
 
-    if module_id:
+    if module_ids:
+        subset = subset[subset["module_id"].isin(module_ids)]
+    elif module_id:
         subset = subset[subset["module_id"] == module_id]
 
     if question_ids:
@@ -548,15 +557,37 @@ def hake_gain(pre: float, post: float, max_score: float) -> float:
 def compute_cpi_outcome(
     canonical_df: pd.DataFrame,
     weights: dict = None,
+    module_ids: Optional[List[str]] = None,
+    instrument_types: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """
     Compute CPI_outcome per student.
     CPI_outcome = α·CPI_MCQ + β·g_misconceptions + γ·g_AICI
 
+    Added 2026-08-09 (Task F): teacher-configurable module/instrument
+    selection, generalizing this from its original "unconditionally over
+    every module, always all 3 components" behavior. Both new params
+    default to None, preserving the exact old behavior when omitted (the
+    Report Generation fallback path still calls this with neither set).
+
+    Parameters
+    ----------
+    module_ids : list of "module_N" strings, or None for all modules.
+        Only scopes which modules' Content MCQ scores feed cpi_mcq --
+        AI Misconceptions/AICI gain are pre/post-COURSE instruments (not
+        module-specific), so they're unaffected by this filter.
+    instrument_types : subset of {"content_mcq", "misconceptions_gain",
+        "aici_gain"}, or None for all three. A component not selected is
+        excluded entirely (not just NaN'd) -- the remaining weights
+        renormalize over whatever's left, same as the existing
+        missing-data handling below.
+
     Returns DataFrame: user_id, cpi_mcq, g_misconceptions, g_aici,
                        cpi_outcome, n_modules_mcq
     """
     w = {**DEFAULT_OUTCOME, **(weights or {})}
+    _types = set(instrument_types) if instrument_types is not None else \
+        {"content_mcq", "misconceptions_gain", "aici_gain"}
 
     from core.analytics.descriptive.score_aggregator import compute_assessment_scores
 
@@ -565,6 +596,15 @@ def compute_cpi_outcome(
         return pd.DataFrame(columns=["user_id", "cpi_mcq", "g_misconceptions",
                                      "g_aici", "cpi_outcome"])
 
+    # module_ids come from the UI as "module_N" (e.g. "module_3"); MCQ
+    # instrument_keys are written as "moduleN_content_mcq_assessment"
+    # (no underscore) -- translate once, outside the per-user loop.
+    _allowed_mcq_keys = None
+    if module_ids:
+        _allowed_mcq_keys = {
+            f"module{mid.split('_')[-1]}_content_mcq_assessment" for mid in module_ids
+        }
+
     results = []
     for uid in asc["user_id"].unique():
         udf = asc[asc["user_id"] == uid]
@@ -572,6 +612,8 @@ def compute_cpi_outcome(
         mcq_rows = udf[udf["instrument_key"].str.contains(
             "content_mcq_assessment", na=False
         )]
+        if _allowed_mcq_keys is not None:
+            mcq_rows = mcq_rows[mcq_rows["instrument_key"].isin(_allowed_mcq_keys)]
         cpi_mcq = float(mcq_rows["pct_correct"].mean() / 100) \
             if not mcq_rows.empty else float("nan")
 
@@ -589,11 +631,13 @@ def compute_cpi_outcome(
             g_aici = hake_gain(pre_aici["pct_correct"].mean(),
                                post_aici["pct_correct"].mean(), 100.0)
 
-        components = {
-            "cpi_mcq":          (cpi_mcq, w["alpha"]),
-            "g_misconceptions": (g_misc,  w["beta"]),
-            "g_aici":           (g_aici,  w["gamma"]),
-        }
+        components = {}
+        if "content_mcq" in _types:
+            components["cpi_mcq"] = (cpi_mcq, w["alpha"])
+        if "misconceptions_gain" in _types:
+            components["g_misconceptions"] = (g_misc, w["beta"])
+        if "aici_gain" in _types:
+            components["g_aici"] = (g_aici, w["gamma"])
         valid = [(v, wt) for v, wt in components.values() if not np.isnan(v)]
         if valid:
             total_w = sum(wt for _, wt in valid)
