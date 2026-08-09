@@ -73,6 +73,14 @@ def _cohort_selector(key_prefix: str, label: str = "Cohort") -> str | None:
     uses — so a cohort created here is immediately usable everywhere else
     in the app too, not a parallel/duplicate mechanism.
     """
+    # A st.success() called right before st.rerun() never actually reaches
+    # the screen -- the rerun happens before the browser paints it. Stash
+    # the message in session_state instead and show it on the NEXT render,
+    # right before the widget it's about (fixed 2026-08-08).
+    _flash_key = f"{key_prefix}_flash"
+    if st.session_state.get(_flash_key):
+        st.success(st.session_state.pop(_flash_key))
+
     cohorts = user_service.get_all_cohorts()
     options = [_COHORT_NONE] + cohorts + [_COHORT_CREATE_NEW]
     choice = st.selectbox(label, options=options, key=f"{key_prefix}_choice")
@@ -80,9 +88,13 @@ def _cohort_selector(key_prefix: str, label: str = "Cohort") -> str | None:
     if choice == _COHORT_CREATE_NEW:
         new_id = st.text_input("New cohort ID", key=f"{key_prefix}_new_id")
         if st.button("Create cohort", key=f"{key_prefix}_new_btn"):
-            if new_id.strip():
+            new_id = new_id.strip()
+            if new_id:
                 user_service.add_cohort(new_id)
-                st.success(f"Cohort '{new_id.strip()}' created — select it above.")
+                st.session_state[_flash_key] = f"Cohort '{new_id}' created and selected below."
+                # Pre-select the new cohort immediately instead of leaving
+                # the dropdown on "— none —" and making the admin find it.
+                st.session_state[f"{key_prefix}_choice"] = new_id
                 st.rerun()
             else:
                 st.warning("Enter a cohort ID first.")
@@ -914,11 +926,20 @@ def show_admin_dashboard(username: str):
                 "Accepted formats: `.txt`, `.vtt` (WebVTT), `.pdf`."
             )
 
+            # Generation counter: bumping this gives the uploader a fresh
+            # widget key, which is the standard Streamlit trick to actually
+            # clear a file_uploader (there's no other way to reset one).
+            # Used both after a successful save and by the explicit
+            # "Clear form" button below (fixed 2026-08-08).
+            if "admin_int_upload_gen" not in st.session_state:
+                st.session_state["admin_int_upload_gen"] = 0
+            _int_gen = st.session_state["admin_int_upload_gen"]
+
             _upload_files = st.file_uploader(
                 "Select transcript files",
                 type=["txt", "vtt", "pdf"],
                 accept_multiple_files=True,
-                key="admin_transcript_upload",
+                key=f"admin_transcript_upload_{_int_gen}",
                 help="Upload multiple files at once. "
                      "Participant IDs are set below.",
             )
@@ -963,6 +984,17 @@ def show_admin_dashboard(username: str):
                 _cohort_options = [_COHORT_NONE] + user_service.get_all_cohorts()
                 _bulk_index = _cohort_options.index(_bulk_cohort) if _bulk_cohort in _cohort_options else 0
 
+                # Per-file selectboxes use a persistent widget key, so their
+                # `index=` default only takes effect the first time each key
+                # is created -- changing the bulk cohort afterward silently
+                # has no effect on files already rendered. Detect the change
+                # and drop the stale per-file keys so they pick up the new
+                # bulk default on this render (fixed 2026-08-08).
+                if st.session_state.get("admin_int_bulk_cohort_last_seen") != _bulk_cohort:
+                    for _uf in _upload_files:
+                        st.session_state.pop(f"admin_cohort_{_uf.name}", None)
+                    st.session_state["admin_int_bulk_cohort_last_seen"] = _bulk_cohort
+
                 _mappings = {}
                 for _uf in _upload_files:
                     _default_id = _ts_infer_pid(_uf.name)
@@ -987,7 +1019,16 @@ def show_admin_dashboard(username: str):
                     _file_cohort = None if _file_cohort_choice == _COHORT_NONE else _file_cohort_choice
                     _mappings[_uf.name] = (_uf, _pid.strip(), _file_cohort)
 
-                if st.button(
+                _int_clear_col, _int_upload_col = st.columns([1, 2])
+                if _int_clear_col.button(
+                    "🔄 Clear form", key="admin_int_clear_batch",
+                    help="Discard this batch's file selections and start fresh, "
+                         "without uploading anything.",
+                ):
+                    st.session_state["admin_int_upload_gen"] += 1
+                    st.rerun()
+
+                if _int_upload_col.button(
                     "📤 Upload transcripts to store",
                     key="admin_upload_submit",
                     type="primary",
@@ -1035,15 +1076,25 @@ def show_admin_dashboard(username: str):
                             _skipped.append(f"{_fname}: {_ue}")
 
                     if _saved:
-                        st.success(
+                        # Flash message pattern (see _cohort_selector) --
+                        # st.rerun() below would otherwise wipe this before
+                        # it's ever painted.
+                        st.session_state["admin_int_upload_flash"] = (
                             f"✅ {_saved} transcript(s) saved to store."
                         )
+                        # Fresh uploader for the next batch -- this is the
+                        # "Done" / "clear after upload" facility.
+                        st.session_state["admin_int_upload_gen"] += 1
                     if _skipped:
-                        st.warning(
-                            f"Skipped {len(_skipped)}: "
-                            + "; ".join(_skipped)
+                        st.session_state["admin_int_upload_flash_warn"] = (
+                            f"Skipped {len(_skipped)}: " + "; ".join(_skipped)
                         )
                     st.rerun()
+
+            if st.session_state.get("admin_int_upload_flash"):
+                st.success(st.session_state.pop("admin_int_upload_flash"))
+            if st.session_state.get("admin_int_upload_flash_warn"):
+                st.warning(st.session_state.pop("admin_int_upload_flash_warn"))
 
         st.divider()
 
@@ -1186,11 +1237,15 @@ def show_admin_dashboard(username: str):
                 "Accepted formats: `.txt`, `.vtt` (WebVTT), `.pdf`."
             )
 
+            if "admin_obs_upload_gen" not in st.session_state:
+                st.session_state["admin_obs_upload_gen"] = 0
+            _obs_gen = st.session_state["admin_obs_upload_gen"]
+
             _obs_upload_files = st.file_uploader(
                 "Select transcript files",
                 type=["txt", "vtt", "pdf"],
                 accept_multiple_files=True,
-                key="admin_obs_transcript_upload",
+                key=f"admin_obs_transcript_upload_{_obs_gen}",
                 help="Upload multiple files at once. "
                      "Participant IDs are set below.",
             )
@@ -1231,6 +1286,11 @@ def show_admin_dashboard(username: str):
                 _obs_cohort_options = [_COHORT_NONE] + user_service.get_all_cohorts()
                 _obs_bulk_index = _obs_cohort_options.index(_obs_bulk_cohort) if _obs_bulk_cohort in _obs_cohort_options else 0
 
+                if st.session_state.get("admin_obs_bulk_cohort_last_seen") != _obs_bulk_cohort:
+                    for _uf in _obs_upload_files:
+                        st.session_state.pop(f"admin_obs_cohort_{_uf.name}", None)
+                    st.session_state["admin_obs_bulk_cohort_last_seen"] = _obs_bulk_cohort
+
                 _obs_mappings = {}
                 for _uf in _obs_upload_files:
                     _obs_default_id = _obs_infer_pid(_uf.name)
@@ -1255,7 +1315,16 @@ def show_admin_dashboard(username: str):
                     _obs_file_cohort = None if _obs_file_cohort_choice == _COHORT_NONE else _obs_file_cohort_choice
                     _obs_mappings[_uf.name] = (_uf, _obs_pid.strip(), _obs_file_cohort)
 
-                if st.button(
+                _obs_clear_col, _obs_upload_col = st.columns([1, 2])
+                if _obs_clear_col.button(
+                    "🔄 Clear form", key="admin_obs_clear_batch",
+                    help="Discard this batch's file selections and start fresh, "
+                         "without uploading anything.",
+                ):
+                    st.session_state["admin_obs_upload_gen"] += 1
+                    st.rerun()
+
+                if _obs_upload_col.button(
                     "📤 Upload transcripts to store",
                     key="admin_obs_upload_submit",
                     type="primary",
@@ -1302,15 +1371,21 @@ def show_admin_dashboard(username: str):
                             _obs_skipped.append(f"{_fname}: {_ue}")
 
                     if _obs_saved:
-                        st.success(
+                        st.session_state["admin_obs_upload_flash"] = (
                             f"✅ {_obs_saved} transcript(s) saved to store."
                         )
+                        st.session_state["admin_obs_upload_gen"] += 1
                     if _obs_skipped:
-                        st.warning(
+                        st.session_state["admin_obs_upload_flash_warn"] = (
                             f"Skipped {len(_obs_skipped)}: "
                             + "; ".join(_obs_skipped)
                         )
                     st.rerun()
+
+            if st.session_state.get("admin_obs_upload_flash"):
+                st.success(st.session_state.pop("admin_obs_upload_flash"))
+            if st.session_state.get("admin_obs_upload_flash_warn"):
+                st.warning(st.session_state.pop("admin_obs_upload_flash_warn"))
 
         # ── Dataset Metrics ───────────────────────────────────────────────────
         # --- Begin DEBUG for ensuring correct database is being read to read survey scores
