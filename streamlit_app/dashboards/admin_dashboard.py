@@ -81,6 +81,19 @@ def _cohort_selector(key_prefix: str, label: str = "Cohort") -> str | None:
     if st.session_state.get(_flash_key):
         st.success(st.session_state.pop(_flash_key))
 
+    # Streamlit forbids writing to st.session_state[key] for a widget's OWN
+    # key in the same run the widget already rendered -- raises
+    # StreamlitAPIException ("cannot be modified after the widget ... is
+    # instantiated"), even if a st.rerun() follows right after. So the
+    # "pre-select the newly created cohort" write can't happen inside the
+    # button handler below (that's after st.selectbox() already ran this
+    # pass) -- it has to be applied here, BEFORE st.selectbox() is called,
+    # using a separate flag set on the previous run (fixed 2026-08-09,
+    # crash found during the user's E.1 re-test).
+    _pending_key = f"{key_prefix}_pending_select"
+    if st.session_state.get(_pending_key):
+        st.session_state[f"{key_prefix}_choice"] = st.session_state.pop(_pending_key)
+
     cohorts = user_service.get_all_cohorts()
     options = [_COHORT_NONE] + cohorts + [_COHORT_CREATE_NEW]
     choice = st.selectbox(label, options=options, key=f"{key_prefix}_choice")
@@ -92,9 +105,9 @@ def _cohort_selector(key_prefix: str, label: str = "Cohort") -> str | None:
             if new_id:
                 user_service.add_cohort(new_id)
                 st.session_state[_flash_key] = f"Cohort '{new_id}' created and selected below."
-                # Pre-select the new cohort immediately instead of leaving
-                # the dropdown on "— none —" and making the admin find it.
-                st.session_state[f"{key_prefix}_choice"] = new_id
+                # Deferred pre-select -- applied at the top of this function
+                # on the next render, not here (see comment above).
+                st.session_state[_pending_key] = new_id
                 st.rerun()
             else:
                 st.warning("Enter a cohort ID first.")
@@ -987,13 +1000,23 @@ def show_admin_dashboard(username: str):
                 # Per-file selectboxes use a persistent widget key, so their
                 # `index=` default only takes effect the first time each key
                 # is created -- changing the bulk cohort afterward silently
-                # has no effect on files already rendered. Detect the change
-                # and drop the stale per-file keys so they pick up the new
-                # bulk default on this render (fixed 2026-08-08).
+                # has no effect on files already rendered. Tracking a single
+                # "last seen bulk value" and popping stale keys (the
+                # 2026-08-08 fix) isn't fully reliable either -- if the same
+                # filename is re-used across batches, its old key can carry
+                # a stale value from an even earlier bulk setting that
+                # happens to coincidentally match "last seen" again, so the
+                # change goes undetected. Folding a generation counter into
+                # the key sidesteps the whole class of bug: every bulk
+                # change gives every per-file widget a brand new key, so
+                # there is no persisted value left to go stale (fixed
+                # 2026-08-09, confirmed still failing after the first fix).
+                if "admin_int_bulk_cohort_gen" not in st.session_state:
+                    st.session_state["admin_int_bulk_cohort_gen"] = 0
                 if st.session_state.get("admin_int_bulk_cohort_last_seen") != _bulk_cohort:
-                    for _uf in _upload_files:
-                        st.session_state.pop(f"admin_cohort_{_uf.name}", None)
+                    st.session_state["admin_int_bulk_cohort_gen"] += 1
                     st.session_state["admin_int_bulk_cohort_last_seen"] = _bulk_cohort
+                _bulk_gen = st.session_state["admin_int_bulk_cohort_gen"]
 
                 _mappings = {}
                 for _uf in _upload_files:
@@ -1013,7 +1036,7 @@ def show_admin_dashboard(username: str):
                         "Cohort",
                         options=_cohort_options,
                         index=_bulk_index,
-                        key=f"admin_cohort_{_uf.name}",
+                        key=f"admin_cohort_{_uf.name}_{_bulk_gen}",
                         help="Defaults to the batch cohort above — change to override for just this file.",
                     )
                     _file_cohort = None if _file_cohort_choice == _COHORT_NONE else _file_cohort_choice
@@ -1026,6 +1049,11 @@ def show_admin_dashboard(username: str):
                          "without uploading anything.",
                 ):
                     st.session_state["admin_int_upload_gen"] += 1
+                    # Also force fresh per-file cohort widgets for the next
+                    # batch, in case a re-uploaded file shares a filename
+                    # with one from this batch (fixed 2026-08-09).
+                    st.session_state["admin_int_bulk_cohort_gen"] = \
+                        st.session_state.get("admin_int_bulk_cohort_gen", 0) + 1
                     st.rerun()
 
                 if _int_upload_col.button(
@@ -1085,6 +1113,8 @@ def show_admin_dashboard(username: str):
                         # Fresh uploader for the next batch -- this is the
                         # "Done" / "clear after upload" facility.
                         st.session_state["admin_int_upload_gen"] += 1
+                        st.session_state["admin_int_bulk_cohort_gen"] = \
+                            st.session_state.get("admin_int_bulk_cohort_gen", 0) + 1
                     if _skipped:
                         st.session_state["admin_int_upload_flash_warn"] = (
                             f"Skipped {len(_skipped)}: " + "; ".join(_skipped)
@@ -1286,10 +1316,15 @@ def show_admin_dashboard(username: str):
                 _obs_cohort_options = [_COHORT_NONE] + user_service.get_all_cohorts()
                 _obs_bulk_index = _obs_cohort_options.index(_obs_bulk_cohort) if _obs_bulk_cohort in _obs_cohort_options else 0
 
+                # See the matching comment in the Interview Transcript Store
+                # section above -- a generation-counter key sidesteps the
+                # stale-key class of bug entirely (fixed 2026-08-09).
+                if "admin_obs_bulk_cohort_gen" not in st.session_state:
+                    st.session_state["admin_obs_bulk_cohort_gen"] = 0
                 if st.session_state.get("admin_obs_bulk_cohort_last_seen") != _obs_bulk_cohort:
-                    for _uf in _obs_upload_files:
-                        st.session_state.pop(f"admin_obs_cohort_{_uf.name}", None)
+                    st.session_state["admin_obs_bulk_cohort_gen"] += 1
                     st.session_state["admin_obs_bulk_cohort_last_seen"] = _obs_bulk_cohort
+                _obs_bulk_gen = st.session_state["admin_obs_bulk_cohort_gen"]
 
                 _obs_mappings = {}
                 for _uf in _obs_upload_files:
@@ -1309,7 +1344,7 @@ def show_admin_dashboard(username: str):
                         "Cohort",
                         options=_obs_cohort_options,
                         index=_obs_bulk_index,
-                        key=f"admin_obs_cohort_{_uf.name}",
+                        key=f"admin_obs_cohort_{_uf.name}_{_obs_bulk_gen}",
                         help="Defaults to the batch cohort above — change to override for just this file.",
                     )
                     _obs_file_cohort = None if _obs_file_cohort_choice == _COHORT_NONE else _obs_file_cohort_choice
@@ -1322,6 +1357,8 @@ def show_admin_dashboard(username: str):
                          "without uploading anything.",
                 ):
                     st.session_state["admin_obs_upload_gen"] += 1
+                    st.session_state["admin_obs_bulk_cohort_gen"] = \
+                        st.session_state.get("admin_obs_bulk_cohort_gen", 0) + 1
                     st.rerun()
 
                 if _obs_upload_col.button(
@@ -1375,6 +1412,8 @@ def show_admin_dashboard(username: str):
                             f"✅ {_obs_saved} transcript(s) saved to store."
                         )
                         st.session_state["admin_obs_upload_gen"] += 1
+                        st.session_state["admin_obs_bulk_cohort_gen"] = \
+                            st.session_state.get("admin_obs_bulk_cohort_gen", 0) + 1
                     if _obs_skipped:
                         st.session_state["admin_obs_upload_flash_warn"] = (
                             f"Skipped {len(_obs_skipped)}: "
