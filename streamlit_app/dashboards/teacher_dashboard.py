@@ -6403,24 +6403,58 @@ def _build_pdf(sections: list, title: str) -> bytes:
                     story.append(Paragraph(line, body_style))
 
         if df is not None and not df.empty:
-            # Convert dataframe to reportlab table
+            # Convert dataframe to reportlab table.
+            #
+            # Fixed 2026-08-09: a plain string in a platypus Table cell is
+            # NOT auto-wrapped by reportlab -- a well-known gotcha -- so any
+            # value wider than its column (a long participant ID, a long
+            # description, or Task F's new comma-joined multi-module scope
+            # string like "module_1,module_2,...") silently overflowed into
+            # the next column or past the page margin instead of wrapping.
+            # Equal fixed-width columns made it worse for any table with a
+            # naturally-long column. Now every cell is wrapped in a
+            # Paragraph (which DOES wrap) and column widths are weighted by
+            # each column's average content length instead of split evenly.
             col_headers = list(df.columns)
             data_rows   = df.astype(str).values.tolist()
-            tbl_data    = [col_headers] + data_rows
 
-            # Column widths — distribute across page
             page_w = A4[0] - 4*cm
-            col_w  = page_w / max(len(col_headers), 1)
-            col_widths = [col_w] * len(col_headers)
+            _avg_lens = [
+                max(
+                    (len(str(col_headers[i])) + sum(len(row[i]) for row in data_rows))
+                    / (1 + len(data_rows)),
+                    3,
+                )
+                for i in range(len(col_headers))
+            ]
+            _min_w = 1.6 * cm
+            col_widths = [max(page_w * (l / sum(_avg_lens)), _min_w) for l in _avg_lens]
+            # The min-width floor above can push the total past page_w for
+            # tables with many columns -- rescale so it always fits exactly.
+            _scale = page_w / sum(col_widths)
+            col_widths = [w * _scale for w in col_widths]
+
+            _tbl_header_style = ParagraphStyle(
+                "TblHeader", parent=styles["Normal"],
+                fontSize=8, leading=10, textColor=colors.white,
+                fontName="Helvetica-Bold",
+            )
+            _tbl_body_style = ParagraphStyle(
+                "TblBody", parent=styles["Normal"],
+                fontSize=7.5, leading=9,
+            )
+            tbl_data = (
+                [[Paragraph(str(h), _tbl_header_style) for h in col_headers]]
+                + [
+                    [Paragraph(str(cell), _tbl_body_style) for cell in row]
+                    for row in data_rows
+                ]
+            )
 
             tbl = Table(tbl_data, colWidths=col_widths, repeatRows=1)
             tbl.setStyle(TableStyle([
                 ("BACKGROUND",  (0,0), (-1,0),  colors.HexColor("#0077BB")),
-                ("TEXTCOLOR",   (0,0), (-1,0),  colors.white),
-                ("FONTSIZE",    (0,0), (-1,0),  8),
-                ("FONTNAME",    (0,0), (-1,0),  "Helvetica-Bold"),
-                ("ALIGN",       (0,0), (-1,-1), "LEFT"),
-                ("FONTSIZE",    (0,1), (-1,-1), 7.5),
+                ("VALIGN",      (0,0), (-1,-1), "TOP"),
                 ("ROWBACKGROUNDS",(0,1),(-1,-1),
                  [colors.HexColor("#F7FBFF"), colors.white]),
                 ("GRID",        (0,0), (-1,-1), 0.3, colors.HexColor("#CCCCCC")),
