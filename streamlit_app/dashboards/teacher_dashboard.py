@@ -434,6 +434,25 @@ def _histogram(
         st.bar_chart(values.dropna())
 
 
+def _render_normality_check(values: pd.Series, label: str = "") -> None:
+    """
+    Compact normality caption for use directly under any per-student
+    distribution histogram (Assessment Scores / Survey Construct Means
+    "By Student" views). For the full cross-instrument picture, see the
+    "Data Quality & Distributional Checks" section further down the
+    Basic Statistics tab.
+    """
+    from core.analytics.descriptive.normality_checks import assess_normality
+    r = assess_normality(values, label=label)
+    if r["error"]:
+        st.caption(f"📐 Normality: {r['error']}")
+        return
+    st.caption(
+        f"📐 Normality (Shapiro-Wilk): W={r['statistic']}, p={r['p_value']}  |  "
+        f"Skewness={r['skewness']}, Kurtosis={r['kurtosis']}  →  **{r['verdict']}**"
+    )
+
+
 def _grouped_distribution_chart(
     df: pd.DataFrame,
     value_col: str,
@@ -641,6 +660,120 @@ def _is_aici_instrument(instrument_key: str) -> bool:
     return any(kw in key_lower for kw in _AICI_INSTRUMENT_KEYS)
 
 
+def _render_data_quality_checks(canonical_df: pd.DataFrame) -> None:
+    """
+    Section 4: Data Quality & Distributional Checks -- the descriptive-
+    analysis gate before any inferential test. Consolidates normality
+    (Shapiro-Wilk) across all 5 data sources, straight-lining
+    (careless-responding) flags on the two surveys, and a
+    participation-rate trend across the 7-module curriculum as a
+    survey-fatigue signal. Operates on the same already-filtered
+    canonical_df as every other Basic Statistics section, so it inherits
+    every sidebar filter automatically -- including the single-student
+    filter, which degrades gracefully (assess_normality's own n<3 guard
+    shows "Not tested (n<3)" rather than erroring).
+    """
+    from core.analytics.descriptive.normality_checks import (
+        assess_group_normality, detect_straight_lining, compute_missingness_by_module,
+    )
+
+    st.subheader("🔍 Data Quality & Distributional Checks")
+    st.caption(
+        "Before running inferential tests, check whether distributional assumptions "
+        "are met and whether survey-fatigue-related data-quality issues are present "
+        "in the currently filtered sample."
+    )
+
+    # ── Normality across all 5 data sources ────────────────────────────────
+    with st.expander("📐 Normality checks (Shapiro-Wilk)", expanded=True):
+        norm_tables = []
+
+        asc_all = compute_assessment_scores(canonical_df)
+        if not asc_all.empty:
+            asc_norm = assess_group_normality(asc_all, "pct_correct", ["instrument_key"])
+            if not asc_norm.empty:
+                asc_norm["Data source"] = asc_norm["instrument_key"].map(
+                    lambda k: _ASSESSMENT_LABELS.get(k, k)
+                )
+                norm_tables.append(asc_norm)
+
+        cm_all = compute_construct_means(canonical_df)
+        if not cm_all.empty:
+            cm_norm = assess_group_normality(cm_all, "mean_score", ["instrument_key", "construct"])
+            if not cm_norm.empty:
+                cm_norm["Data source"] = cm_norm.apply(
+                    lambda r: f"{_SURVEY_LABELS.get(r['instrument_key'], r['instrument_key'])} "
+                              f"— {str(r['construct']).replace('_', ' ').title()}",
+                    axis=1,
+                )
+                norm_tables.append(cm_norm)
+
+        if norm_tables:
+            combined = pd.concat(norm_tables, ignore_index=True, sort=False)
+            disp = combined[["Data source", "n", "statistic", "p_value",
+                              "skewness", "kurtosis", "verdict"]].copy()
+            disp.columns = ["Data source", "N", "Shapiro W", "p-value",
+                             "Skewness", "Kurtosis", "Verdict"]
+            st.dataframe(disp, hide_index=True, width="stretch")
+            st.caption(
+                "p ≥ .05 does not *prove* normality, only that this sample doesn't "
+                "clearly deviate from it. Reference: Shapiro & Wilk (1965), "
+                "*Biometrika*, 52(3/4), 591–611."
+            )
+        else:
+            st.info("No data available for normality testing under the current filters.")
+
+    # ── Straight-lining (survey careless-responding) ────────────────────────
+    with st.expander("🚩 Straight-lining (survey careless-responding flags)", expanded=False):
+        sl = detect_straight_lining(canonical_df)
+        if sl.empty:
+            st.info("No survey response data available under the current filters.")
+        else:
+            n_flagged = int(sl["flagged"].sum())
+            st.metric("Flagged (student, survey) pairs", f"{n_flagged} / {len(sl)}")
+            if n_flagged:
+                flagged_disp = sl[sl["flagged"]].copy()
+                flagged_disp["Data source"] = flagged_disp["instrument_key"].map(
+                    lambda k: _SURVEY_LABELS.get(k, k)
+                )
+                st.dataframe(
+                    flagged_disp[["user_id", "Data source", "n_items"]].rename(
+                        columns={"user_id": "Student", "n_items": "Items answered"}
+                    ),
+                    hide_index=True, width="stretch",
+                )
+            st.caption(
+                "Flagged when a student selected the identical response option for "
+                "every item in a survey submission (n≥3 items). Reference: "
+                "Meade, A. W., & Craig, S. B. (2012). Identifying careless responses "
+                "in survey data. *Psychological Methods, 17*(3), 437–455."
+            )
+
+    # ── Missingness / participation trend across modules ────────────────────
+    with st.expander("📉 Participation trend across modules (missingness)", expanded=False):
+        miss = compute_missingness_by_module(canonical_df)
+        if miss.empty:
+            st.info("No module data available under the current filters.")
+        else:
+            disp_m = miss[["module_id", "n_participants", "pct_of_cohort"]].copy()
+            disp_m.columns = ["Module", "Participants", "% of Cohort"]
+            st.dataframe(disp_m, hide_index=True, width="stretch")
+            if _HAS_PLOTLY:
+                _fig = px.line(
+                    miss, x="module_num", y="pct_of_cohort", markers=True,
+                    title="Participation Rate Across Modules",
+                )
+                _fig.update_layout(margin=dict(t=40, b=10, l=10, r=10), height=280)
+                _fig.update_xaxes(title="Module", dtick=1)
+                _fig.update_yaxes(title="% of Cohort Participating", range=[0, 100])
+                st.plotly_chart(_fig, width="stretch", config={"displayModeBar": False})
+            st.caption(
+                "A declining trend across modules can indicate accumulating "
+                "survey/curriculum fatigue, distinct from any single student's "
+                "individual completion rate."
+            )
+
+
 def _render_assessment_scores(canonical_df: pd.DataFrame) -> None:
     """Section 2: Assessment scores — per-question or per-student view."""
 
@@ -820,6 +953,7 @@ def _render_assessment_scores(canonical_df: pd.DataFrame) -> None:
             x_label="% Correct",
             x_range=[0, 100],
         )
+        _render_normality_check(asc_filtered["pct_correct"], label=selected_label)
         with st.expander("Individual student scores"):
             display = asc_filtered[["user_id","n_items_answered","raw_score","pct_correct"]].copy()
             display.columns = ["Student", "Items Answered", "Raw Score", "% Correct"]
@@ -1496,6 +1630,9 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
                         x_range=[1, 4],
                         color="#F4845F",
                     )
+                    _render_normality_check(
+                        cm_c["mean_score"], label=construct.replace("_", " ").title()
+                    )
 
     else:
         # By Cohort (distribution): compare cohorts' mean scores per construct.
@@ -2103,6 +2240,134 @@ def _render_result_card(result: dict, score_label: str = "% Correct") -> None:
                 )
 
 
+def _get_flagged_user_ids_for_instruments(
+    canonical_df: pd.DataFrame,
+    instrument_keys: list,
+) -> dict:
+    """
+    Compute data-quality flags scoped to the specific instrument(s) an
+    inferential test is about to use. Returns
+    {"outliers": set, "missingness": set, "straight_lining": set|None}
+    -- straight_lining is None when no survey instrument is involved
+    (it doesn't apply to MCQ assessments, see normality_checks.py).
+    """
+    from core.analytics.descriptive.normality_checks import (
+        detect_outliers, detect_excessive_missingness, detect_straight_lining,
+    )
+    from core.analytics.descriptive.score_aggregator import (
+        compute_assessment_scores, compute_construct_means, _is_survey,
+    )
+
+    survey_keys     = [k for k in instrument_keys if _is_survey(k)]
+    assessment_keys = [k for k in instrument_keys if not _is_survey(k)]
+
+    outlier_ids = set()
+    if assessment_keys:
+        asc = compute_assessment_scores(canonical_df, instrument_keys=assessment_keys)
+        if not asc.empty:
+            out = detect_outliers(asc, "pct_correct", ["instrument_key"])
+            outlier_ids |= set(out[out["flagged"]]["user_id"])
+    if survey_keys:
+        cm = compute_construct_means(canonical_df, instrument_keys=survey_keys)
+        if not cm.empty:
+            out2 = detect_outliers(cm, "mean_score", ["instrument_key", "construct"])
+            outlier_ids |= set(out2[out2["flagged"]]["user_id"])
+
+    miss_df = detect_excessive_missingness(canonical_df, instrument_keys=instrument_keys)
+    missingness_ids = set(miss_df[miss_df["flagged"]]["user_id"]) if not miss_df.empty else set()
+
+    straight_lining_ids = None
+    if survey_keys:
+        sl = detect_straight_lining(canonical_df)
+        if not sl.empty:
+            sl = sl[sl["instrument_key"].isin(survey_keys)]
+        straight_lining_ids = set(sl[sl["flagged"]]["user_id"]) if not sl.empty else set()
+
+    return {
+        "outliers": outlier_ids,
+        "missingness": missingness_ids,
+        "straight_lining": straight_lining_ids,
+    }
+
+
+def _render_exclusion_controls(
+    canonical_df: pd.DataFrame,
+    instrument_keys: list,
+    key_prefix: str,
+) -> pd.DataFrame:
+    """
+    Per-criterion "exclude flagged participants" expander for use right
+    before an inferential test runs. Each criterion is its own checkbox
+    with a citation, left to the teacher/researcher's judgment -- these
+    are diagnostic flags, not automatic removals. Returns canonical_df
+    with any checked criteria's flagged user_ids filtered out (or the
+    original canonical_df unchanged if nothing is checked).
+    """
+    flags = _get_flagged_user_ids_for_instruments(canonical_df, instrument_keys)
+    excluded: set = set()
+
+    with st.expander("🧪 Exclude flagged participants before running this test", expanded=False):
+        st.caption(
+            "Optional. These are data-quality flags, not automatic removals -- "
+            "whether to exclude is your judgment call as the researcher, informed "
+            "by the citations below."
+        )
+
+        if st.checkbox(
+            f"Exclude outliers ({len(flags['outliers'])} flagged)",
+            value=False, key=f"{key_prefix}_excl_outliers",
+        ):
+            excluded |= flags["outliers"]
+        st.caption(
+            "Extreme values can distort parametric estimates (mean, SD) and "
+            "inflate Type I/II error even when the bulk of the distribution is "
+            "well-behaved. Osborne, J. W., & Overbay, A. (2004). The power of "
+            "outliers (and why researchers should always check for them). "
+            "*Practical Assessment, Research & Evaluation, 9*(6). — Tabachnick, "
+            "B. G., & Fidell, L. S. *Using Multivariate Statistics* (data-"
+            "screening chapter)."
+        )
+
+        if st.checkbox(
+            f"Exclude participants with excessive missing data "
+            f"({len(flags['missingness'])} flagged)",
+            value=False, key=f"{key_prefix}_excl_missing",
+        ):
+            excluded |= flags["missingness"]
+        st.caption(
+            "Non-random missingness can bias inferential estimates and "
+            "standard errors. Little, R. J. A., & Rubin, D. B. *Statistical "
+            "Analysis with Missing Data*. — Enders, C. K. (2010). *Applied "
+            "Missing Data Analysis*. Guilford Press."
+        )
+
+        if flags["straight_lining"] is not None:
+            if st.checkbox(
+                f"Exclude straight-lining respondents "
+                f"({len(flags['straight_lining'])} flagged)",
+                value=False, key=f"{key_prefix}_excl_straightlining",
+            ):
+                excluded |= flags["straight_lining"]
+            st.caption(
+                "Careless/invariant responding attenuates validity and can bias "
+                "correlational and inferential findings. Meade, A. W., & Craig, "
+                "S. B. (2012). Identifying careless responses in survey data. "
+                "*Psychological Methods, 17*(3), 437–455. — Curran, P. G. (2016). "
+                "Methods for the detection of carelessly invalid responses in "
+                "survey data. *Journal of Experimental Social Psychology, 66*, 4–19."
+            )
+
+        if excluded:
+            st.warning(
+                f"**{len(excluded)} participant(s) excluded from this test:** "
+                + ", ".join(sorted(excluded))
+            )
+
+    if not excluded:
+        return canonical_df
+    return canonical_df[~canonical_df["user_id"].isin(excluded)]
+
+
 def _render_inferential_tab(
     canonical_df: pd.DataFrame,
     demographics_df: pd.DataFrame,
@@ -2171,9 +2436,13 @@ def _render_inferential_tab(
         }
         pre_key, post_key = pair_map[instrument_pair]
 
+        _pp_canonical = _render_exclusion_controls(
+            canonical_df, [pre_key, post_key], key_prefix="inf_pp"
+        )
+
         with st.spinner("Computing…"):
             r = run_paired_comparison(
-                canonical_df, pre_key, post_key,
+                _pp_canonical, pre_key, post_key,
                 alpha=0.05,
                 include_wilcoxon=show_wilcoxon,
                 use_pct=True,
@@ -2183,7 +2452,7 @@ def _render_inferential_tab(
         # ── Bland-Altman method agreement ─────────────────────────────────
         with st.spinner("Computing method agreement…"):
             _ba = run_bland_altman(
-                canonical_df, pre_key, post_key, use_pct=True
+                _pp_canonical, pre_key, post_key, use_pct=True
             )
         _render_bland_altman_expander(_ba, score_label="% Correct")
         # ─────────────────────────────────────────────────────────────────
@@ -2213,9 +2482,13 @@ def _render_inferential_tab(
                 key="inf_bg_group",
             )
 
+        _bg_canonical = _render_exclusion_controls(
+            canonical_df, [bg_key], key_prefix="inf_bg"
+        )
+
         with st.spinner("Computing…"):
             r_bg = run_between_groups(
-                canonical_df, bg_key,
+                _bg_canonical, bg_key,
                 group_col=bg_group,
                 demographics_df=demographics_df,
                 alpha=0.05, use_pct=True,
@@ -2258,9 +2531,16 @@ def _render_inferential_tab(
         )
 
         if rm_type == "MCQ content knowledge":
+            _mcq_keys = [
+                k for k in canonical_df["instrument_key"].unique()
+                if "content_mcq_assessment" in k
+            ]
+            _rm_mcq_canonical = _render_exclusion_controls(
+                canonical_df, _mcq_keys, key_prefix="inf_rm_mcq"
+            )
             with st.spinner("Computing…"):
                 r_rm = run_repeated_measures(
-                    canonical_df,
+                    _rm_mcq_canonical,
                     instrument_key="content_mcq_assessment",
                     construct=None, alpha=0.05,
                 )
@@ -2300,9 +2580,17 @@ def _render_inferential_tab(
                     key="inf_rm_construct",
                 )
 
+            _survey_keys = [
+                k for k in canonical_df["instrument_key"].unique()
+                if survey_key in k
+            ]
+            _rm_survey_canonical = _render_exclusion_controls(
+                canonical_df, _survey_keys, key_prefix="inf_rm_survey"
+            )
+
             with st.spinner("Computing…"):
                 r_rm = run_repeated_measures(
-                    canonical_df,
+                    _rm_survey_canonical,
                     instrument_key=survey_key,
                     construct=rm_construct,
                     alpha=0.05,
@@ -3220,6 +3508,8 @@ def show_teacher_dashboard(username: str) -> None:
         _render_assessment_scores(filtered_canonical)
         st.divider()
         _render_survey_construct_means(filtered_canonical)
+        st.divider()
+        _render_data_quality_checks(filtered_canonical)
 
     elif active_tab == "📈 Inferential Statistics":
         _render_inferential_tab(filtered_canonical, filtered_demographics)
@@ -6500,7 +6790,10 @@ def _report_basic_stats(
     st.caption("Generates a PDF snapshot of participant summary, assessment scores, and survey construct means.")
 
     # Seed checkbox defaults so they persist across reruns
-    _BS_OPTIONS = ["Participant summary", "Assessment scores", "Survey construct means"]
+    _BS_OPTIONS = [
+        "Participant summary", "Assessment scores", "Survey construct means",
+        "Data quality & normality checks",
+    ]
     bs_selected = st.multiselect(
         "Include sections:",
         options=_BS_OPTIONS,
@@ -6513,6 +6806,7 @@ def _report_basic_stats(
         include_participant = "Participant summary"   in selected
         include_assessment  = "Assessment scores"    in selected
         include_survey      = "Survey construct means" in selected
+        include_quality     = "Data quality & normality checks" in selected
 
         with st.spinner("Building PDF…"):
             sections = []
@@ -6591,6 +6885,86 @@ def _report_basic_stats(
                                 "table":   disp,
                                 "caption": f"Table: Construct means for {label}. Scale: 1=Strongly disagree, 4=Strongly agree.",
                             })
+
+            # Data quality & normality checks
+            if include_quality:
+                from core.analytics.descriptive.score_aggregator import (
+                    compute_assessment_scores, compute_construct_means,
+                )
+                from core.analytics.descriptive.normality_checks import (
+                    assess_group_normality, detect_straight_lining,
+                    compute_missingness_by_module,
+                )
+
+                norm_tables = []
+                asc_q = compute_assessment_scores(canonical_df)
+                if not asc_q.empty:
+                    asc_norm_q = assess_group_normality(asc_q, "pct_correct", ["instrument_key"])
+                    if not asc_norm_q.empty:
+                        asc_norm_q["Data source"] = asc_norm_q["instrument_key"].map(
+                            lambda k: _ASSESSMENT_LABELS.get(k, k)
+                        )
+                        norm_tables.append(asc_norm_q)
+                cm_q = compute_construct_means(canonical_df)
+                if not cm_q.empty:
+                    cm_norm_q = assess_group_normality(cm_q, "mean_score", ["instrument_key", "construct"])
+                    if not cm_norm_q.empty:
+                        cm_norm_q["Data source"] = cm_norm_q.apply(
+                            lambda r: f"{_SURVEY_LABELS.get(r['instrument_key'], r['instrument_key'])} "
+                                      f"— {str(r['construct']).replace('_', ' ').title()}",
+                            axis=1,
+                        )
+                        norm_tables.append(cm_norm_q)
+
+                if norm_tables:
+                    combined_q = pd.concat(norm_tables, ignore_index=True, sort=False)
+                    disp_norm = combined_q[["Data source", "n", "statistic", "p_value",
+                                             "skewness", "kurtosis", "verdict"]].copy()
+                    disp_norm.columns = ["Data source", "N", "Shapiro W", "p-value",
+                                          "Skewness", "Kurtosis", "Verdict"]
+                    sections.append({
+                        "heading": "4. Data Quality & Distributional Checks — Normality",
+                        "body":    (
+                            "Shapiro-Wilk normality test per data source. p ≥ .05 does "
+                            "not prove normality, only that this sample doesn't clearly "
+                            "deviate from it. Reference: Shapiro & Wilk (1965), "
+                            "Biometrika, 52(3/4), 591-611."
+                        ),
+                        "table":   disp_norm,
+                        "caption": "Table 4. Normality checks across all instruments/constructs.",
+                    })
+
+                sl_q = detect_straight_lining(canonical_df)
+                n_flagged_q = int(sl_q["flagged"].sum()) if not sl_q.empty else 0
+                sections.append({
+                    "heading": "Straight-Lining (Survey Careless-Responding Flags)",
+                    "body":    (
+                        f"{n_flagged_q} of {len(sl_q)} (student, survey) pairs flagged "
+                        "-- identical response option selected for every item in a "
+                        "submission (n>=3 items). Reference: Meade & Craig (2012), "
+                        "Psychological Methods, 17(3), 437-455."
+                    ),
+                    "table":   (
+                        sl_q[sl_q["flagged"]][["user_id", "instrument_key", "n_items"]]
+                        .rename(columns={"user_id": "Student", "instrument_key": "Survey",
+                                         "n_items": "Items"})
+                        if n_flagged_q else None
+                    ),
+                })
+
+                miss_q = compute_missingness_by_module(canonical_df)
+                if not miss_q.empty:
+                    disp_miss = miss_q[["module_id", "n_participants", "pct_of_cohort"]].copy()
+                    disp_miss.columns = ["Module", "Participants", "% of Cohort"]
+                    sections.append({
+                        "heading": "Participation Trend Across Modules (Missingness)",
+                        "body":    (
+                            "A declining trend across modules can indicate accumulating "
+                            "survey/curriculum fatigue."
+                        ),
+                        "table":   disp_miss,
+                        "caption": "Table 5. Participation rate per module.",
+                    })
 
             pdf_bytes = _build_pdf(sections, "Basic Statistics Report")
             st.download_button(

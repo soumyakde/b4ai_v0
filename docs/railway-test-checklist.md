@@ -1,0 +1,237 @@
+# Railway Test-Environment Checklist — Post-pilot enhancements (2026-08-04, updated 2026-08-14)
+
+**Purpose:** confirm the requested changes (Tasks A-J, plus fixes found while testing) work correctly on the real deployed Railway `test` environment. Underlying logic was already verified directly (hand-computed math checks, full data round-trip tests, live SSH confirmation of the bug fix, direct-Python and AppTest verification) — this is your pass to confirm it looks and behaves right from the actual dashboard.
+
+**URL:** https://basics4ai-staging-test.up.railway.app
+**Login:** your own admin account (the `test` environment's database was refreshed from production on 2026-08-04, so your real credentials work here too)
+
+Estimated time: ~60 minutes (Tasks A-D: ~15 min, Task E: ~10 min, Task J: ~15 min). Tasks F, G, H, I already signed off and live in production — skip unless you want a re-check.
+
+---
+
+## A. "Cognitive Engagement" label (2 min)
+
+1. Log in, open the **Teacher Dashboard**.
+2. Go to **📊 Basic Statistics** (should now be the 1st tab — see item D below).
+3. Scroll to **Survey Construct Means (Likert 1-4)**.
+4. Open the **"Select Survey"** dropdown — confirm it reads **"Cognitive Engagement"**, not "SCCCES (Conceptual Change)".
+5. Select it, switch the chart view to **"By Question"** — confirm the chart title reads **"Mean Score Per Question Item — Cognitive Engagement"**.
+6. ✅ Pass if: both places show the new label, no "SCCCES" text visible anywhere in this section.
+
+## B. Bland-Altman Diff (Post−Pre) (3 min)
+
+1. Go to **📈 Inferential Statistics** → the Pre vs Post / method-agreement section.
+2. For **AI Misconceptions**, expand **"📐 Method agreement — Bland-Altman limits of agreement"**.
+3. Open the inner **"Individual differences"** expander — confirm the column header now reads **"Diff (Post−Pre)"**.
+4. Spot-check one row: if a student's Post % was higher than their Pre %, that row's Diff value should now be **positive** (previously it would have shown negative under the old Pre−Post convention).
+5. Read the interpretation sentence above the table — confirm it says something like *"Post scores exceeded pre on average (gain post-intervention)"* when the bias is positive, and the opposite when negative.
+6. Repeat steps 2-5 for **AI Conceptual Inventory (AICI)**.
+7. ✅ Pass if: both instruments show "Diff (Post−Pre)", the sign direction matches what you'd expect from a real improving student, and the interpretation sentence's wording matches the sign.
+
+## C.1 — Groq error fixed, + 2 bugs found during your 2026-08-08 test pass, now fixed (5 min)
+
+1. Go to **🤖 LLM Analysis** (should now be the 3rd tab — see item D).
+2. Pick either **Inductive Thematic Analysis (ITA)** or **Deductive Thematic Analysis (DTA)**.
+3. In the model selection step, select **Groq**, and select at least one data source with available text.
+4. Run a small analysis (1-2 texts is enough to confirm it works — keep it small to control cost/quota).
+5. ✅ Pass if: you do **not** see "Groq API error: No module named 'groq'" — a real result (or a different, unrelated error like a rate limit) means the fix worked.
+6. **Re-test the ITA "sentence-transformers is not installed" crash you hit at Phase 2b (Deduplicating codes):** run an ITA analysis through to completion (any model). Root cause: `sentence-transformers` was present in the last known-good backup's `requirements.txt` but had dropped out of the current repo's — a real regression, now re-added. ✅ Pass if: Phase 2b completes without the `RuntimeError` (first run may take a little longer — it downloads a small ~90MB model from Hugging Face the first time; this repeats after every scheduled redeploy since the container filesystem is ephemeral, which is expected, not a bug).
+7. **Re-test the "counts don't update with the cohort filter" bug you found:** in ITA or DTA Step 1, select a cohort filter, then look at the "Reflections/Interviews/Observer transcripts available" metrics in the next step. ✅ Pass if: the metric labels show the cohort name (e.g. "Reflections available (amherstyouthandrec2D)") and the numbers reflect only that cohort — not the total across everyone. Try switching cohorts or clearing the filter and confirm the counts update each time.
+
+## C.2 — Observer/instructor transcripts (4 min)
+
+1. Go to **Admin Dashboard → Research Operations**.
+2. Scroll past the existing "Interview Transcript Store" — confirm a new **"📂 Observer/Instructor Transcript Store"** section appears below it, with its own upload/list/delete controls.
+3. Upload a small `.txt` test file, assign it a real participant ID, submit.
+4. Confirm it appears in the Observer/Instructor store's table — and confirm it does **not** appear in the Interview Transcript Store's table above it (they should stay separate).
+5. Go back to **Teacher Dashboard → 🤖 LLM Analysis → (ITA) Step 1 — Select Data Source**.
+6. Confirm a third checkbox now exists: **"Observer/instructor transcript(s) (store)"**, and that checking it shows a metric with your uploaded file counted.
+7. Delete your test upload from the Observer/Instructor Transcript Store when done (use "Delete a transcript", not "Clear all" — that would remove real data if any exists).
+8. ✅ Pass if: the new store is genuinely separate from the interview one, your test file shows up and is countable, and you can clean it up afterward with no error.
+
+*(The underlying bug fix — transcripts now actually persisting to the real database instead of silently vanishing on redeploy — was already verified directly via SSH and doesn't need a UI check, but if you want extra confidence: upload a file here, then check back after a few hours to confirm it's still there.)*
+
+## D. Tab order + IRT note (2 min)
+
+1. On the Teacher Dashboard, confirm the top section-selector reads, left to right: **Basic Statistics, Inferential Statistics, LLM Analysis, Competency Progression, IRT Analysis, Report Generation**.
+2. Click into **🔬 IRT Analysis** — confirm a note appears near the top: *"🚧 This section is functional but earmarked for further development."*
+3. ✅ Pass if: the order matches exactly and the note is visible.
+
+---
+
+## E. Cohort tagging for interview/observer transcripts (10 min)
+
+**Purpose:** lets you tag pre-pilot interview/observer transcripts (recorded before the platform existed, with no registered-user record) with a cohort_id, so they can be filtered and reported on by cohort just like the rest of your pilot data.
+
+### E.1 — Cohort selector on upload, re-test (2026-08-09) of 3 bugs you found (5 min)
+
+Your first pass found 3 real bugs here — all fixed now:
+- The "cohort created" success message never appeared (it was being wiped by an immediate rerun before it could paint) — fixed, and the new cohort is now auto-selected in the dropdown too.
+- Changing the bulk "Cohort (applies to all files below)" selector after files were already listed had no effect on the per-file dropdowns (they kept showing "None") — fixed, they now correctly re-sync to the bulk choice.
+- No way to clear the form / start a new batch — added a **"🔄 Clear form"** button, and the uploader now also auto-clears itself after a successful save.
+
+1. Go to **Admin Dashboard → Research Operations → Interview Transcript Store**.
+2. In the upload section, confirm a **bulk "Cohort" selector** appears above the file list, with your existing cohorts as options plus a **"+ Create new cohort…"** choice.
+3. Pick **"+ Create new cohort…"**, type a throwaway test cohort ID (e.g. `TestCohortE`), click **"Create cohort"**. ✅ Pass if: a green success message appears immediately, AND the bulk selector jumps straight to your new cohort (no need to find/reselect it).
+4. Upload 2 small `.txt` test files. Leave participant IDs as suggested. **Now change the bulk "Cohort" selector to something else** (or back to "— none —"). ✅ Pass if: both per-file cohort dropdowns update to match your new bulk choice — you should NOT have to manually re-set each one.
+5. Click **"🔄 Clear form"** without uploading. ✅ Pass if: the file list clears and you can select fresh files (nothing was saved).
+6. Re-select your 2 files, set a cohort, click **"📤 Upload transcripts to store"**. ✅ Pass if: a success message appears AND the uploader is empty again afterward, ready for a new batch without you doing anything.
+7. Confirm the transcript list table now shows a **"Cohort"** column with your chosen cohort for those rows.
+8. Repeat steps 2-7 for **Observer/Instructor Transcript Store** — confirm it works identically and independently (its own bulk selector, its own per-file override, its own Cohort column, its own Clear form button).
+9. ✅ Pass if: all of the above hold for both transcript stores.
+
+### E.2 — Cohort filter in LLM Analysis (3 min)
+
+1. Go to **Teacher Dashboard → 🤖 LLM Analysis**.
+2. In either **ITA Step 1** or **DTA**'s data-source step, confirm a new **"Filter by cohort (optional...)"** multiselect appears below the source checkboxes, listing your existing cohorts (including the test one from E.1).
+3. Select your test cohort — confirm the source counts update to reflect only that cohort's data.
+4. For ITA specifically: advance through the wizard steps and back — confirm the cohort selection is preserved (doesn't reset).
+5. Leave the filter empty and confirm all data (unfiltered) loads as before — this is the "no cohort filter" default and should behave exactly like it did before this update.
+6. ✅ Pass if: the filter narrows results correctly, ITA's selection survives step navigation, and leaving it empty still includes everything (no accidental default-narrowing).
+
+### E.3 — Report Generation shows cohort scope (3 min)
+
+1. Run a small ITA or DTA analysis with your test cohort filter applied (from E.2) — just enough to complete a run.
+2. Go to **Teacher Dashboard → Report Generation → 🤖 LLM Analysis**.
+3. Open the run selector — confirm your new run's label includes the cohort you filtered to (e.g. "... — TestCohortE"), and that older runs from before this update show **"All cohorts"**.
+4. Generate the PDF — confirm the header section includes a **"Cohort scope:"** line matching what you selected.
+5. ✅ Pass if: the run picker and the generated PDF both correctly show which cohort(s) the run covers.
+
+### E.4 — Cohort deletion, new (5 min)
+
+You noticed there was no way to remove a cohort you'd created by mistake — now there is, gated so it can never orphan a reference.
+
+1. Go to **Admin Dashboard → User Management → Cohort Management**.
+2. Confirm a **"Delete a cohort"** section appears below "Create Cohort", with a dropdown of your existing cohorts.
+3. Pick a cohort you know is **still in use** (e.g. `test`/`test2`/whatever you tagged transcripts with earlier) — ✅ pass if a warning shows exactly how many users/transcripts reference it, and **no delete button appears**.
+4. Create a fresh throwaway cohort (e.g. `TestCohortDelete`) via "Create Cohort" above — confirm the success message now appears correctly (this reuses the same fix as the upload-form flash-message bug).
+5. Select it in the "Delete a cohort" dropdown — ✅ pass if it says "unused — safe to delete" and a delete button appears.
+6. Click it — ✅ pass if a success message appears and the cohort is gone from every cohort dropdown in the app (Cohort Management, the upload forms, LLM Analysis's cohort filter).
+7. ✅ Pass if: an in-use cohort is correctly blocked with an accurate count, and an unused one deletes cleanly.
+
+### Cleanup
+
+Delete your `test`/`test2`/`TestCohortE` test transcripts (Interview and Observer stores) using "Delete a transcript", and now also any leftover test cohorts via the new "Delete a cohort" control (E.4) once they're unused — this is all on the disposable `test` environment, so it's optional, but keeps things tidy for later testing.
+
+---
+
+## F. Competency Progression Index — multi-module, multi-instrument, cohort scope (10 min)
+
+You asked for the CPI tab's Step 1 to combine one or more modules' content assessments plus AI Misconceptions/AICI gain, and to show cohort scope. Here's what changed and what to check.
+
+### F.1 — Step 1 configuration (4 min)
+
+1. Go to **Teacher Dashboard → 📉 Competency Progression → Step 1 — Configure**.
+2. Confirm a **"Modules"** multiselect appears (not a single dropdown), defaulting to all your modules selected.
+3. Confirm **3 checkboxes** appear: "Content MCQ" (checked by default), "AI Misconceptions gain (Post−Pre)", "AICI gain (Post−Pre)".
+4. Confirm a **"Cohort scope:"** caption appears, showing whichever cohort(s) your sidebar's Cohort filter is currently set to (or "All cohorts" if none selected). Try changing the sidebar's Cohort filter and confirm this caption updates to match.
+5. ✅ Pass if: all of the above render correctly and the cohort caption tracks the sidebar filter.
+
+### F.2 — Single-module classic behavior still works (2 min)
+
+This confirms nothing broke for your existing single-module workflow.
+
+1. In the Modules multiselect, narrow it down to **exactly one module**, and leave only "Content MCQ" checked.
+2. Confirm the original **CPI_quant method** radio (CTT / IRT Rasch / IRT 2PL / Both) and the module/instrument-key read-only fields reappear — this is the original behavior, unchanged.
+3. Click **"Compute CPI_quant"** — ✅ pass if the results look exactly like they did before this update (same numbers, "CTT"-labeled metrics).
+
+### F.3 — Multi-module / multi-instrument combining (3 min)
+
+1. Select **2 or more modules**, and check **all 3 instrument-type boxes** (Content MCQ + both gain scores).
+2. Confirm the CPI_quant method radio and IRT options **disappear** (replaced by a "Combining: ..." caption listing your selected modules and instrument types) — IRT modeling isn't offered for a pooled multi-instrument selection.
+3. Click **"Compute CPI_quant"** — ✅ pass if it completes with no error, showing "Outcome"-labeled metrics (not "CTT").
+4. Continue to Step 3, score a few reflections, then Step 4 — confirm CPI+ computes and the per-student table populates as before.
+5. ✅ Pass if: switching between single-module and multi-module/multi-instrument selections both work, with no errors either way.
+
+### F.4 — Report Generation shows CPI run scope (2 min)
+
+1. Go to **Teacher Dashboard → Report Generation → v. Competency Progression**.
+2. Confirm a **run picker** now appears above the report options (previously this always silently used your most recent run with no way to choose) — its labels show each run's module/instrument scope.
+3. Generate the PDF — confirm the **Methodology** section describes the actual modules/instruments your selected run used, not a generic fixed description.
+4. ✅ Pass if: you can pick a specific past run, and the report accurately describes what it covers.
+
+---
+
+## G. Registration confirmation + duplicate-account prevention (5 min)
+
+You reported that impatient students would create multiple accounts while waiting for approval. The likely root cause was found and fixed: the "registration successful" message never reliably reached the screen, and the redirect to the Login page silently failed.
+
+1. Log out (or open a private/incognito window) and go to the **Register** page.
+2. Register a throwaway test account (e.g. `TestRegE2E1`).
+3. ✅ Pass if: a clear green banner appears — *"Registration successful for 'TestRegE2E1'! Please wait for Admin approval..."* — AND the page has switched to the **Login** view (not still showing the registration form).
+4. Reload the page — ✅ pass if the banner does **not** reappear (it's a one-time confirmation, not a persistent message).
+5. Try registering the **same username with different capitalization** (e.g. `testrege2e1`) — ✅ pass if it's rejected as already taken (this used to silently succeed as a second, separate account).
+6. Clean up: delete `TestRegE2E1` via Admin Dashboard → User Management once done testing (optional, disposable `test` environment).
+
+---
+
+## H. PDF report table overflow fix, re-test (2 min)
+
+You found this in F.4's CPI report (module_id spilling into the Band column) and independently in the ITA report (Participant filename spilling into Code Name, Description running past the page margin). Root cause was shared by every report — fixed once in the common PDF-building code.
+
+Your re-test of the ITA report then found a **second, separate issue**: the Description column looked cut off mid-sentence with no visible wrapping. That turned out to be unrelated to the wrapping fix — the ITA report's own code was hard-truncating each description to 80 characters before it ever reached the PDF builder, a leftover from before wrapping worked. Fixed by removing that truncation.
+
+1. Regenerate the **CPI+ report** (Report Generation → v. Competency Progression) from a run with a multi-module scope — ✅ pass if the `module_id`/scope column wraps cleanly within its own column, no longer bleeding into Band.
+2. Regenerate an **ITA report** (Report Generation → iv. LLM Analysis) with a transcript that has a long filename/participant ID — ✅ pass if Participant, Code Name, and Description all stay within their own columns and margins, wrapping onto multiple full lines (not cut off) instead of overflowing or truncating.
+3. ✅ Pass if: both reports render cleanly with no column bleed-through and no truncated/cut-off text anywhere in the tables.
+
+---
+
+## I. ITA report — representative quotes cited per theme (2 min)
+
+You pointed out the report wasn't reliably citing significant participant quotes per theme. Found the cause: Phase 6's prompt only asked the LLM to include quotes "where available" in free-flowing prose — a soft request it didn't reliably follow. Fixed by deterministically listing up to 3 attributed, verbatim quotes under each theme in the PDF, independent of what the narrative prose does.
+
+1. Regenerate an **ITA report** (Report Generation → iv. LLM Analysis) from a completed run.
+2. Under each **Theme N: ...** section, confirm a **"Representative quotes:"** block appears below the summary, listing up to 3 verbatim quotes, each attributed to a participant (e.g. `"quote text" — username`).
+3. A theme with no codes carrying a quote should simply show no quotes block (not an error or empty section) — this is expected, not a bug.
+4. ✅ Pass if: quotes are now reliably present (when the underlying data has them) and correctly attributed, for every theme.
+
+---
+
+## J. Data-quality checks (normality, straight-lining, missingness) + exclusion options (15 min)
+
+Your dissertation methodology calls for normality checks (plus other data-quality screens relevant to survey fatigue) before any inferential test. Basic Statistics now surfaces these, and Inferential Statistics lets you optionally exclude flagged participants per criterion before running a test — each with a citation explaining why.
+
+### J.1 — Basic Statistics: Data Quality & Distributional Checks (5 min)
+
+1. Go to **Teacher Dashboard → 📊 Basic Statistics**.
+2. Scroll past **Survey Construct Means** — confirm a new **"🔍 Data Quality & Distributional Checks"** section appears, with 3 expanders.
+3. Open **"📐 Normality checks (Shapiro-Wilk)"** (expanded by default) — confirm a table listing every data source (all 7 modules' Content MCQ, AI Misconceptions Pre/Post, AICI Pre/Post, each Cognitive Engagement/SIMS construct), with columns N, Shapiro W, p-value, Skewness, Kurtosis, Verdict. Groups with n<20 should show "-- exploratory, n<20" in the verdict.
+4. Open **"🚩 Straight-lining (careless-responding flags)"** — confirm a flagged-count metric and a table of flagged (student, survey) pairs, plus a citation (Meade & Craig, 2012) underneath.
+5. Open **"📉 Participation trend across modules (missingness)"** — confirm a table and line chart showing % of cohort participating per module 1-7 (Module 7 will legitimately show near-0%, since it's disabled — not a bug).
+6. Scroll up to **Assessment Scores → Student view** and **Survey Construct Means → By Student (distribution)** — confirm a small normality caption (W, p, skew, kurtosis, verdict) appears under each histogram.
+7. In the sidebar, filter down to a **single student** — confirm the Data Quality section degrades gracefully (shows "too few students to test" or similar), not an error.
+8. ✅ Pass if: all 3 expanders render correctly for every data source, single-student filtering doesn't crash, and the participation-trend chart shows a believable declining/flat pattern.
+
+### J.2 — Basic Statistics PDF report includes data quality (3 min)
+
+1. Go to **Report Generation → i. Basic Statistics**.
+2. Confirm **"Data quality & normality checks"** is included in the section checklist (checked by default).
+3. Generate the PDF — confirm it includes a normality table, straight-lining summary, and missingness trend, matching what you saw live in J.1.
+4. ✅ Pass if: the PDF section renders cleanly with no column overflow or truncation (same fix as Item H).
+
+### J.3 — Inferential Statistics: exclude flagged participants (7 min)
+
+Before each test, you can now optionally exclude participants who fail a data-quality criterion — outliers, excessive missing data, and (for survey instruments only) straight-lining. Each option shows how many participants it would exclude and cites the source for why it matters.
+
+1. Go to **📈 Inferential Statistics → Pre vs Post**. Above the "Computing…" spinner, confirm a **"🧪 Exclude flagged participants before running this test"** expander appears.
+2. Open it — confirm checkboxes for "Exclude outliers" and "Exclude participants with excessive missing data" each show a flagged count and a citation underneath (Osborne & Overbay 2004 / Tabachnick & Fidell for outliers; Little & Rubin / Enders 2010 for missingness).
+3. Check **"Exclude outliers"** — if the count is > 0, confirm a warning appears listing which participant(s) were excluded, and the test result above updates (fewer participants counted, numbers may shift slightly). If the count shows **0 flagged**, that's a legitimate result for that instrument pair — try a different instrument or move to step 4 to see a non-zero case.
+4. Go to **Between Groups** — confirm the same expander appears, scoped to whichever instrument you pick in the dropdown above it.
+5. Go to **Across Modules**, select **"MCQ content knowledge"** — confirm the expander shows **only 2 checkboxes** (outliers, missing data) — no straight-lining option, since MCQ correctness isn't a carelessness signal.
+6. Still in **Across Modules**, switch to **"Survey construct"** — confirm the expander now shows **3 checkboxes**, including "Exclude straight-lining respondents" with the Meade & Craig / Curran citation.
+7. ✅ Pass if: the expander appears in all 3 sections, straight-lining is correctly hidden for MCQ-only comparisons and shown for survey comparisons, and checking a box with a non-zero flagged count visibly changes the test result and shows an audit-trail warning of who was excluded.
+
+### Cleanup
+
+None needed — this section is read-only/diagnostic (no new data is written), and the exclusion checkboxes reset each time you leave the tab.
+
+---
+
+## If anything fails
+
+Note which item failed and what you saw, then let Claude know — don't try to fix anything yourself. This is all on the disposable `test` environment; nothing here touches the real pilot data on `production`.
+
+## Once everything passes
+
+Let Claude know, and production deploy will follow the same sequence already used for every prior batch: fresh production backup → merge `test` → `main` → push → verify live.
