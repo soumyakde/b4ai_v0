@@ -7381,7 +7381,12 @@ Source: Basics4AI programme instrument.
 **AI-CI — AI Conceptual Inventory (20-item)**
 MCQ assessment of AI conceptual understanding across classification,
 decision trees, supervised/unsupervised learning, bias, and prediction.
-See Appendix 1 of the published instrument for full item listings.
+Adapted from **Zhang, Perry & Lee (2024/2025)**'s published *AI Literacy
+Concept Inventory* -- their own instrument uses the same "AI-CI"
+abbreviation and covers closely matching topics (AI general concepts,
+logic systems, machine learning general concepts, supervised learning),
+validated with 981 middle-school students. See Appendix 1 of the
+published instrument for full item listings.
         """)
 
     st.divider()
@@ -7455,6 +7460,31 @@ See Appendix 1 of the published instrument for full item listings.
                 "*Journal of Personality and Social Psychology, 57*(5), 749–761."
             ),
             "note": "Source of the Relative Autonomy Index (RAI) formula used in the Correlations tab -- not the SIMS paper above, which does not itself present this formula.",
+        },
+        {
+            "section": "Instruments",
+            "tag": "AI-CI", "color": "#E6F3FB", "border": "#0077BB",
+            "citation": (
+                "Zhang, H., Perry, A., & Lee, I. (2025). Developing and "
+                "Validating the Artificial Intelligence Literacy Concept "
+                "Inventory: an Instrument to Assess Artificial Intelligence "
+                "Literacy among Middle School Students. *International "
+                "Journal of Artificial Intelligence in Education, 35*(1), "
+                "398–438. https://doi.org/10.1007/s40593-024-00398-x"
+            ),
+            "note": "Source instrument for AI-CI (20-item MCQ) -- their own instrument is likewise abbreviated \"AI-CI\", validated with 981 middle-school students.",
+        },
+        {
+            "section": "Instruments",
+            "tag": "Design ethics", "color": "#E6F3FB", "border": "#0077BB",
+            "citation": (
+                "DiPaola, D., Payne, B. H., & Breazeal, C. (2020). Decoding "
+                "Design Agendas: An Ethical Design Activity for Middle "
+                "School Students. *Proceedings of the Interaction Design "
+                "and Children Conference (IDC '20)*, 1–10. "
+                "https://doi.org/10.1145/3392063.3394396"
+            ),
+            "note": "Provided by the researcher as related AI-ethics-education context; not the direct source of AIM-F, which is an original Basics4AI-programme instrument.",
         },
         # ── Descriptive & Data-Quality Checks ──────────────────────────
         {
