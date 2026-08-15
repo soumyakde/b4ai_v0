@@ -321,6 +321,15 @@ A new **"🔗 Correlations"** tab now sits right after Inferential Statistics. I
 5. Open **"ℹ️ What do these numbers mean?"** and confirm it references Bakdash & Marusich (2017) for rmcorr, Cohen (1988) for the effect-size labels (including the caveat that these are rough, domain-independent benchmarks), and Benjamini & Hochberg (1995) for FDR.
 6. ✅ Pass if: results render with effect-size labels, both uncorrected and FDR-corrected p-values shown side by side (nothing is silently hidden).
 
+### L.5 — Correlations Report (Report Generation tab) (8 min)
+
+1. Switch to the **"📄 Report Generation"** tab (top-level tab, not the Correlations tab).
+2. Click the **"vi. Correlations"** option in the Report section radio (between "v. Competency Progression" and "vii. Full Programme Report" — note Full Programme Report and Instruments & References have shifted to vii/viii to make room).
+3. Confirm all 4 section checkboxes are pre-selected: Reliability & Redundancy, Composite Correlation Matrix, Mixed-Effects Model, Repeated-Measures Correlations.
+4. Click **"📄 Generate Correlations PDF"**. Confirm it completes (may take up to ~30 seconds) with no error, and a **"⬇️ Download Correlations Report (PDF)"** button appears with a green "PDF ready" message.
+5. Download and open the PDF. Confirm it includes: a reliability table for both SCCCES and SIMS; an inter-sub-construct correlation matrix for both surveys; a mixed-effects model block-comparison table plus coefficients tables for the BIC-best and AIC-best blocks (using the full default predictor set — all 4 composites + RAI + Amotivation, not just 1-2); a repeated-measures correlations table with effect-size labels.
+6. ✅ Pass if: the PDF generates without error and contains real numbers (not blank/placeholder sections) for all 4 phases, using the full predictor set rather than requiring you to have run the live Correlations tab first.
+
 ### Cleanup
 
 None needed — read-only/diagnostic. The saved composite definitions (L.2) persist only for your current session.

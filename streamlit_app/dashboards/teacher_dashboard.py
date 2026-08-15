@@ -7272,8 +7272,9 @@ def _render_report_tab(
             "iii. IRT Analysis",
             "iv. LLM Analysis",
             "v. Competency Progression",
-            "vi. Full Programme Report",
-            "vii. Instruments & References",
+            "vi. Correlations",
+            "vii. Full Programme Report",
+            "viii. Instruments & References",
         ],
         horizontal=True,
         key="report_section_radio",
@@ -7284,8 +7285,9 @@ def _render_report_tab(
         "iii. IRT Analysis":         ("#009E73", "#E6F7F1"),
         "iv. LLM Analysis":          ("#CC79A7", "#F9EEF5"),
         "v. Competency Progression": ("#888888", "#F0F0F0"),
-        "vi. Full Programme Report":       ("#333333", "#F5F5F5"),
-        "vii. Instruments & References":   ("#56B4E9", "#E8F4FB"),
+        "vi. Correlations":                ("#D55E00", "#FDECE3"),
+        "vii. Full Programme Report":      ("#333333", "#F5F5F5"),
+        "viii. Instruments & References":  ("#56B4E9", "#E8F4FB"),
     }
     _rc, _rbg = _RS_COLORS.get(rep_section, ("#333","#F8F8F8"))
     st.markdown(
@@ -7311,23 +7313,26 @@ def _render_report_tab(
     elif rep_section == "v. Competency Progression":
         _report_cpi(canonical_df)
 
-    elif rep_section == "vi. Full Programme Report":
+    elif rep_section == "vi. Correlations":
+        _report_correlations(canonical_df)
+
+    elif rep_section == "vii. Full Programme Report":
         _report_full_programme(
             canonical_df, demographics_df, cohort_map, username
         )
 
-    elif rep_section == "vii. Instruments & References":
+    elif rep_section == "viii. Instruments & References":
         _report_instruments_references()
 
 
 
 # -----------------------------------------------------------------------
-# vii. Instruments & References
+# viii. Instruments & References
 # -----------------------------------------------------------------------
 
 def _report_instruments_references() -> None:
     """Instruments used and full references for Basics4AI scales."""
-    st.markdown("### vii. Instruments & References")
+    st.markdown("### viii. Instruments & References")
     st.caption(
         "Full citations for all adapted instruments used in the Basics4AI "
         "programme evaluation. Cite these sources when reporting survey results."
@@ -8372,7 +8377,238 @@ def _report_llm() -> None:
 
 
 # -----------------------------------------------------------------------
-# vi. Full Programme Report
+# vi. Correlations report
+# -----------------------------------------------------------------------
+
+def _report_correlations(canonical_df: pd.DataFrame) -> None:
+    st.markdown("### vi. Correlations Report")
+    st.caption(
+        "Generates a PDF covering reliability screening, composite/RAI "
+        "correlation matrices, the person-mean-centered mixed-effects "
+        "model, and repeated-measures correlations — the same 4-phase "
+        "methodology as the live Correlations tab, recomputed fresh from "
+        "the current filtered dataset. Uses the default composite "
+        "grouping and the full predictor set (all composites + RAI + "
+        "Amotivation) rather than requiring you to re-select predictors "
+        "here; adjust and preview interactively in the Correlations tab "
+        "first if you want a narrower report."
+    )
+
+    _CORR_RPT_OPTIONS = [
+        "Reliability & Redundancy", "Composite Correlation Matrix",
+        "Mixed-Effects Model", "Repeated-Measures Correlations",
+    ]
+    corr_rpt_selected = st.multiselect(
+        "Include sections:",
+        options=_CORR_RPT_OPTIONS,
+        default=_CORR_RPT_OPTIONS,
+        key="rpt_corr_multiselect",
+    )
+
+    if st.button("📄 Generate Correlations PDF", key="rpt_corr_gen", type="primary"):
+        corr_sel = st.session_state.get("rpt_corr_multiselect", _CORR_RPT_OPTIONS)
+        inc_rel = "Reliability & Redundancy" in corr_sel
+        inc_mat = "Composite Correlation Matrix" in corr_sel
+        inc_mm  = "Mixed-Effects Model" in corr_sel
+        inc_rmc = "Repeated-Measures Correlations" in corr_sel
+
+        with st.spinner("Running correlational analyses and building PDF…"):
+            sections = [{
+                "heading": "Correlations Report",
+                "body": (
+                    "Does cognitive engagement or motivation relate to "
+                    "assessment performance? α = 0.05; FDR "
+                    "(Benjamini-Hochberg) applied where multiple "
+                    "predictors are tested together."
+                ),
+            }]
+
+            sccces_key = _CORR_SURVEY_KEYS["Cognitive Engagement (SCCCES)"]
+            sims_key = _CORR_SURVEY_KEYS["Interest & Motivation (SIMS)"]
+            composite_map = {k: list(v) for k, v in DEFAULT_SCCCES_COMPOSITE_MAP.items()}
+
+            if inc_rel:
+                for survey_label, survey_key in _CORR_SURVEY_KEYS.items():
+                    try:
+                        rel = compute_construct_reliability(canonical_df, survey_key)
+                        if rel.empty:
+                            continue
+                        rel_display = rel[[
+                            "construct", "n_items", "n_subjects", "method", "value", "badge",
+                        ]].rename(columns={
+                            "construct": "Sub-construct", "n_items": "N items",
+                            "n_subjects": "N students", "method": "Method",
+                            "value": "Reliability", "badge": "Verdict",
+                        })
+                        sections.append({
+                            "heading": f"Reliability — {survey_label}",
+                            "body": (
+                                "3+ items: Cronbach's alpha. Exactly 2 items: "
+                                "Spearman-Brown step-up (Eisinga, Te Grotenhuis "
+                                "& Pelzer, 2013, International Journal of "
+                                "Public Health, 58(4), 637-642) — raw alpha is "
+                                "not appropriate at n=2. 1 item: not "
+                                "estimable, shown as a limitation, not hidden."
+                            ),
+                            "table": rel_display,
+                        })
+                    except Exception as e:
+                        sections.append({"heading": f"Reliability — {survey_label}", "body": f"Could not compute: {e}"})
+
+            if inc_mat:
+                for survey_label, survey_key in _CORR_SURVEY_KEYS.items():
+                    try:
+                        mat = compute_inter_construct_correlation_matrix(canonical_df, survey_key)
+                        if mat.get("error"):
+                            continue
+                        sections.append({
+                            "heading": f"Inter-Sub-Construct Correlation Matrix — {survey_label}",
+                            "body": (
+                                "Highly correlated sub-constructs are "
+                                "candidates for combining into one composite. "
+                                "Heddy et al. (2018, Frontiers in Education, "
+                                "3:43) found via their own EFA (N=513) that "
+                                "SCCCES's 4 message-appraisal sub-constructs "
+                                "collapse into a single empirical factor — "
+                                "the default composite grouping below "
+                                "follows that finding."
+                            ),
+                            "table": mat["matrix"].round(3).reset_index(),
+                        })
+                    except Exception as e:
+                        sections.append({"heading": f"Correlation Matrix — {survey_label}", "body": f"Could not compute: {e}"})
+
+            # Shared predictor set (all composites + RAI + Amotivation),
+            # built once and reused by both Mixed-Effects Model and
+            # Repeated-Measures Correlations below, mirroring how the
+            # live tab builds predictor_frames per section.
+            long_df = None
+            predictor_frames: Dict[str, pd.DataFrame] = {}
+            if inc_mm or inc_rmc:
+                predictor_options = list(composite_map.keys()) + ["RAI", "Amotivation"]
+                for pred in predictor_options:
+                    try:
+                        if pred == "RAI":
+                            predictor_frames["RAI"] = compute_rai(canonical_df, sims_key)
+                        elif pred == "Amotivation":
+                            cm = compute_construct_means(canonical_df, instrument_keys=[
+                                k for k in canonical_df["instrument_key"].unique()
+                                if k == sims_key or str(k).endswith("_" + sims_key)
+                            ])
+                            predictor_frames["Amotivation"] = cm[cm["construct"] == "amotivation"][
+                                ["user_id", "module_id", "mean_score"]
+                            ]
+                        else:
+                            comp = compute_composite_scores(canonical_df, sccces_key, {pred: composite_map[pred]})
+                            predictor_frames[pred] = comp[comp["composite"] == pred]
+                    except Exception:
+                        pass
+                if predictor_frames:
+                    try:
+                        long_df = build_person_module_dataset(canonical_df, predictor_frames)
+                    except Exception:
+                        long_df = None
+
+            if inc_mm:
+                if long_df is None or long_df.empty:
+                    sections.append({"heading": "Mixed-Effects Model", "body": "No complete cases available for the current filters."})
+                else:
+                    try:
+                        preds = list(predictor_frames.keys())
+                        centered = person_mean_center(long_df, preds)
+                        mm = run_mixed_model(centered, "pct_correct", within_cols=preds, between_cols=preds)
+                        if mm.get("error"):
+                            sections.append({"heading": "Mixed-Effects Model", "body": f"Could not compute: {mm['error']}"})
+                        else:
+                            bic_name = mm.get("best_block_by_bic")
+                            aic_name = mm.get("best_block_by_aic")
+                            block_rows = [
+                                {"Block": name, "AIC": _fmt_stat(b.get("aic")),
+                                 "BIC": _fmt_stat(b.get("bic")), "Converged": b.get("converged"),
+                                 "N obs": b.get("n_obs")}
+                                for name, b in mm["blocks"].items()
+                            ]
+                            sections.append({
+                                "heading": "Mixed-Effects Model — Block Comparison",
+                                "body": (
+                                    f"{mm['small_sample_caveat']}\n"
+                                    f"Best model by BIC (Schwarz, 1978): {bic_name}  |  "
+                                    f"Best model by AIC (Akaike, 1974): {aic_name}"
+                                ),
+                                "table": pd.DataFrame(block_rows),
+                            })
+                            for best_name in {bic_name, aic_name}:
+                                if not best_name:
+                                    continue
+                                reml_name = f"{best_name}_reml"
+                                block = mm["blocks"].get(reml_name) or mm["blocks"].get(best_name)
+                                if block and block.get("params"):
+                                    coef_rows = [
+                                        {"Term": term, "Estimate": _fmt_stat(p["estimate"]),
+                                         "SE": _fmt_stat(p["se"]), "z": _fmt_stat(p.get("z")),
+                                         "p": _fmt_stat(p.get("p"), 6)}
+                                        for term, p in block["params"].items()
+                                    ]
+                                    sections.append({
+                                        "heading": f"Coefficients — {reml_name if mm['blocks'].get(reml_name) else best_name}",
+                                        "body": "",
+                                        "table": pd.DataFrame(coef_rows),
+                                    })
+                            if mm.get("vif"):
+                                sections.append({
+                                    "heading": "Variance Inflation Factors",
+                                    "body": "VIF > 5-10 suggests problematic multicollinearity between predictors.",
+                                    "table": pd.DataFrame([{"Term": k, "VIF": _fmt_stat(v, 2)} for k, v in mm["vif"].items()]),
+                                })
+                    except Exception as e:
+                        sections.append({"heading": "Mixed-Effects Model", "body": f"Could not compute: {e}"})
+
+            if inc_rmc:
+                if long_df is None or long_df.empty:
+                    sections.append({"heading": "Repeated-Measures Correlations", "body": "No complete cases available for the current filters."})
+                else:
+                    try:
+                        preds = list(predictor_frames.keys())
+                        rmc = run_repeated_measures_correlations(long_df, "pct_correct", preds)
+                        if rmc.get("error") or not rmc.get("fdr"):
+                            sections.append({"heading": "Repeated-Measures Correlations", "body": "No results — check that predictors have enough complete cases."})
+                        else:
+                            rows = [
+                                {"Predictor": r["predictor"], "r": _fmt_stat(r.get("r")),
+                                 "Effect size": r.get("effect_size_label", "—"),
+                                 "N students": r.get("n_subjects"),
+                                 "p (uncorrected)": _fmt_stat(r.get("p_unc"), 4),
+                                 "p (FDR-corrected)": _fmt_stat(r.get("p_fdr"), 4),
+                                 "Significant (FDR)": "Yes" if r.get("reject_fdr") else "No"}
+                                for r in rmc["fdr"]
+                            ]
+                            sections.append({
+                                "heading": "Repeated-Measures Correlations",
+                                "body": (
+                                    "Bakdash, J. Z., & Marusich, L. R. (2017). "
+                                    "Repeated measures correlation. Frontiers "
+                                    "in Psychology, 8:456. FDR "
+                                    "(Benjamini-Hochberg, 1995) applied across "
+                                    "this predictor set."
+                                ),
+                                "table": pd.DataFrame(rows),
+                            })
+                    except Exception as e:
+                        sections.append({"heading": "Repeated-Measures Correlations", "body": f"Could not compute: {e}"})
+
+            pdf_bytes = _build_pdf(sections, "Correlations Report")
+            st.download_button(
+                "⬇️ Download Correlations Report (PDF)",
+                data=pdf_bytes,
+                file_name="b4ai_correlations.pdf",
+                mime="application/pdf",
+                key="rpt_corr_dl",
+            )
+            st.success("PDF ready.")
+
+
+# -----------------------------------------------------------------------
+# vii. Full Programme Report
 # -----------------------------------------------------------------------
 
 def _report_full_programme(
@@ -8381,7 +8617,7 @@ def _report_full_programme(
     cohort_map: dict,
     username: str,
 ) -> None:
-    st.markdown("### vi. Full Programme Report")
+    st.markdown("### vii. Full Programme Report")
     st.caption(
         "Generates a single PDF combining all available analysis sections. "
         "Run each analysis tab first to populate all sections."
