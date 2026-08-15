@@ -787,6 +787,10 @@ def run_repeated_measures(
                 "Repeated-measures tests (Friedman / RM-ANOVA) require 3+ "
                 "time points."
             )
+            # Not a computation failure -- a normal navigational redirect.
+            # _render_result_card() shows this as guidance (st.info), not
+            # a red "Could not compute" error.
+            result["error_is_guidance"] = True
             return result
 
         # Sort columns by module number for logical ordering

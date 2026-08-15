@@ -1998,7 +1998,10 @@ def _render_bland_altman_expander(
 def _render_result_card(result: dict, score_label: str = "% Correct") -> None:
     """Render a single test result as a clean card with source table and means."""
     if result.get("error"):
-        st.error(f"Could not compute: {result['error']}")
+        if result.get("error_is_guidance"):
+            st.info(f"ℹ️ {result['error']}")
+        else:
+            st.error(f"Could not compute: {result['error']}")
         return
 
     # ── Data-driven test recommendation (Task K) ────────────────────────
