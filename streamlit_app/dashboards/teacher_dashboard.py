@@ -1764,6 +1764,61 @@ _STAT_HELP = {
         "sampling variability rather than a true effect. Both the p-value "
         "and the effect size (Cohen's d / η² / Kendall's W) must be considered together."
     ),
+    "levene": (
+        "**Levene's Test — Homogeneity of Variance**\n\n"
+        "The ANOVA/independent t-test's *other* core assumption, beyond "
+        "normality: that each group's scores are spread out by roughly "
+        "the same amount. This app uses the Brown-Forsythe variant "
+        "(centered on each group's median, not mean) — more robust when "
+        "a group's scores aren't perfectly normal either.\n\n"
+        "A significant result (p < 0.05) means variances differ meaningfully "
+        "across groups — the standard ANOVA/t-test can become unreliable, "
+        "and Welch's t-test (2 groups) or Kruskal-Wallis (3+ groups) is "
+        "the safer choice."
+    ),
+    "ttest_ind": (
+        "**Independent-Samples t-test**\n\n"
+        "Tests whether the *average* score differs between two independent "
+        "groups (e.g. two cohorts, or two grades) — the two-group companion "
+        "to one-way ANOVA. Assumes each group's scores are roughly normally "
+        "distributed and similarly spread out (see Levene's test).\n\n"
+        "**Important:** A significant p-value does not tell you *how big* "
+        "the difference is — always read Cohen's d alongside it."
+    ),
+    "mann_whitney": (
+        "**Mann-Whitney U Test**\n\n"
+        "A non-parametric companion to the independent-samples t-test — "
+        "compares two independent groups without assuming their scores "
+        "follow a normal distribution. Appropriate for small samples or "
+        "ordinal data. If both the t-test and Mann-Whitney U are "
+        "significant, the result is more credible."
+    ),
+    "rm_anova": (
+        "**RM-ANOVA — Repeated-Measures ANOVA**\n\n"
+        "The parametric alternative to the Friedman test — tests whether "
+        "scores change significantly across 3+ time points (e.g. modules) "
+        "for the *same* students, using the actual score values rather than "
+        "ranks. More statistically powerful than Friedman when its "
+        "assumptions hold: normality at each time point, *and* sphericity "
+        "(see below) across all the pairwise differences.\n\n"
+        "When sphericity is violated, prefer the Greenhouse-Geisser "
+        "corrected p-value over the uncorrected one."
+    ),
+    "sphericity": (
+        "**Mauchly's Test — Sphericity**\n\n"
+        "RM-ANOVA's own extra assumption, beyond normality: that the "
+        "variance of the *differences* between every pair of time points "
+        "is roughly equal (e.g. Module1−Module2 varies about as much as "
+        "Module1−Module4). A significant result (p < 0.05) means this "
+        "doesn't hold — the Greenhouse-Geisser correction shrinks the "
+        "degrees of freedom to compensate, giving a more conservative, "
+        "trustworthy p-value.\n\n"
+        "**Caveat with small samples:** Mauchly's test itself has low power "
+        "at low n and can fail to detect a real violation — with this "
+        "pilot's typical per-module sample sizes, prefer the "
+        "Greenhouse-Geisser corrected p-value regardless of what Mauchly's "
+        "test reports."
+    ),
 }
 
 _IRT_HELP = {
@@ -1946,6 +2001,16 @@ def _render_result_card(result: dict, score_label: str = "% Correct") -> None:
         st.error(f"Could not compute: {result['error']}")
         return
 
+    # ── Data-driven test recommendation (Task K) ────────────────────────
+    # Computed inside the run_* function itself from the live, currently-
+    # filtered data -- both parametric and non-parametric results still
+    # render in full below, this is advisory, not a gate.
+    if result.get("recommended_test"):
+        st.success(
+            f"✅ **Recommended:** {result['recommended_test']}  \n"
+            f"{result.get('recommendation_rationale', '')}"
+        )
+
     sig       = result.get("significant", False)
     alpha     = result.get("alpha", 0.05)
     sig_badge = "✅ Significant" if sig else "— Not significant"
@@ -2039,12 +2104,52 @@ def _render_result_card(result: dict, score_label: str = "% Correct") -> None:
     # ONE-WAY ANOVA (Between Groups) — TC26
     # ================================================================
     elif "f_stat" in result:
-        cols = st.columns(4)
-        cols[0].metric("F statistic",   f"{result['f_stat']:.4f}")
-        cols[1].metric("ANOVA p-value", f"{result['anova_p']:.4f}  {sig_badge}")
-        cols[2].metric("η² (eta²)",
-                       f"{result['eta_squared']:.4f} ({result['effect_size_label']})")
-        cols[3].metric("Kruskal-Wallis p", f"{result['kruskal_p']:.4f}")
+        _two_group = result.get("n_groups") == 2 and "t_stat" in result
+        if _two_group:
+            cols = st.columns(4)
+            cols[0].metric("t statistic", f"{result['t_stat']:.4f}")
+            cols[1].metric("Independent t-test p-value",
+                           f"{result['t_p_value']:.4f}  {sig_badge}")
+            cols[2].metric("Cohen's d", f"{result['cohens_d_indep']:.3f}")
+            cols[3].metric("Mann-Whitney U p", f"{result['mannwhitney_p']:.4f}")
+            st.caption(
+                f"ANOVA/Kruskal-Wallis (equivalent for 2 groups): "
+                f"F={result['f_stat']:.4f}, p={result['anova_p']:.4f}  |  "
+                f"Kruskal-Wallis p={result['kruskal_p']:.4f}"
+            )
+            if result.get("welch_t_p") is not None:
+                st.caption(
+                    f"Welch's t-test (unequal variances): "
+                    f"t={result['welch_t_stat']}, p={result['welch_t_p']:.4f}"
+                )
+        else:
+            cols = st.columns(4)
+            cols[0].metric("F statistic",   f"{result['f_stat']:.4f}")
+            cols[1].metric("ANOVA p-value", f"{result['anova_p']:.4f}  {sig_badge}")
+            cols[2].metric("η² (eta²)",
+                           f"{result['eta_squared']:.4f} ({result['effect_size_label']})")
+            cols[3].metric("Kruskal-Wallis p", f"{result['kruskal_p']:.4f}")
+
+        # ── Normality + variance homogeneity (live data) ────────────────
+        gnorm  = result.get("group_normality", {})
+        levene = result.get("levene")
+        if gnorm or levene:
+            with st.expander("📐 Assumption checks (normality + Levene's)", expanded=False):
+                if gnorm:
+                    _ndf = pd.DataFrame([
+                        {"Group": g, "N": v.get("n"), "Shapiro W": v.get("statistic"),
+                         "p-value": v.get("p_value"), "Verdict": v.get("verdict")}
+                        for g, v in gnorm.items()
+                    ])
+                    st.dataframe(_ndf, hide_index=True, width="stretch")
+                if levene and levene.get("error") is None:
+                    st.caption(
+                        f"Levene's test (variance homogeneity): "
+                        f"statistic={levene.get('statistic')}, "
+                        f"p={levene.get('p_value')} — {levene.get('verdict')}"
+                    )
+                elif levene and levene.get("error"):
+                    st.caption(f"Levene's test: {levene['error']}")
 
         # ── Means by group ────────────────────────────────────────────
         gm = result.get("group_means", {})
@@ -2103,6 +2208,34 @@ def _render_result_card(result: dict, score_label: str = "% Correct") -> None:
                        f"{result['kendalls_w']:.4f} ({result['effect_size_label']})")
         cols[3].metric("N subjects",  str(result.get("n_subjects", "")))
 
+        # ── Parametric RM-ANOVA + sphericity (Task K) ───────────────────
+        rm = result.get("rm_anova")
+        if rm:
+            cols_rm = st.columns(4)
+            cols_rm[0].metric("RM-ANOVA F", f"{rm['f_stat']:.4f}")
+            cols_rm[1].metric("p (uncorrected)", f"{rm['p_unc']:.4f}")
+            if rm.get("p_gg_corr") is not None:
+                cols_rm[2].metric("p (Greenhouse-Geisser)", f"{rm['p_gg_corr']:.4f}")
+            else:
+                cols_rm[2].metric("p (Greenhouse-Geisser)", "—")
+            cols_rm[3].metric(
+                "Generalized η²",
+                f"{rm['eta_sq_gen']:.4f}" if rm.get("eta_sq_gen") is not None else "—",
+            )
+            if rm.get("p_spher") is not None:
+                _sph_verdict = (
+                    "sphericity holds" if rm["sphericity"]
+                    else "sphericity VIOLATED — prefer the GG-corrected p above"
+                )
+                st.caption(
+                    f"Mauchly's test: W={rm['w_spher']}, p={rm['p_spher']} "
+                    f"— {_sph_verdict}."
+                )
+            else:
+                st.caption("Only 2 time points — sphericity not applicable.")
+        elif result.get("rm_anova_error"):
+            st.caption(f"RM-ANOVA unavailable: {result['rm_anova_error']}")
+
         # ── RM ANOVA-style source table ───────────────────────────────
         _n   = result.get("n_subjects", 0)
         _tp  = result.get("time_points", [])
@@ -2133,8 +2266,9 @@ def _render_result_card(result: dict, score_label: str = "% Correct") -> None:
                     column_config={c: st.column_config.Column(c, width="small")
                                    for c in _rm_tbl.columns})
                 st.caption(
-                    "SS and MS are approximated from Friedman χ² and Kendall's W. "
-                    "The Friedman test is non-parametric — treat these as indicative."
+                    "SS and MS are approximated from Friedman χ² and Kendall's W "
+                    "(distinct from the real RM-ANOVA metrics above, when available). "
+                    "The Friedman test is non-parametric — treat this table as indicative."
                 )
 
         # ── Means by module / time-point ──────────────────────────────
@@ -2159,13 +2293,25 @@ def _render_result_card(result: dict, score_label: str = "% Correct") -> None:
             st.divider()
             st.markdown(_STAT_HELP["paired_t"])
         elif "f_stat" in result:
-            st.markdown(_STAT_HELP["eta_squared"])
+            if result.get("n_groups") == 2 and "t_stat" in result:
+                st.markdown(_STAT_HELP["ttest_ind"])
+                st.divider()
+                st.markdown(_STAT_HELP["mann_whitney"])
+            else:
+                st.markdown(_STAT_HELP["eta_squared"])
+                st.divider()
+                st.markdown(_STAT_HELP["kruskal_wallis"])
             st.divider()
-            st.markdown(_STAT_HELP["kruskal_wallis"])
+            st.markdown(_STAT_HELP["levene"])
         elif "friedman_stat" in result:
             st.markdown(_STAT_HELP["friedman"])
             st.divider()
             st.markdown(_STAT_HELP["kendalls_w"])
+            if result.get("rm_anova"):
+                st.divider()
+                st.markdown(_STAT_HELP["rm_anova"])
+                st.divider()
+                st.markdown(_STAT_HELP["sphericity"])
         st.divider()
         st.markdown(_STAT_HELP["p_value"])
 
@@ -2418,12 +2564,6 @@ def _render_inferential_tab(
             key="inf_pair_select",
         )
 
-        show_wilcoxon = st.checkbox(
-            "Show Wilcoxon signed-rank test",
-            value=False,
-            key="inf_wilcoxon_toggle",
-        )
-
         pair_map = {
             "AI Misconceptions": (
                 "precourse_pre_ai_misconceptions_assessment",
@@ -2444,7 +2584,7 @@ def _render_inferential_tab(
             r = run_paired_comparison(
                 _pp_canonical, pre_key, post_key,
                 alpha=0.05,
-                include_wilcoxon=show_wilcoxon,
+                include_wilcoxon=True,
                 use_pct=True,
             )
         _render_result_card(r, score_label="% Correct")
@@ -7103,7 +7243,9 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                 ]
                 for label, pre_k, post_k in pairs:
                     try:
-                        r = run_paired_comparison(canonical_df, pre_k, post_k, alpha=0.05)
+                        r = run_paired_comparison(
+                            canonical_df, pre_k, post_k, alpha=0.05, include_wilcoxon=True,
+                        )
                         if r.get("error"):
                             continue
                         sections.append({
@@ -7114,7 +7256,8 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                                 f"Difference: {r['mean_diff']:+.2f}\n"
                                 f"Cohen's d = {r['cohens_d']:.3f} ({r['effect_size_label']})  |  "
                                 f"p = {r['t_p_value']:.4f}  |  "
-                                f"{'Significant' if r['significant'] else 'Not significant'} at α=0.05"
+                                f"{'Significant' if r['significant'] else 'Not significant'} at α=0.05\n"
+                                f"Recommended: {r.get('recommended_test', '—')}"
                             ),
                         })
                     except Exception:
@@ -7140,7 +7283,9 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                                     f"F = {r['f_stat']:.3f}  |  "
                                     f"η² = {r['eta_squared']:.4f} ({r['effect_size_label']})  |  "
                                     f"p = {r['anova_p']:.4f}  |  "
-                                    f"Kruskal-Wallis p = {r['kruskal_p']:.4f}"
+                                    f"Kruskal-Wallis p = {r['kruskal_p']:.4f}\n"
+                                    f"Levene's (variance homogeneity): {r.get('levene', {}).get('verdict', '—')}\n"
+                                    f"Recommended: {r.get('recommended_test', '—')}"
                                 ),
                             })
                         except Exception:
@@ -7188,12 +7333,19 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                             {"Module": k, "Mean % Correct": round(v, 2)}
                             for k, v in sorted(mbt.items())
                         ]) if mbt else None
+                        _rm = r.get("rm_anova")
+                        _rm_line = (
+                            f"  |  RM-ANOVA p(GG) = {_rm['p_gg_corr']:.4f}" if _rm and _rm.get("p_gg_corr") is not None
+                            else f"  |  RM-ANOVA p = {_rm['p_unc']:.4f}" if _rm
+                            else ""
+                        )
                         sections.append({
                             "heading": "Across Modules — MCQ Content Knowledge",
                             "body":    (
                                 f"Friedman χ² = {r['friedman_stat']:.4f}  |  "
                                 f"p = {r['p_value']:.4f}  |  "
-                                f"Kendall's W = {r['kendalls_w']:.4f} ({r['effect_size_label']})"
+                                f"Kendall's W = {r['kendalls_w']:.4f} ({r['effect_size_label']}){_rm_line}\n"
+                                f"Recommended: {r.get('recommended_test', '—')}"
                             ),
                             "table":   mbt_df,
                             "caption": "Mean % correct per module across all students.",
@@ -7227,6 +7379,7 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                                 "Kendall's W":  f"{r['kendalls_w']:.4f}",
                                 "Effect":       r["effect_size_label"],
                                 "Significant":  "Yes" if r["significant"] else "No",
+                                "Recommended":  r.get("recommended_test", "—"),
                             })
                         except Exception:
                             pass

@@ -21,10 +21,14 @@ assess_group_normality(df, value_col, group_cols)
     Runs assess_normality() once per group (e.g. per instrument, or per
     instrument+construct).
 
-recommend_test_family(verdict, paired=False, n_groups=2)
+recommend_test_family(verdict, paired=False, n_groups=2, repeated_measures=False)
     Advisory only -- maps a normality verdict to the matching
     inferential_tests.py test family. Does not gate/replace the existing
     "always show both parametric and non-parametric" behavior.
+
+assess_variance_homogeneity(df, value_col, group_col, center="median")
+    Levene's test (Brown-Forsythe by default) for equal variances across
+    2+ groups -- the ANOVA/independent-t-test's other core assumption.
 
 detect_straight_lining(canonical_df, min_items=3)
     Per (user_id, instrument_key) survey pair, flags identical raw
@@ -216,6 +220,94 @@ def recommend_test_family(
         "Independent t-test (run_between_groups)" if is_normal
         else "Mann-Whitney U (run_between_groups, non-parametric)"
     )
+
+
+# -----------------------------------------------------------------------
+# Public function 3b: assess_variance_homogeneity
+# -----------------------------------------------------------------------
+
+def assess_variance_homogeneity(
+    df: pd.DataFrame,
+    value_col: str,
+    group_col: str,
+    center: str = "median",
+) -> dict:
+    """
+    Levene's test for homogeneity of variance across 2+ groups -- the
+    other core assumption (beyond normality) for ANOVA / independent
+    t-test comparisons.
+
+    center="median" (the Brown-Forsythe variant) is the default -- more
+    robust to non-normality within the groups themselves than
+    center="mean", which matters here since this is often run alongside
+    a normality check that may already show a violation.
+
+    Parameters
+    ----------
+    df        : pd.DataFrame -- one row per student, must contain
+                value_col and group_col.
+    value_col : str -- column to test (e.g. "score", "pct_correct").
+    group_col : str -- grouping column (e.g. "grade", "cohort_id").
+    center    : str -- passed to scipy.stats.levene ("median"/"mean"/"trimmed").
+
+    Returns
+    -------
+    dict: group_col, groups, n_per_group, variances, statistic,
+          p_value, verdict, low_n_warning, error
+    """
+    result = {
+        "group_col": group_col, "groups": [], "n_per_group": {},
+        "variances": {}, "statistic": None, "p_value": None,
+        "verdict": None, "low_n_warning": False, "error": None,
+    }
+
+    sub = df[[value_col, group_col]].dropna()
+    groups_data = {
+        str(g): grp[value_col].astype(float).to_numpy()
+        for g, grp in sub.groupby(group_col, sort=False)
+    }
+
+    if len(groups_data) < 2:
+        result["error"] = "Need at least 2 groups to test variance homogeneity."
+        result["verdict"] = "Not tested (fewer than 2 groups)"
+        return result
+
+    too_small = [g for g, a in groups_data.items() if len(a) < MIN_N_FOR_TEST]
+    if too_small:
+        result["error"] = (
+            f"Too few students in group(s) {too_small} (n<{MIN_N_FOR_TEST}) "
+            "to test variance homogeneity."
+        )
+        result["verdict"] = "Not tested (n<3 in at least one group)"
+        return result
+
+    group_names = sorted(groups_data.keys())
+    result["groups"] = group_names
+    result["n_per_group"] = {g: int(len(groups_data[g])) for g in group_names}
+    result["variances"] = {
+        g: round(float(groups_data[g].var(ddof=1)), 4) for g in group_names
+    }
+
+    try:
+        stat, p = stats.levene(*[groups_data[g] for g in group_names], center=center)
+    except Exception as e:
+        result["error"] = str(e)
+        return result
+
+    result["statistic"] = round(float(stat), 4)
+    result["p_value"] = round(float(p), 4)
+    result["low_n_warning"] = min(result["n_per_group"].values()) < LOW_N_THRESHOLD
+
+    verdict = (
+        "Consistent with equal variances (p ≥ .05)"
+        if p >= 0.05 else
+        "Deviates from equal variances (p < .05)"
+    )
+    if result["low_n_warning"]:
+        verdict += " -- exploratory, n<20"
+    result["verdict"] = verdict
+
+    return result
 
 
 # -----------------------------------------------------------------------

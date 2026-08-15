@@ -1,11 +1,11 @@
-# Railway Test-Environment Checklist — Post-pilot enhancements (2026-08-04, updated 2026-08-14)
+# Railway Test-Environment Checklist — Post-pilot enhancements (2026-08-04, updated 2026-08-15)
 
-**Purpose:** confirm the requested changes (Tasks A-J, plus fixes found while testing) work correctly on the real deployed Railway `test` environment. Underlying logic was already verified directly (hand-computed math checks, full data round-trip tests, live SSH confirmation of the bug fix, direct-Python and AppTest verification) — this is your pass to confirm it looks and behaves right from the actual dashboard.
+**Purpose:** confirm the requested changes (Tasks A-K, plus fixes found while testing) work correctly on the real deployed Railway `test` environment. Underlying logic was already verified directly (hand-computed math checks, full data round-trip tests, live SSH confirmation of the bug fix, direct-Python and AppTest verification) — this is your pass to confirm it looks and behaves right from the actual dashboard.
 
 **URL:** https://basics4ai-staging-test.up.railway.app
 **Login:** your own admin account (the `test` environment's database was refreshed from production on 2026-08-04, so your real credentials work here too)
 
-Estimated time: ~60 minutes (Tasks A-D: ~15 min, Task E: ~10 min, Task J: ~15 min). Tasks F, G, H, I already signed off and live in production — skip unless you want a re-check.
+Estimated time: ~80 minutes (Tasks A-D: ~15 min, Task E: ~10 min, Task J: ~15 min, Task K: ~20 min). Tasks A-J already signed off and live in production — skip unless you want a re-check; Task K (below) is new.
 
 ---
 
@@ -236,6 +236,47 @@ While reviewing J.3, you asked why **Across Modules — Repeated Measures (Fried
 4. Go to **🔬 IRT Analysis → Likert Survey — Graded Response Model (GRM)** — confirm its **"Survey"** dropdown also now reads "Cognitive Engagement", not "SCCCES".
 5. Go to **Report Generation → ii. Inferential Statistics**, generate the PDF — confirm it completes without error (this report's Across Modules section now uses the same active-modules-by-default scoping, with no UI needed there since it's a static report).
 6. ✅ Pass if: both module pickers default sensibly and visibly change N when you add/remove modules, "Cognitive Engagement" appears everywhere "SCCCES" used to, and the PDF report still generates cleanly.
+
+---
+
+## K. Data-driven test selection: recommendations, 2-group t-test/Mann-Whitney U, RM-ANOVA + sphericity (20 min)
+
+Your dissertation methodology calls for the appropriate inferential test to be determined by the data itself (group count + assumption checks), not predetermined. Every test in Inferential Statistics now computes a live assumption check on the exact data you've selected and shows an explicit recommendation — both results still display (nothing is hidden), the recommendation is advisory.
+
+### K.1 — Pre vs Post: recommendation + always-on Wilcoxon (3 min)
+
+1. Go to **📈 Inferential Statistics → Pre vs Post**, pick either instrument pair.
+2. Confirm a **"✅ Recommended: ..."** green callout appears above the results, naming either "Paired t-test" or "Wilcoxon signed-rank", with a one-line rationale citing the normality verdict of the *difference scores*.
+3. Confirm the **"Show Wilcoxon signed-rank test"** checkbox is gone — the Wilcoxon result now always appears as a caption below the main metrics (no manual toggle needed).
+4. ✅ Pass if: the callout appears with a sensible recommendation, and Wilcoxon results show without needing to check anything.
+
+### K.2 — Between Groups: 2-group vs 3+-group, Levene's test (7 min)
+
+1. Still in Inferential Statistics, go to **Between Groups**. Pick a **"Group by"** option that yields exactly 2 groups (e.g. **gender**, if only Male/Female are present).
+2. Confirm the metrics row now shows **"t statistic" / "Independent t-test p-value" / "Cohen's d" / "Mann-Whitney U p"** — not F/ANOVA/Kruskal-Wallis. A caption below shows the ANOVA/Kruskal-Wallis numbers too (for reference — mathematically equivalent for 2 groups), and a Welch's t-test line appears if variances are unequal.
+3. Open the new **"📐 Assumption checks (normality + Levene's)"** expander — confirm a per-group normality table and a Levene's test verdict appear.
+4. Confirm the recommendation callout names one of: Independent t-test, Mann-Whitney U, or Welch's t-test — matching what the normality/Levene's verdicts in step 3 would suggest.
+5. Switch **"Group by"** to something with 3+ groups (e.g. **cohort_id**). Confirm the metrics row switches back to the original **F statistic / ANOVA p-value / η² / Kruskal-Wallis p** layout, and the recommendation now names ANOVA or Kruskal-Wallis.
+6. ✅ Pass if: the metric layout correctly switches with group count, the assumption-checks expander shows real numbers, and the recommendation is consistent with them.
+
+### K.3 — Across Modules: real RM-ANOVA + sphericity (5 min)
+
+1. Go to **Across Modules**, select **"MCQ content knowledge"**.
+2. Below the existing Friedman metrics, confirm a second row appears: **"RM-ANOVA F" / "p (uncorrected)" / "p (Greenhouse-Geisser)" / "Generalized η²"**, plus a caption reporting Mauchly's test (W, p) and whether sphericity holds.
+3. Confirm the recommendation callout names either "RM-ANOVA" or "Friedman test", with a rationale — and if sphericity is violated, the rationale should say to prefer the Greenhouse-Geisser corrected p-value.
+4. Switch to **"Survey construct"** — confirm the same RM-ANOVA row and sphericity caption appear there too.
+5. Narrow the module picker (from Task J) down to **exactly 2 modules** — confirm you get a clear message directing you to use "Pre vs Post" instead, not a cryptic error (2 time points is a paired comparison, not repeated-measures).
+6. ✅ Pass if: RM-ANOVA metrics appear for both MCQ and survey paths, sphericity is reported, and narrowing to 2 modules degrades gracefully.
+
+### K.4 — Inferential Statistics PDF report (3 min)
+
+1. Go to **Report Generation → ii. Inferential Statistics**, generate the PDF.
+2. Confirm it completes without error — every section (Pre vs Post, Between Groups, Across Modules) now includes a "Recommended: ..." line, Between Groups also shows the Levene's verdict, and the survey-constructs summary table has a new "Recommended" column.
+3. ✅ Pass if: the PDF generates cleanly and the new recommendation text/column appear in each relevant section.
+
+### Cleanup
+
+None needed — read-only/diagnostic, no new data is written.
 
 ---
 

@@ -45,6 +45,10 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 
+from core.analytics.descriptive.normality_checks import (
+    assess_normality, assess_variance_homogeneity, recommend_test_family,
+)
+
 
 # -----------------------------------------------------------------------
 # Constants
@@ -416,6 +420,18 @@ def run_paired_comparison(
         result["cohens_d"]          = round(d, 4)
         result["effect_size_label"] = _effect_label_d(d)
 
+        # Assumption check: normality of the DIFFERENCE scores (the
+        # paired t-test's actual target, not the raw pre/post scores
+        # individually) -- drives the test-family recommendation below.
+        diff_norm = assess_normality(diff, label="Pre-Post difference")
+        result["diff_normality"] = diff_norm
+        result["recommended_test"] = recommend_test_family(
+            diff_norm["verdict"], paired=True,
+        )
+        result["recommendation_rationale"] = (
+            f"Normality of differences: {diff_norm['verdict']}."
+        )
+
         # Wilcoxon (optional)
         if include_wilcoxon:
             if (diff == 0).all():
@@ -480,10 +496,18 @@ def run_between_groups(
     -------
     dict with keys:
         instrument_key, group_col, alpha, use_pct,
-        groups, n_per_group, group_means, group_stds,
+        groups, n_per_group, group_means, group_stds, n_groups,
         f_stat, anova_p, significant,
         eta_squared, effect_size_label,
         kruskal_stat, kruskal_p,
+        group_normality, levene,
+        t_stat, t_p_value, welch_t_stat, welch_t_p,
+        mannwhitney_stat, mannwhitney_p, cohens_d_indep
+            (only present when n_groups == 2 -- literal independent
+            t-test / Welch's t-test / Mann-Whitney U, alongside the
+            ANOVA/Kruskal-Wallis above which are always computed
+            regardless of group count),
+        recommended_test, recommendation_rationale,
         power_achieved, n_needed_80,
         low_n_warning, error
     """
@@ -578,6 +602,73 @@ def run_between_groups(
         result["kruskal_stat"] = round(float(kruskal_stat), 4)
         result["kruskal_p"]    = round(float(kruskal_p),    6)
 
+        result["n_groups"] = len(group_names)
+
+        # ── Assumption checks (live data) ──────────────────────────────
+        group_normality = {
+            g: assess_normality(groups_data[g], label=g) for g in group_names
+        }
+        result["group_normality"] = group_normality
+        # Conservative combining rule: any group's normality violation
+        # counts the whole comparison as non-normal.
+        overall_normal = all(
+            v["verdict"] and v["verdict"].startswith("Consistent with normality")
+            for v in group_normality.values()
+        )
+        overall_verdict = (
+            "Consistent with normality (p ≥ .05)" if overall_normal
+            else "Deviates from normality (p < .05)"
+        )
+
+        levene = assess_variance_homogeneity(scores, "score", group_col)
+        result["levene"] = levene
+        variance_ok = bool(
+            levene.get("verdict")
+            and levene["verdict"].startswith("Consistent with equal variances")
+        )
+
+        # ── Literal independent t-test / Mann-Whitney U for exactly ────
+        # 2 groups -- ANOVA/Kruskal-Wallis above stay for 3+ groups.
+        if len(group_names) == 2:
+            a, b = group_arrays
+            t_stat, t_p = stats.ttest_ind(a, b, equal_var=True)
+            result["t_stat"]    = round(float(t_stat), 4)
+            result["t_p_value"] = round(float(t_p),    6)
+
+            welch_t, welch_p = stats.ttest_ind(a, b, equal_var=False)
+            result["welch_t_stat"] = round(float(welch_t), 4)
+            result["welch_t_p"]    = round(float(welch_p), 6)
+
+            mw_stat, mw_p = stats.mannwhitneyu(a, b, alternative="two-sided")
+            result["mannwhitney_stat"] = round(float(mw_stat), 4)
+            result["mannwhitney_p"]    = round(float(mw_p),    6)
+
+            pooled_sd = math.sqrt(
+                ((len(a) - 1) * a.std(ddof=1) ** 2 + (len(b) - 1) * b.std(ddof=1) ** 2)
+                / (len(a) + len(b) - 2)
+            ) if (len(a) + len(b) - 2) > 0 else 0.0
+            result["cohens_d_indep"] = (
+                round(float((a.mean() - b.mean()) / pooled_sd), 4) if pooled_sd else 0.0
+            )
+            # Headline significance now follows the primary 2-group test,
+            # not the ANOVA (still computed above for reference/continuity).
+            result["significant"] = bool(t_p < alpha)
+
+        # ── Recommendation ──────────────────────────────────────────────
+        rec = recommend_test_family(overall_verdict, n_groups=len(group_names))
+        rationale = (
+            f"Normality: {overall_verdict}. "
+            f"Variance homogeneity (Levene's, p={levene.get('p_value')}): "
+            f"{levene.get('verdict')}."
+        )
+        if levene.get("error") is None and not variance_ok:
+            if len(group_names) == 2:
+                rec = "Welch's t-test (unequal variances, run_between_groups)"
+            else:
+                rec = "Kruskal-Wallis (run_between_groups, non-parametric) -- variances unequal"
+        result["recommended_test"] = rec
+        result["recommendation_rationale"] = rationale
+
         # Power analysis (balanced: use mean n per group)
         k = len(group_names)
         mean_n = int(round(sum(result["n_per_group"].values()) / k))
@@ -631,6 +722,14 @@ def run_repeated_measures(
         means_by_time, stds_by_time,
         friedman_stat, p_value, significant,
         kendalls_w, effect_size_label,
+        time_point_normality,
+        rm_anova (dict: f_stat, p_unc, p_gg_corr, eps, eta_sq_gen,
+            sphericity, w_spher, p_spher -- None if pingouin unavailable
+            or k<3 for the sphericity-specific fields),
+        rm_anova_error (str | None -- set when pingouin is missing or
+            the RM-ANOVA computation itself failed; Friedman above is
+            unaffected either way),
+        recommended_test, recommendation_rationale,
         low_n_warning, error
     """
     result: Dict[str, Any] = {
@@ -671,6 +770,22 @@ def run_repeated_measures(
             result["error"] = (
                 "Need at least 2 time points. "
                 f"Found columns: {list(pivot.columns)}"
+            )
+            return result
+
+        if pivot.shape[1] == 2:
+            # The Friedman test requires >=3 related samples (scipy raises
+            # a cryptic ValueError otherwise) -- a within-subject
+            # comparison of exactly 2 time points is a paired comparison,
+            # not a repeated-measures one. Reachable in practice: the
+            # module picker in the live tab lets a researcher narrow
+            # "Across Modules" down to exactly 2 modules.
+            result["error"] = (
+                "Exactly 2 time points selected -- use the 'Pre vs Post' "
+                "section instead (paired t-test / Wilcoxon), which is the "
+                "correct comparison for exactly 2 related conditions. "
+                "Repeated-measures tests (Friedman / RM-ANOVA) require 3+ "
+                "time points."
             )
             return result
 
@@ -718,6 +833,66 @@ def run_repeated_measures(
         w = _kendalls_w(pivot)
         result["kendalls_w"]        = round(w, 4)
         result["effect_size_label"] = _effect_label_w(w)
+
+        # ── Assumption check: normality per time point (live data) ─────
+        time_point_normality = {
+            str(t): assess_normality(pivot[t], label=str(t)) for t in time_points
+        }
+        result["time_point_normality"] = time_point_normality
+        overall_normal = all(
+            v["verdict"] and v["verdict"].startswith("Consistent with normality")
+            for v in time_point_normality.values()
+        )
+        overall_verdict = (
+            "Consistent with normality (p ≥ .05)" if overall_normal
+            else "Deviates from normality (p < .05)"
+        )
+
+        # ── Parametric RM-ANOVA + sphericity (Mauchly's), alongside the ─
+        # Friedman test above -- both always computed, per this app's
+        # "show both, let the researcher decide" philosophy. Sphericity
+        # is only meaningful for 3+ time points (2 points = 1 pairwise
+        # difference, trivially satisfied) -- pingouin itself omits the
+        # correction columns in that case, handled via .get() below.
+        result["rm_anova"] = None
+        result["rm_anova_error"] = None
+        try:
+            import pingouin as pg
+            subj_col = pivot.index.name or "user_id"
+            long_df = pivot.reset_index().melt(
+                id_vars=subj_col, var_name="time_point", value_name="score",
+            )
+            aov = pg.rm_anova(
+                data=long_df, dv="score", within="time_point",
+                subject=subj_col, correction=True, detailed=True,
+            )
+            row = aov.iloc[0]
+            result["rm_anova"] = {
+                "f_stat":     round(float(row["F"]), 4),
+                "p_unc":      round(float(row["p_unc"]), 6),
+                "p_gg_corr":  round(float(row["p_GG_corr"]), 6) if "p_GG_corr" in aov.columns else None,
+                "eps":        round(float(row["eps"]), 4) if "eps" in aov.columns else None,
+                "eta_sq_gen": round(float(row["ng2"]), 4) if "ng2" in aov.columns else None,
+                "sphericity": bool(row["sphericity"]) if "sphericity" in aov.columns else True,
+                "w_spher":    round(float(row["W_spher"]), 4) if "W_spher" in aov.columns else None,
+                "p_spher":    round(float(row["p_spher"]), 6) if "p_spher" in aov.columns else None,
+            }
+        except ImportError:
+            result["rm_anova_error"] = "pingouin not installed -- RM-ANOVA unavailable, Friedman still shown."
+        except Exception as e:
+            result["rm_anova_error"] = str(e)
+
+        rec = recommend_test_family(overall_verdict, repeated_measures=True)
+        rationale = f"Normality across time points: {overall_verdict}."
+        rm = result.get("rm_anova")
+        if rm and rm.get("sphericity") is False:
+            rationale += (
+                " Sphericity violated (Mauchly's p="
+                f"{rm.get('p_spher')}) -- prefer the Greenhouse-Geisser "
+                "corrected p-value over the uncorrected one if using RM-ANOVA."
+            )
+        result["recommended_test"] = rec
+        result["recommendation_rationale"] = rationale
 
         result["low_n_warning"] = n < LOW_N_THRESHOLD
 
