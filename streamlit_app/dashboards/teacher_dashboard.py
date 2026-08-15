@@ -3210,21 +3210,49 @@ def _render_correlations_tab(
                             "N obs": b.get("n_obs"), "Error": b.get("error") or "",
                         })
                     st.dataframe(pd.DataFrame(block_rows), hide_index=True, width="stretch")
-                    if mm.get("best_block_by_bic"):
-                        st.success(f"✅ **Best model by BIC:** {mm['best_block_by_bic']}")
 
-                    best_name = mm.get("best_block_by_bic")
-                    reml_name = f"{best_name}_reml" if best_name else None
-                    display_block = mm["blocks"].get(reml_name) or (mm["blocks"].get(best_name) if best_name else None)
-                    if display_block and display_block.get("params"):
-                        st.markdown(f"**Coefficients — {reml_name or best_name}**")
-                        param_rows = [
+                    def _coef_table(block_dict):
+                        return pd.DataFrame([
                             {"Term": term, "Estimate": _fmt_stat(p["estimate"]),
                              "SE": _fmt_stat(p["se"]), "z": _fmt_stat(p.get("z")),
                              "p": _fmt_stat(p.get("p"), 6)}
-                            for term, p in display_block["params"].items()
-                        ]
-                        st.dataframe(pd.DataFrame(param_rows), hide_index=True, width="stretch")
+                            for term, p in block_dict["params"].items()
+                        ])
+
+                    bic_name = mm.get("best_block_by_bic")
+                    aic_name = mm.get("best_block_by_aic")
+                    bic_has_predictors = bic_name and len(mm["blocks"].get(bic_name, {}).get("params", {})) > 2  # > Intercept + Group Var
+
+                    if bic_name:
+                        st.success(f"✅ **Best model by BIC (more conservative):** {bic_name}")
+                        reml_name = f"{bic_name}_reml"
+                        bic_display = mm["blocks"].get(reml_name) or mm["blocks"].get(bic_name)
+                        if bic_display and bic_display.get("params"):
+                            if not bic_has_predictors:
+                                st.info(
+                                    "BIC prefers the model with **no predictors** here -- a real, valid "
+                                    "finding, not an error. It means the selected predictors did not "
+                                    "improve model fit enough to justify their added complexity under "
+                                    "BIC's stricter penalty. The coefficients below are just the "
+                                    "intercept/group variance -- see the AIC-preferred model below for "
+                                    "the actual predictor estimates."
+                                )
+                            st.markdown(f"**Coefficients — {reml_name if mm['blocks'].get(reml_name) else bic_name}**")
+                            st.dataframe(_coef_table(bic_display), hide_index=True, width="stretch")
+
+                    if aic_name and aic_name != bic_name:
+                        st.markdown(f"**Best model by AIC (less conservative):** {aic_name}")
+                        aic_display = mm["blocks"].get(aic_name)
+                        if aic_display and aic_display.get("params"):
+                            st.markdown(f"**Coefficients — {aic_name}**")
+                            st.dataframe(_coef_table(aic_display), hide_index=True, width="stretch")
+                            st.caption(
+                                "BIC and AIC disagree here -- BIC favors the simpler model above; "
+                                "AIC (which penalizes added complexity less) favors this richer one. "
+                                "Neither is \"correct\" -- report both, or default to BIC's conclusion "
+                                "given this study's modest sample size, per the standing convention "
+                                "used throughout this analysis."
+                            )
 
                     if mm.get("lrt"):
                         with st.expander("📊 Likelihood ratio tests between nested blocks", expanded=False):
