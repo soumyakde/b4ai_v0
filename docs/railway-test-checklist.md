@@ -314,10 +314,11 @@ A new **"🔗 Correlations"** tab now sits right after Inferential Statistics. I
 ### L.4 — Repeated-Measures Correlations (8 min)
 
 1. Switch to **Repeated-Measures Correlations**. Select the same 1-2 predictors.
-2. Click **"▶ Run Repeated-Measures Correlations"**. Confirm a results table appears with columns for r, N students, uncorrected p, FDR-corrected p, and a "Significant (FDR)" Yes/No column.
-3. If any predictor is FDR-significant, confirm a green **"✅ Strongest FDR-significant predictor"** callout appears.
-4. Open **"ℹ️ What do these numbers mean?"** and confirm it references Bakdash & Marusich (2017) for rmcorr and Benjamini & Hochberg (1995) for FDR.
-5. ✅ Pass if: results render with both uncorrected and FDR-corrected p-values shown side by side (nothing is silently hidden).
+2. Click **"▶ Run Repeated-Measures Correlations"**. Confirm a results table appears with columns for r, **Effect size**, N students, uncorrected p, FDR-corrected p, and a "Significant (FDR)" Yes/No column.
+3. Confirm the **Effect size** column shows a Cohen (1988) label (Negligible / Small / Medium / Large) matching the magnitude of each row's r value.
+4. If any predictor is FDR-significant, confirm a green **"✅ Strongest FDR-significant predictor"** callout appears.
+5. Open **"ℹ️ What do these numbers mean?"** and confirm it references Bakdash & Marusich (2017) for rmcorr, Cohen (1988) for the effect-size labels (including the caveat that these are rough, domain-independent benchmarks), and Benjamini & Hochberg (1995) for FDR.
+6. ✅ Pass if: results render with effect-size labels, both uncorrected and FDR-corrected p-values shown side by side (nothing is silently hidden).
 
 ### Cleanup
 

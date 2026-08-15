@@ -1916,6 +1916,23 @@ _STAT_HELP = {
         "Amotivation is also kept available separately — it reflects "
         "active disengagement, not just \"low autonomous motivation.\""
     ),
+    "r_effect_size": (
+        "**Effect Size — Interpreting r**\n\n"
+        "Cohen's (1988) conventional benchmarks for the magnitude of a "
+        "correlation coefficient (applies the same way to the rmcorr r "
+        "above as to an ordinary Pearson r):\n\n"
+        "- **|r| < 0.10** — Negligible\n"
+        "- **0.10 ≤ |r| < 0.30** — Small\n"
+        "- **0.30 ≤ |r| < 0.50** — Medium\n"
+        "- **|r| ≥ 0.50** — Large\n\n"
+        "Cohen, J. (1988). *Statistical Power Analysis for the Behavioral "
+        "Sciences* (2nd ed.). Hillsdale, NJ: Lawrence Erlbaum Associates. "
+        "**Caveat:** Cohen himself, and the field since, treat these as "
+        "rough, domain-independent benchmarks of last resort — a genuinely "
+        "small r can still be practically meaningful (or vice versa) "
+        "depending on context. Read alongside statistical significance, "
+        "not instead of it."
+    ),
 }
 
 _IRT_HELP = {
@@ -3337,6 +3354,7 @@ def _render_correlations_tab(
                 else:
                     rows = [
                         {"Predictor": r["predictor"], "r": _fmt_stat(r.get("r")),
+                         "Effect size": r.get("effect_size_label", "—"),
                          "N students": r.get("n_subjects"), "p (uncorrected)": _fmt_stat(r.get("p_unc"), 4),
                          "p (FDR-corrected)": _fmt_stat(r.get("p_fdr"), 4),
                          "Significant (FDR)": "✅ Yes" if r.get("reject_fdr") else "— No",
@@ -3365,6 +3383,8 @@ def _render_correlations_tab(
 
                     with st.expander("ℹ️ What do these numbers mean?", expanded=False):
                         st.markdown(_STAT_HELP["rm_corr"])
+                        st.divider()
+                        st.markdown(_STAT_HELP["r_effect_size"])
                         st.divider()
                         st.markdown(_STAT_HELP["fdr_bh"])
 

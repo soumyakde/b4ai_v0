@@ -745,6 +745,29 @@ def run_mixed_model(
 # Phase 3 -- Repeated-measures correlation + FDR
 # =========================================================================
 
+def r_effect_label(r: Optional[float]) -> str:
+    """
+    Cohen's (1988) conventional benchmarks for a correlation
+    coefficient's magnitude -- |r| < .10 negligible, .10-.30 small,
+    .30-.50 medium, >=.50 large. Cohen, J. (1988). Statistical Power
+    Analysis for the Behavioral Sciences (2nd ed.). Hillsdale, NJ:
+    Lawrence Erlbaum Associates. Cohen himself, and the field since,
+    caution these are rough, domain-independent benchmarks of last
+    resort, not a substitute for context-specific judgment -- surfaced
+    as a label alongside the raw r, not in place of it.
+    """
+    if r is None or (isinstance(r, float) and np.isnan(r)):
+        return "—"
+    ar = abs(r)
+    if ar >= 0.50:
+        return "Large (≥.50)"
+    if ar >= 0.30:
+        return "Medium (≥.30)"
+    if ar >= 0.10:
+        return "Small (≥.10)"
+    return "Negligible (<.10)"
+
+
 def run_repeated_measures_correlations(
     long_df: pd.DataFrame,
     outcome_col: str,
@@ -764,8 +787,8 @@ def run_repeated_measures_correlations(
     Returns
     -------
     dict: results (list of {predictor, r, dof, p_unc, ci95, power,
-        n_subjects, error}), fdr (same rows + p_fdr, reject_fdr),
-        alpha, error
+        n_subjects, effect_size_label, error}), fdr (same rows +
+        p_fdr, reject_fdr), alpha, error
     """
     result: Dict[str, Any] = {"results": [], "fdr": [], "alpha": alpha, "error": None}
 
@@ -785,7 +808,8 @@ def run_repeated_measures_correlations(
         n_subjects = sub[id_col].nunique()
         row: Dict[str, Any] = {
             "predictor": predictor, "r": None, "dof": None, "p_unc": None,
-            "ci95": None, "power": None, "n_subjects": n_subjects, "error": None,
+            "ci95": None, "power": None, "n_subjects": n_subjects,
+            "effect_size_label": "—", "error": None,
         }
         if n_subjects < 3 or len(sub) < 6:
             row["error"] = f"Too few complete cases (subjects={n_subjects}) for rm_corr."
@@ -798,6 +822,7 @@ def run_repeated_measures_correlations(
             row["p_unc"] = round(float(r["pval"].iloc[0]), 6)
             row["ci95"] = list(r["CI95"].iloc[0])
             row["power"] = round(float(r["power"].iloc[0]), 4)
+            row["effect_size_label"] = r_effect_label(row["r"])
         except Exception as e:
             row["error"] = str(e)
         rows.append(row)
