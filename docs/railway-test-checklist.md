@@ -330,6 +330,15 @@ A new **"🔗 Correlations"** tab now sits right after Inferential Statistics. I
 5. Download and open the PDF. Confirm it includes: a reliability table for both SCCCES and SIMS; an inter-sub-construct correlation matrix for both surveys; a mixed-effects model block-comparison table plus coefficients tables for the BIC-best and AIC-best blocks (using the full default predictor set — all 4 composites + RAI + Amotivation, not just 1-2); a repeated-measures correlations table with effect-size labels.
 6. ✅ Pass if: the PDF generates without error and contains real numbers (not blank/placeholder sections) for all 4 phases, using the full predictor set rather than requiring you to have run the live Correlations tab first.
 
+### L.6 — Instruments & References (Report Generation tab) (8 min)
+
+1. Still in **"📄 Report Generation"**, click **"viii. Instruments & References"** (shifted from vii after L.5 added a new "vi. Correlations" section).
+2. Open **"📋 Instruments used in this study"** and confirm the SCCCES description now explicitly states it draws from **two source instruments**: Rotgans & Schmidt (2011) for 3 sub-constructs (Engagement with Task, Effort & Persistence, Experience of Flow) and Heddy et al. (2018) for the other 7. Confirm the SIMS description correctly cites Guay, Vallerand & Blanchard (2000), and notes the RAI formula comes from Ryan & Connell (1989), not the SIMS paper.
+3. Scroll the **References** list below and confirm it's now organized into section headers: Instruments, Descriptive & Data-Quality Checks, Inferential Statistics, Correlational Analysis, Competency Progression Index (CPI), IRT Analysis, Qualitative / LLM Analysis — with a citation for essentially every statistical method used anywhere in the app (Shapiro-Wilk, Levene's, Bland-Altman, Spearman-Brown, person-mean-centering, BIC/AIC criteria, random-slope structure, rmcorr, FDR, Cohen's effect sizes, CTT/IRT/CPI+ framework/reliability measures, and the ITA/DTA qualitative-analysis methodology papers).
+4. Confirm the **De Paoli (2024)** citation now reads *Social Science Computer Review, 42*(4), 997–1019 (previously showed a mismatched *Applied AI Letters* citation — now corrected).
+5. In the sidebar (visible on any page, not just Report Generation), open **"📚 Instruments & References"** and confirm it also now correctly attributes SCCCES to Rotgans & Schmidt (2011) + Heddy et al. (2018), and SIMS to Guay, Vallerand & Blanchard (2000) — not the earlier incorrect "SIMS (Deci & Ryan, 1985)" label.
+6. ✅ Pass if: the instrument overview correctly explains SCCCES's dual provenance, the reference list is organized by section and covers every method used in the app, and no stale/incorrect citations remain (Dole & Sinatra, the wrong De Paoli journal, or the wrong SIMS attribution).
+
 ### Cleanup
 
 None needed — read-only/diagnostic. The saved composite definitions (L.2) persist only for your current session.

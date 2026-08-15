@@ -7341,21 +7341,33 @@ def _report_instruments_references() -> None:
     # ── Instruments overview ─────────────────────────────────────────
     with st.expander("📋 Instruments used in this study", expanded=True):
         st.markdown("""
-**SCCCES — Situational Conceptual Change Cognitive Engagement Scale**
-Measures learners' cognitive engagement with instructional messaging across
-seven constructs: Engagement with Task, Effort & Persistence, Experience of Flow,
-Coherency, Plausibility, Credibility, and Comprehensibility of Messaging,
-Attention, Culture, and Personal Relevance. Likert scale 1–4.
-Items Q9_1, Q9_2, Q10_1, Q10_2 are reverse-scored (5−x) before computing construct means.
+**SCCCES — Situational Cognitive Engagement Scale (adapted, 10 sub-constructs / 20 items, 4-point Likert)**
+This app's "SCCCES" combines items from **two source instruments**, not one:
+- **Rotgans & Schmidt (2011)** — the *Situational Cognitive Engagement Scale (SCES)*
+  contributes 3 sub-constructs: **Engagement with Task, Effort & Persistence,
+  Experience of Flow**.
+- **Heddy, Taasoobshirazi, Chancey & Danielson (2018)** — the *Conceptual
+  Change Cognitive Engagement Scale (CCCES)* contributes the remaining 7:
+  **Coherency, Plausibility, Credibility, and Comprehensibility of
+  Messaging, Attention, Culture, and Personal Relevance**.
+
+Both source instruments used a 5-point Likert scale; this adaptation for
+ages 10-14 uses a 4-point scale (a genuine age-adaptation deviation, stated
+explicitly here and in the Correlations tab). Items Q9_1, Q9_2, Q10_1, Q10_2
+are reverse-scored (5−x) before computing construct means.
 
 ---
 
-**SIMS — Situational Motivation Scale**
-Measures motivation type in four constructs: Intrinsic Motivation, Identified
-Regulation, External Regulation, and Amotivation. Likert scale 1–4.
-Items Q4_1–Q4_4 (External Regulation) and Q5_1–Q5_3 (Amotivation) are
+**SIMS — Situational Motivation Scale (adapted, 4 sub-constructs / 13 items, 4-point Likert)**
+Source: **Guay, Vallerand & Blanchard (2000)**. Measures motivation type in
+four constructs: Intrinsic Motivation, Identified Regulation, External
+Regulation, and Amotivation. The original instrument has 16 items on a
+7-point scale; this adaptation uses 13 items on a 4-point scale. Items
+Q4_1–Q4_4 (External Regulation) and Q5_1–Q5_3 (Amotivation) are
 reverse-scored so that all four constructs read in the same direction:
-**higher mean = better self-determined motivation**.
+**higher mean = better self-determined motivation**. The Relative Autonomy
+Index (RAI), computed from these four constructs, is *not* from this SIMS
+source paper — see **Ryan & Connell (1989)** below.
 
 ---
 
@@ -7375,13 +7387,18 @@ See Appendix 1 of the published instrument for full item listings.
     st.divider()
 
     # ── References ───────────────────────────────────────────────────
-    st.markdown("#### References")
+    st.caption(
+        "Every citation used anywhere in this app -- instruments, "
+        "descriptive/data-quality checks, inferential test selection, "
+        "correlational analysis, CPI, IRT, and LLM-assisted qualitative "
+        "analysis -- consolidated here in one place."
+    )
 
     _REFS = [
+        # ── Instruments ─────────────────────────────────────────────
         {
-            "tag": "SIMS",
-            "color": "#E6F3FB",
-            "border": "#0077BB",
+            "section": "Instruments",
+            "tag": "SIMS", "color": "#E6F3FB", "border": "#0077BB",
             "citation": (
                 "Guay, F., Vallerand, R. J., & Blanchard, C. (2000). "
                 "On the Assessment of Situational Intrinsic and Extrinsic Motivation: "
@@ -7389,24 +7406,22 @@ See Appendix 1 of the published instrument for full item listings.
                 "*Motivation and Emotion, 24*(3), 175–213. "
                 "https://doi.org/10.1023/a:1005614228250"
             ),
-            "note": "Adapted for Basics4AI: External Regulation and Amotivation items reverse-scored.",
+            "note": "SIMS source instrument. Adapted for Basics4AI: 13 of 16 items, 4-point (not 7-point) scale; External Regulation and Amotivation items reverse-scored.",
         },
         {
-            "tag": "SCES",
-            "color": "#E6F7F1",
-            "border": "#009E73",
+            "section": "Instruments",
+            "tag": "SCES", "color": "#E6F7F1", "border": "#009E73",
             "citation": (
                 "Rotgans, J. I., & Schmidt, H. G. (2011). "
                 "Cognitive engagement in the problem-based learning classroom. "
                 "*Advances in Health Sciences Education, 16*(4), 465–479. "
                 "https://doi.org/10.1007/s10459-011-9272-9"
             ),
-            "note": "Engagement with Task, Effort & Persistence, and Experience of Flow subscales.",
+            "note": "Contributes 3 of SCCCES's 10 sub-constructs: Engagement with Task, Effort & Persistence, Experience of Flow.",
         },
         {
-            "tag": "CCCES",
-            "color": "#F9EEF5",
-            "border": "#CC79A7",
+            "section": "Instruments",
+            "tag": "CCCES", "color": "#F9EEF5", "border": "#CC79A7",
             "citation": (
                 "Heddy, B. C., Taasoobshirazi, G., Chancey, J. B., & Danielson, R. W. (2018). "
                 "Developing and Validating a Conceptual Change Cognitive Engagement Instrument. "
@@ -7414,14 +7429,317 @@ See Appendix 1 of the published instrument for full item listings.
                 "https://doi.org/10.3389/feduc.2018.00043"
             ),
             "note": (
-                "Coherency, Plausibility, Credibility, Comprehensibility of Messaging, "
-                "Attention, Culture, and Personal Relevance subscales."
+                "Contributes the remaining 7 of SCCCES's 10 sub-constructs: Coherency, Plausibility, "
+                "Credibility, Comprehensibility of Messaging, Attention, Culture, Personal Relevance. "
+                "This paper's own EFA (N=513) found the 4 message-appraisal sub-constructs collapse "
+                "into a single empirical factor -- the a priori basis for the Correlations tab's "
+                "default composite grouping."
             ),
         },
         {
-            "tag": "IRT",
-            "color": "#E6F7F1",
-            "border": "#009E73",
+            "section": "Instruments",
+            "tag": "SDT", "color": "#E6F3FB", "border": "#0077BB",
+            "citation": (
+                "Deci, E. L., & Ryan, R. M. (1985). "
+                "*Intrinsic Motivation and Self-Determination in Human Behavior*. "
+                "Plenum. https://doi.org/10.1007/978-1-4899-2271-7"
+            ),
+            "note": "Self-Determination Theory underpinning SIMS construct interpretation.",
+        },
+        {
+            "section": "Instruments",
+            "tag": "RAI", "color": "#E6F3FB", "border": "#0077BB",
+            "citation": (
+                "Ryan, R. M., & Connell, J. P. (1989). Perceived locus of causality "
+                "and internalization: Examining reasons for acting in two domains. "
+                "*Journal of Personality and Social Psychology, 57*(5), 749–761."
+            ),
+            "note": "Source of the Relative Autonomy Index (RAI) formula used in the Correlations tab -- not the SIMS paper above, which does not itself present this formula.",
+        },
+        # ── Descriptive & Data-Quality Checks ──────────────────────────
+        {
+            "section": "Descriptive & Data-Quality Checks",
+            "tag": "Normality", "color": "#E6F7F1", "border": "#009E73",
+            "citation": (
+                "Shapiro, S. S., & Wilk, M. B. (1965). An analysis of variance test "
+                "for normality (complete samples). *Biometrika, 52*(3/4), 591–611."
+            ),
+            "note": "Shapiro-Wilk normality test, Basic Statistics and Inferential Statistics tabs.",
+        },
+        {
+            "section": "Descriptive & Data-Quality Checks",
+            "tag": "Variance", "color": "#E6F7F1", "border": "#009E73",
+            "citation": (
+                "Levene, H. (1960). Robust tests for equality of variances. In I. "
+                "Olkin (Ed.), *Contributions to Probability and Statistics* (pp. "
+                "278–292). Stanford University Press. — Brown, M. B., & Forsythe, "
+                "A. B. (1974). Robust tests for the equality of variances. "
+                "*Journal of the American Statistical Association, 69*(346), 364–367."
+            ),
+            "note": "Levene's test (Brown-Forsythe/median-centered variant used by default), Inferential Statistics tab's assumption checks.",
+        },
+        {
+            "section": "Descriptive & Data-Quality Checks",
+            "tag": "Careless", "color": "#E6F7F1", "border": "#009E73",
+            "citation": (
+                "Meade, A. W., & Craig, S. B. (2012). Identifying careless responses "
+                "in survey data. *Psychological Methods, 17*(3), 437–455. — Curran, "
+                "P. G. (2016). Methods for the detection of carelessly invalid "
+                "responses in survey data. *Journal of Experimental Social "
+                "Psychology, 66*, 4–19."
+            ),
+            "note": "Straight-lining detection and exclusion option, Basic Statistics and Inferential Statistics tabs.",
+        },
+        {
+            "section": "Descriptive & Data-Quality Checks",
+            "tag": "Outliers", "color": "#E6F7F1", "border": "#009E73",
+            "citation": (
+                "Osborne, J. W., & Overbay, A. (2004). The power of outliers (and "
+                "why researchers should always check for them). *Practical "
+                "Assessment, Research & Evaluation, 9*(6). — Tabachnick, B. G., & "
+                "Fidell, L. S. *Using Multivariate Statistics* (data-screening chapter)."
+            ),
+            "note": "Outlier detection and exclusion option, Inferential Statistics tab.",
+        },
+        {
+            "section": "Descriptive & Data-Quality Checks",
+            "tag": "Missing data", "color": "#E6F7F1", "border": "#009E73",
+            "citation": (
+                "Little, R. J. A., & Rubin, D. B. *Statistical Analysis with "
+                "Missing Data*. — Enders, C. K. (2010). *Applied Missing Data "
+                "Analysis*. Guilford Press."
+            ),
+            "note": "Excessive-missingness detection and exclusion option, Inferential Statistics tab.",
+        },
+        # ── Inferential Statistics ──────────────────────────────────
+        {
+            "section": "Inferential Statistics",
+            "tag": "Agreement", "color": "#FFF3E6", "border": "#EE7733",
+            "citation": (
+                "Bland, J. M., & Altman, D. G. (1990). A note on the use of the "
+                "intraclass correlation coefficient in the evaluation of agreement "
+                "between two methods of measurement. *Computers in Biology and "
+                "Medicine, 20*(5), 337–340. "
+                "https://doi.org/10.1016/0010-4825(90)90013-F"
+            ),
+            "note": "Bland-Altman method-agreement analysis, Basic Statistics and Inferential Statistics tabs.",
+        },
+        {
+            "section": "Inferential Statistics",
+            "tag": "Power caution", "color": "#FFF3E6", "border": "#EE7733",
+            "citation": (
+                "Lakens, D. (2022). Sample size justification. *Collabra: "
+                "Psychology, 8*(1), 33267. https://doi.org/10.1525/collabra.33267 "
+                "— Gelman, A., & Carlin, J. (2014). Beyond power calculations: "
+                "Assessing Type S (sign) and Type M (magnitude) errors. "
+                "*Perspectives on Psychological Science, 9*(6), 641–651."
+            ),
+            "note": "Low-N warning and sample-size-guidance caveat, Inferential Statistics tab.",
+        },
+        # ── Correlational Analysis ──────────────────────────────────
+        {
+            "section": "Correlational Analysis",
+            "tag": "Reliability", "color": "#FDECE3", "border": "#D55E00",
+            "citation": (
+                "Eisinga, R., Te Grotenhuis, M., & Pelzer, B. (2013). The "
+                "reliability of a two-item scale: Pearson, Cronbach, or "
+                "Spearman-Brown? *International Journal of Public Health, "
+                "58*(4), 637–642."
+            ),
+            "note": "Spearman-Brown step-up for 2-item sub-constructs, Correlations tab.",
+        },
+        {
+            "section": "Correlational Analysis",
+            "tag": "Centering", "color": "#FDECE3", "border": "#D55E00",
+            "citation": (
+                "Enders, C. K., & Tofighi, D. (2007). Centering predictors in "
+                "multilevel regression models: A new look at an old issue. "
+                "*Psychological Methods, 12*(2), 121–138."
+            ),
+            "note": "Person-mean-centering (within/between-person effects), Correlations tab's mixed-effects model.",
+        },
+        {
+            "section": "Correlational Analysis",
+            "tag": "ML vs REML", "color": "#FDECE3", "border": "#D55E00",
+            "citation": (
+                "Pinheiro, J. C., & Bates, D. M. (2000). *Mixed-Effects Models "
+                "in S and S-PLUS*. Springer, §2.4."
+            ),
+            "note": "ML-fit block comparisons and REML reporting-refit, Correlations tab's mixed-effects model.",
+        },
+        {
+            "section": "Correlational Analysis",
+            "tag": "BIC", "color": "#FDECE3", "border": "#D55E00",
+            "citation": (
+                "Schwarz, G. (1978). Estimating the dimension of a model. "
+                "*Annals of Statistics, 6*(2), 461–464."
+            ),
+            "note": "\"Best model by BIC\" selection criterion, Correlations tab's mixed-effects model.",
+        },
+        {
+            "section": "Correlational Analysis",
+            "tag": "AIC", "color": "#FDECE3", "border": "#D55E00",
+            "citation": (
+                "Akaike, H. (1974). A new look at the statistical model "
+                "identification. *IEEE Transactions on Automatic Control, "
+                "19*(6), 716–723."
+            ),
+            "note": "\"Best model by AIC\" selection criterion, Correlations tab's mixed-effects model.",
+        },
+        {
+            "section": "Correlational Analysis",
+            "tag": "Random slope", "color": "#FDECE3", "border": "#D55E00",
+            "citation": (
+                "Barr, D. J., Levy, R., Scheepers, C., & Tily, H. J. (2013). "
+                "Random effects structure for confirmatory hypothesis testing: "
+                "Keep it maximal. *Journal of Memory and Language, 68*(3), 255–278."
+            ),
+            "note": "Random-slope model interpretation (M3b_random_slope), Correlations tab's mixed-effects model.",
+        },
+        {
+            "section": "Correlational Analysis",
+            "tag": "rmcorr", "color": "#FDECE3", "border": "#D55E00",
+            "citation": (
+                "Bakdash, J. Z., & Marusich, L. R. (2017). Repeated measures "
+                "correlation. *Frontiers in Psychology, 8*:456."
+            ),
+            "note": "Repeated-Measures Correlations sub-section, Correlations tab.",
+        },
+        {
+            "section": "Correlational Analysis",
+            "tag": "FDR", "color": "#FDECE3", "border": "#D55E00",
+            "citation": (
+                "Benjamini, Y., & Hochberg, Y. (1995). Controlling the false "
+                "discovery rate. *Journal of the Royal Statistical Society: "
+                "Series B, 57*(1), 289–300. — Curran-Everett, D. (2000). "
+                "Multiple comparisons: philosophies and illustrations. *American "
+                "Journal of Physiology-Regulatory, Integrative and Comparative "
+                "Physiology, 279*(1), R1–R8 (physiology-methods paper, cited "
+                "only as supporting rationale for FDR over Bonferroni)."
+            ),
+            "note": "FDR (Benjamini-Hochberg) multiple-testing correction, Correlations tab.",
+        },
+        {
+            "section": "Correlational Analysis",
+            "tag": "Effect size", "color": "#FDECE3", "border": "#D55E00",
+            "citation": (
+                "Cohen, J. (1988). *Statistical Power Analysis for the "
+                "Behavioral Sciences* (2nd ed.). Hillsdale, NJ: Lawrence "
+                "Erlbaum Associates."
+            ),
+            "note": "Effect-size magnitude benchmarks (d, η², Kendall's W, r) used throughout the Inferential Statistics and Correlations tabs.",
+        },
+        # ── Competency Progression Index (CPI) ──────────────────────
+        {
+            "section": "Competency Progression Index (CPI)",
+            "tag": "CTT", "color": "#F0F0F0", "border": "#888888",
+            "citation": (
+                "Crocker, L., & Algina, J. (1986). *Introduction to Classical "
+                "and Modern Test Theory*. Holt, Rinehart and Winston."
+            ),
+            "note": "Classical Test Theory scoring (CPI_quant), CPI tab.",
+        },
+        {
+            "section": "Competency Progression Index (CPI)",
+            "tag": "IRT ability", "color": "#F0F0F0", "border": "#888888",
+            "citation": (
+                "Baker, F. B. (1985). *The Basics of Item Response Theory*. Heinemann."
+            ),
+            "note": "EAP ability estimation for CPI_quant's IRT method, CPI tab.",
+        },
+        {
+            "section": "Competency Progression Index (CPI)",
+            "tag": "Norm. gain", "color": "#F0F0F0", "border": "#888888",
+            "citation": (
+                "Hake, R. R. (1998). Interactive-engagement versus traditional "
+                "methods. *American Journal of Physics, 66*(1), 64–74."
+            ),
+            "note": "Normalized gain, referenced in the CPI+ 3-component model design.",
+        },
+        {
+            "section": "Competency Progression Index (CPI)",
+            "tag": "CPI+ framework", "color": "#F0F0F0", "border": "#888888",
+            "citation": (
+                "Pellegrino, J. W., & Hilton, M. L. (Eds.). (2012). *Education "
+                "for Life and Work*. National Academies Press."
+            ),
+            "note": "Competency-framework rationale for combining quantitative + qualitative components.",
+        },
+        {
+            "section": "Competency Progression Index (CPI)",
+            "tag": "Weighting", "color": "#F0F0F0", "border": "#888888",
+            "citation": (
+                "Dawes, R. M. (1979). The robust beauty of improper linear "
+                "models in decision making. *Psychological Bulletin, 86*(2), 571–582."
+            ),
+            "note": "Justifies CPI+'s default equal weighting (w1=w2=0.5) at this study's sample size.",
+        },
+        {
+            "section": "Competency Progression Index (CPI)",
+            "tag": "Cronbach's α", "color": "#F0F0F0", "border": "#888888",
+            "citation": (
+                "Cronbach, L. J. (1951). Coefficient alpha and the internal "
+                "structure of tests. *Psychometrika, 16*(3), 297–334."
+            ),
+            "note": "Classic reliability coefficient, shown as baseline/legacy alongside Construct Reliability in the CPI tab.",
+        },
+        {
+            "section": "Competency Progression Index (CPI)",
+            "tag": "Construct Reliability", "color": "#F0F0F0", "border": "#888888",
+            "citation": (
+                "Rosli, M. S., Saleh, N. S., Alshammari, S. H., Ibrahim, M. M., "
+                "Atan, A. S., & Atan, N. A. (2021). Improving Questionnaire "
+                "Reliability using Construct Reliability for Researches in "
+                "Educational Technology. *iJIM, 15*(04), 109. "
+                "https://doi.org/10.3991/ijim.v15i04.20199"
+            ),
+            "note": "Primary reliability method (CR) for IRT-derived factor loadings, CPI tab.",
+        },
+        {
+            "section": "Competency Progression Index (CPI)",
+            "tag": "Omega", "color": "#F0F0F0", "border": "#888888",
+            "citation": (
+                "McDonald, R. P. (1999). *Test Theory: A Unified Treatment*. "
+                "Lawrence Erlbaum. — Dunn, T. J., Baguley, T., & Brunsden, V. "
+                "(2014). From alpha to omega. *British Journal of Psychology, "
+                "105*(3), 399–412."
+            ),
+            "note": "McDonald's omega, secondary reliability measure alongside CR, CPI tab.",
+        },
+        {
+            "section": "Competency Progression Index (CPI)",
+            "tag": "AVE", "color": "#F0F0F0", "border": "#888888",
+            "citation": (
+                "Fornell, C., & Larcker, D. F. (1981). Evaluating structural "
+                "equation models with unobservable variables and measurement "
+                "error. *Journal of Marketing Research, 18*(1), 39–50."
+            ),
+            "note": "Average Variance Extracted (convergent validity), CPI tab.",
+        },
+        {
+            "section": "Competency Progression Index (CPI)",
+            "tag": "Thresholds", "color": "#F0F0F0", "border": "#888888",
+            "citation": (
+                "Hair, J. F., Ringle, C. M., & Sarstedt, M. (2014). PLS-SEM: "
+                "Indeed a silver bullet. *Journal of Marketing Theory and "
+                "Practice, 19*(2), 139–152."
+            ),
+            "note": "CR/AVE/α interpretation thresholds, CPI tab.",
+        },
+        {
+            "section": "Competency Progression Index (CPI)",
+            "tag": "LLM-as-judge", "color": "#F0F0F0", "border": "#888888",
+            "citation": (
+                "Zheng, L., Chiang, W.-L., Sheng, Y., et al. (2023). Judging "
+                "LLM-as-a-Judge with MT-Bench and Chatbot Arena. *arXiv*. "
+                "https://doi.org/10.48550/ARXIV.2306.05685"
+            ),
+            "note": "CPI_qual's LLM-as-judge rubric scoring methodology, CPI tab.",
+        },
+        # ── IRT Analysis ─────────────────────────────────────────────
+        {
+            "section": "IRT Analysis",
+            "tag": "IRT", "color": "#E6F7F1", "border": "#009E73",
             "citation": (
                 "De Ayala, R. J. (2009). "
                 "*The Theory and Practice of Item Response Theory*. "
@@ -7429,10 +7747,10 @@ See Appendix 1 of the published instrument for full item listings.
             ),
             "note": "Rasch (1PL), 2PL, and GRM models used in the IRT Analysis tab.",
         },
+        # ── Qualitative / LLM Analysis ───────────────────────────────
         {
-            "tag": "ITA",
-            "color": "#FFF3E6",
-            "border": "#EE7733",
+            "section": "Qualitative / LLM Analysis",
+            "tag": "ITA", "color": "#FFF3E6", "border": "#EE7733",
             "citation": (
                 "Braun, V., & Clarke, V. (2006). "
                 "Using thematic analysis in psychology. "
@@ -7442,32 +7760,35 @@ See Appendix 1 of the published instrument for full item listings.
             "note": "Inductive Thematic Analysis (ITA) methodology used in the LLM Analysis tab.",
         },
         {
-            "tag": "De Paoli",
-            "color": "#FFF3E6",
-            "border": "#EE7733",
+            "section": "Qualitative / LLM Analysis",
+            "tag": "De Paoli", "color": "#FFF3E6", "border": "#EE7733",
             "citation": (
-                "De Paoli, S. (2024). "
-                "Performing an inductive thematic analysis of semi-structured interviews "
-                "with a Large Language Model. "
-                "*Applied AI Letters, 5*(1), e129. "
-                "https://doi.org/10.1002/ail2.129"
+                "De Paoli, S. (2024). Performing an inductive thematic "
+                "analysis of semi-structured interviews with a large "
+                "language model: An exploration and provocation on the "
+                "limits of the approach. *Social Science Computer Review, "
+                "42*(4), 997–1019. https://doi.org/10.1177/08944393231220483"
             ),
             "note": "LLM-assisted ITA pipeline methodology (Phases 1–6) used in the LLM Analysis tab.",
         },
         {
-            "tag": "SDT",
-            "color": "#E6F3FB",
-            "border": "#0077BB",
+            "section": "Qualitative / LLM Analysis",
+            "tag": "DTA", "color": "#FFF3E6", "border": "#EE7733",
             "citation": (
-                "Deci, E. L., & Ryan, R. M. (1985). "
-                "*Intrinsic Motivation and Self-Determination in Human Behavior*. "
-                "Plenum. https://doi.org/10.1007/978-1-4899-2271-7"
+                "Bingham, A. J. (2023). From data management to actionable "
+                "findings: A five-phase process of qualitative data analysis. "
+                "*International Journal of Qualitative Methods, 22*, 1–11. "
+                "https://doi.org/10.1177/16094069231183620"
             ),
-            "note": "Self-Determination Theory underpinning SIMS construct interpretation.",
+            "note": "Deductive Thematic Analysis (DTA) pipeline methodology used in the LLM Analysis tab.",
         },
     ]
 
+    _section_seen = None
     for ref in _REFS:
+        if ref["section"] != _section_seen:
+            _section_seen = ref["section"]
+            st.markdown(f"#### {_section_seen}")
         _r_color  = ref["color"]
         _r_border = ref["border"]
         _r_tag    = ref["tag"]
@@ -7489,7 +7810,7 @@ See Appendix 1 of the published instrument for full item listings.
     st.divider()
     st.caption(
         "To export this reference list to PDF, use the Full Programme Report "
-        "generator in section vi."
+        "generator in section vii."
     )
 
 # -----------------------------------------------------------------------
@@ -7659,10 +7980,10 @@ def _build_pdf(sections: list, title: str) -> bytes:
     story.append(HRFlowable(width="100%", thickness=0.5,
                              color=colors.HexColor("#CCCCCC")))
     story.append(Paragraph(
-        "Instruments: CCCES (Dole & Sinatra, 1998), SIMS (Deci & Ryan, 1985), "
-        "AI-CI, AIM-F. "
+        "Instruments: SCCCES (Rotgans & Schmidt, 2011; Heddy et al., 2018), "
+        "SIMS (Guay, Vallerand & Blanchard, 2000), AI-CI, AIM-F. "
         "Qualitative analysis: Braun & Clarke (2006); De Paoli (2024); "
-        "Bingham (2023). "
+        "Bingham (2023). Full reference list: Report Generation, section viii. "
         "LLM-assisted thematic analysis is exploratory and does not establish "
         "formal procedures for I-/D-TA with LLMs.",
         disclaimer_style,
