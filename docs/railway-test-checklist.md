@@ -338,8 +338,7 @@ A new **"🔗 Correlations"** tab now sits right after Inferential Statistics. I
 4. Confirm the **De Paoli (2024)** citation now reads *Social Science Computer Review, 42*(4), 997–1019 (previously showed a mismatched *Applied AI Letters* citation — now corrected).
 5. In the sidebar (visible on any page, not just Report Generation), open **"📚 Instruments & References"** and confirm it also now correctly attributes SCCCES to Rotgans & Schmidt (2011) + Heddy et al. (2018), and SIMS to Guay, Vallerand & Blanchard (2000) — not the earlier incorrect "SIMS (Deci & Ryan, 1985)" label.
 6. Confirm the **AI-CI** instrument description now cites **Zhang, Perry & Lee (2025)**, *International Journal of Artificial Intelligence in Education, 35*(1), 398–438 — their own instrument is likewise abbreviated "AI-CI". Confirm this same citation also appears in the sidebar panel.
-7. Confirm a **DiPaola, Payne & Breazeal (2020)** citation appears in the Instruments section, labeled as related AI-ethics-education context provided by the researcher — not as the source of AIM-F, which remains correctly attributed as an original Basics4AI-programme instrument.
-8. ✅ Pass if: the instrument overview correctly explains SCCCES's dual provenance and AI-CI's source, the reference list is organized by section and covers every method used in the app, and no stale/incorrect citations remain (Dole & Sinatra, the wrong De Paoli journal, or the wrong SIMS attribution).
+7. ✅ Pass if: the instrument overview correctly explains SCCCES's dual provenance and AI-CI's source, the reference list is organized by section and covers every method used in the app, and no stale/incorrect citations remain (Dole & Sinatra, the wrong De Paoli journal, or the wrong SIMS attribution).
 
 ### Cleanup
 

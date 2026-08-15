@@ -7474,18 +7474,6 @@ published instrument for full item listings.
             ),
             "note": "Source instrument for AI-CI (20-item MCQ) -- their own instrument is likewise abbreviated \"AI-CI\", validated with 981 middle-school students.",
         },
-        {
-            "section": "Instruments",
-            "tag": "Design ethics", "color": "#E6F3FB", "border": "#0077BB",
-            "citation": (
-                "DiPaola, D., Payne, B. H., & Breazeal, C. (2020). Decoding "
-                "Design Agendas: An Ethical Design Activity for Middle "
-                "School Students. *Proceedings of the Interaction Design "
-                "and Children Conference (IDC '20)*, 1–10. "
-                "https://doi.org/10.1145/3392063.3394396"
-            ),
-            "note": "Provided by the researcher as related AI-ethics-education context; not the direct source of AIM-F, which is an original Basics4AI-programme instrument.",
-        },
         # ── Descriptive & Data-Quality Checks ──────────────────────────
         {
             "section": "Descriptive & Data-Quality Checks",
