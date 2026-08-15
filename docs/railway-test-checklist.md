@@ -309,7 +309,8 @@ A new **"🔗 Correlations"** tab now sits right after Inferential Statistics. I
    - A green **"✅ Best model by BIC"** message names one of the blocks.
    - A **coefficients table** appears for the best model, showing `_within` and `_between` terms separately for each predictor.
    - Expanding **"📊 Likelihood ratio tests"** and **"📐 Variance Inflation Factors"** shows populated tables.
-4. ✅ Pass if: the model runs without error, the small-sample caveat is always visible, and within/between coefficients are clearly distinguished.
+4. Open **"ℹ️ What do these numbers mean?"** and confirm it now includes, in order: a block-by-block explanation of the model comparison table (M0_null → M3b_random_slope); how "Best model by BIC" is selected, citing **Schwarz (1978)**; how "Best model by AIC" is selected, citing **Akaike (1974)**; a general guide to reading a coefficients table (including what the `_reml` suffix means); an explanation of how to interpret a random-slope model's coefficients (e.g. `M3b_random_slope_reml`), citing **Barr, Levy, Scheepers & Tily (2013)**; the existing LRT explanation; and the existing within/between-person and VIF explanations.
+5. ✅ Pass if: the model runs without error, the small-sample caveat is always visible, within/between coefficients are clearly distinguished, and the expanded help text correctly explains every table on the page with its citation.
 
 ### L.4 — Repeated-Measures Correlations (8 min)
 

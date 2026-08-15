@@ -1866,17 +1866,101 @@ _STAT_HELP = {
         "predictors in multilevel regression models. *Psychological "
         "Methods, 12*(2), 121-138."
     ),
+    "mixed_model_blocks": (
+        "**Model Comparison Table — Reading the Blocks**\n\n"
+        "Each row is a mixed-effects model sharing the same "
+        "random-intercept-per-student structure, with a growing set of "
+        "fixed effects, so they can be meaningfully compared against "
+        "each other:\n\n"
+        "- **M0_null** — intercept only (baseline: how much scores vary "
+        "with no predictors at all).\n"
+        "- **M1_module** — adds a linear module/time trend.\n"
+        "- **M2_within** — adds each selected predictor's *within-person* "
+        "effect (person-mean-centered).\n"
+        "- **M3_full** — adds each predictor's *between-person* effect "
+        "too (see \"Within-Person vs. Between-Person Effects\" below).\n"
+        "- **M3b_random_slope** — same fixed effects as M3_full, but "
+        "additionally lets the module-to-module trend vary by student "
+        "instead of assuming everyone follows the same slope (see "
+        "\"Interpreting a random-slope model\" below).\n\n"
+        "All blocks are fit by maximum likelihood (ML, not REML) — this "
+        "is required for the AIC/BIC/LRT comparisons above to be valid "
+        "across models with different fixed effects. Pinheiro, J. C., & "
+        "Bates, D. M. (2000). *Mixed-Effects Models in S and S-PLUS*, "
+        "§2.4."
+    ),
+    "bic_selection": (
+        "**How \"Best model by BIC\" Is Selected**\n\n"
+        "The Bayesian Information Criterion (BIC) is computed for every "
+        "block that converged, and the block with the **lowest** BIC is "
+        "labeled \"Best model by BIC.\" BIC penalizes each additional "
+        "parameter more heavily than AIC does, so it favors simpler "
+        "models more strongly — the more conservative, and primary, "
+        "criterion here given this study's modest sample size "
+        "(~75-110 students). Schwarz, G. (1978). Estimating the "
+        "dimension of a model. *Annals of Statistics, 6*(2), 461-464."
+    ),
+    "aic_selection": (
+        "**How \"Best model by AIC\" Is Selected**\n\n"
+        "The Akaike Information Criterion (AIC) is computed the same "
+        "way, over the same set of converged blocks, and the block with "
+        "the **lowest** AIC is labeled \"Best model by AIC.\" AIC "
+        "penalizes added complexity less than BIC, so it more often "
+        "favors a richer model with more predictor terms — when AIC and "
+        "BIC disagree on which block is best, that disagreement is "
+        "itself informative (see the caption under the AIC table). "
+        "Akaike, H. (1974). A new look at the statistical model "
+        "identification. *IEEE Transactions on Automatic Control, "
+        "19*(6), 716-723."
+    ),
+    "coef_table_interpretation": (
+        "**Reading a Coefficients Table**\n\n"
+        "Each row is one term in the selected model's formula:\n\n"
+        "- **Estimate** — the term's effect on the outcome (percent-"
+        "correct points), holding the other terms constant.\n"
+        "- **SE** — standard error of that estimate; **z** = "
+        "Estimate ÷ SE; **p** — the associated significance level "
+        "(asymptotic/z-based — see the small-sample caveat above).\n"
+        "- **Intercept** and **Group Var** rows are not predictor "
+        "effects — Intercept is the model's baseline, and Group Var is "
+        "the estimated between-student variance in that baseline (how "
+        "much students differ from each other on average).\n"
+        "- A table titled with a **\"_reml\" suffix** (e.g. "
+        "\"M0_null_reml\") means this specific block was re-fit using "
+        "REML instead of ML *after* being selected by AIC/BIC — REML "
+        "gives more accurate standard errors for reporting, but its "
+        "likelihood isn't comparable across different models, which is "
+        "why block *selection* uses ML while only the *winning* "
+        "block(s) get this REML refit."
+    ),
+    "random_slope_interpretation": (
+        "**Interpreting a Random-Slope Model (\"M3b_random_slope\")**\n\n"
+        "Every other block assumes each student's module-to-module "
+        "trend is the same — a shared slope, with only their starting "
+        "point (intercept) differing. M3b_random_slope relaxes this: it "
+        "lets that trend itself vary by student. Its coefficients table "
+        "shows the same fixed-effect terms as M3_full, plus additional "
+        "variance-component rows (student-level variance in the module "
+        "slope, and its covariance with the intercept) — these describe "
+        "*how much* the trend differs across students, not a single "
+        "shared effect. This added complexity is only worth reporting "
+        "if AIC/BIC actually prefer this block over M3_full; if not, "
+        "the simpler shared-slope model is the more defensible one. "
+        "Barr, D. J., Levy, R., Scheepers, C., & Tily, H. J. (2013). "
+        "Random effects structure for confirmatory hypothesis testing: "
+        "keep it maximal. *Journal of Memory and Language, 68*(3), "
+        "255-278."
+    ),
     "aic_bic_lrt": (
-        "**AIC / BIC / Likelihood Ratio Test — Model Comparison**\n\n"
-        "Lower AIC/BIC indicates a better-fitting model, penalized for "
-        "complexity — BIC penalizes additional predictors more heavily "
-        "than AIC, and is used here as the primary criterion given this "
-        "study's modest sample size. A likelihood ratio test (LRT) "
-        "formally tests whether adding a block of predictors improves "
-        "fit beyond chance. All block comparisons use maximum-likelihood "
-        "(not REML) fitting — REML likelihoods aren't comparable across "
-        "models with different fixed effects (Pinheiro, J. C., & Bates, "
-        "D. M. (2000). *Mixed-Effects Models in S and S-PLUS*, §2.4)."
+        "**Likelihood Ratio Test (LRT) — Comparing Nested Blocks**\n\n"
+        "A likelihood ratio test formally tests whether adding a block "
+        "of predictors (e.g. M2_within → M3_full) improves fit "
+        "significantly more than chance alone, using the same ML-fit "
+        "blocks as the AIC/BIC comparison above. A significant LRT "
+        "(p < .05) means the added block is a meaningfully better fit, "
+        "not just a bigger model with more free parameters to overfit "
+        "with. Pinheiro, J. C., & Bates, D. M. (2000). *Mixed-Effects "
+        "Models in S and S-PLUS*, §2.4."
     ),
     "vif": (
         "**Variance Inflation Factor (VIF) — Multicollinearity**\n\n"
@@ -3284,6 +3368,16 @@ def _render_correlations_tab(
 
                     with st.expander("ℹ️ What do these numbers mean?", expanded=False):
                         st.markdown(_STAT_HELP["within_between_centering"])
+                        st.divider()
+                        st.markdown(_STAT_HELP["mixed_model_blocks"])
+                        st.divider()
+                        st.markdown(_STAT_HELP["bic_selection"])
+                        st.divider()
+                        st.markdown(_STAT_HELP["aic_selection"])
+                        st.divider()
+                        st.markdown(_STAT_HELP["coef_table_interpretation"])
+                        st.divider()
+                        st.markdown(_STAT_HELP["random_slope_interpretation"])
                         st.divider()
                         st.markdown(_STAT_HELP["aic_bic_lrt"])
                         st.divider()
