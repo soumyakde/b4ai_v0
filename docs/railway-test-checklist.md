@@ -226,6 +226,17 @@ Before each test, you can now optionally exclude participants who fail a data-qu
 
 None needed — this section is read-only/diagnostic (no new data is written), and the exclusion checkboxes reset each time you leave the tab.
 
+### J.4 — Re-test: Across Modules module picker + "Cognitive Engagement" label fix (5 min)
+
+While reviewing J.3, you asked why **Across Modules — Repeated Measures (Friedman Test)** showed **n = 8 students** for every module combination. Root cause confirmed directly against the data: the Friedman test requires complete data across **every** module it's given, and Module 7 (disabled for everyone except the 8-person `amherstyouthandrec1D` cohort) was always silently included — collapsing every other student out of the comparison. Fixed by adding a module picker, defaulting to currently-active modules only (excludes Module 7 by default; can still be added back deliberately). Same fix applied to the Inferential Statistics PDF report, which had the identical silent collapse with no UI to catch it. Also fixed while in this code: the "Survey" selectbox in this section (and in IRT Analysis's Likert Survey GRM section) still said **"SCCCES"** instead of **"Cognitive Engagement"** — a leftover from Item A's original rename that this selectbox wasn't caught by at the time.
+
+1. Go to **📈 Inferential Statistics → Across Modules**, select **"MCQ content knowledge"**. Confirm a new **"Modules to include"** multiselect appears, defaulting to **Modules 1-6** (Module 7 not pre-selected). Confirm the **N subjects** metric now shows a much larger number than before (expect ~95, not 8).
+2. Manually add **Module 7** back into the multiselect — confirm N subjects drops back down to a small number (the Amherst-only complete-case result) — this confirms the picker genuinely controls the test, it's not just cosmetic.
+3. Switch to **"Survey construct"** — confirm the **"Survey"** dropdown now reads **"Cognitive Engagement"**, not "SCCCES". Confirm the same **"Modules to include"** multiselect appears here too, defaulting to Modules 1-6, with N subjects now much higher than 8 (expect ~86 for Cognitive Engagement's Engagement with Task construct).
+4. Go to **🔬 IRT Analysis → Likert Survey — Graded Response Model (GRM)** — confirm its **"Survey"** dropdown also now reads "Cognitive Engagement", not "SCCCES".
+5. Go to **Report Generation → ii. Inferential Statistics**, generate the PDF — confirm it completes without error (this report's Across Modules section now uses the same active-modules-by-default scoping, with no UI needed there since it's a static report).
+6. ✅ Pass if: both module pickers default sensibly and visibly change N when you add/remove modules, "Cognitive Engagement" appears everywhere "SCCCES" used to, and the PDF report still generates cleanly.
+
 ---
 
 ## If anything fails

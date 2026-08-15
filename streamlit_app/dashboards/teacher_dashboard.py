@@ -32,7 +32,7 @@ except ImportError:
     _HAS_PLOTLY = False
 
 from core.analytics.datasets.canonical_loader import load_canonical_data
-from modules.registry.discover import discover_all_module_numbers
+from modules.registry.discover import discover_all_module_numbers, discover_module_definitions
 from core.analytics.descriptive.score_aggregator import (
     compute_assessment_scores,
     compute_construct_means,
@@ -2531,31 +2531,80 @@ def _render_inferential_tab(
         )
 
         if rm_type == "MCQ content knowledge":
+            import re as _re_rm
+
             _mcq_keys = [
                 k for k in canonical_df["instrument_key"].unique()
                 if "content_mcq_assessment" in k
             ]
-            _rm_mcq_canonical = _render_exclusion_controls(
-                canonical_df, _mcq_keys, key_prefix="inf_rm_mcq"
+
+            def _mcq_module_num(k: str) -> int:
+                m = _re_rm.search(r"(\d+)", k)
+                return int(m.group(1)) if m else 0
+
+            _mcq_keys = sorted(_mcq_keys, key=_mcq_module_num)
+            _mcq_labels = {k: f"Module {_mcq_module_num(k)}" for k in _mcq_keys}
+
+            # The Friedman test requires complete data across EVERY selected
+            # module (rows with any missing module are dropped entirely), so
+            # including a disabled/low-completion module can silently shrink
+            # n to just the handful of students who happened to complete it.
+            # Default to active modules only; let the researcher opt in.
+            _active_nums = {
+                int(d["meta"]["module_id"].split("_", 1)[1])
+                for d in discover_module_definitions(include_inactive=False)
+                if d["meta"]["module_id"].startswith("module_")
+                and d["meta"]["module_id"].split("_", 1)[1].isdigit()
+            }
+            _default_keys = [k for k in _mcq_keys if _mcq_module_num(k) in _active_nums]
+            if not _default_keys:
+                _default_keys = _mcq_keys
+
+            _selected_mcq_labels = st.multiselect(
+                "Modules to include",
+                options=[_mcq_labels[k] for k in _mcq_keys],
+                default=[_mcq_labels[k] for k in _default_keys],
+                key="inf_rm_mcq_modules",
+                help=(
+                    "The Friedman test only uses students with data in EVERY "
+                    "selected module. Including a disabled or low-completion "
+                    "module (e.g. one paused mid-pilot) can sharply reduce n "
+                    "-- defaults to currently active modules only; add others "
+                    "deliberately if you want that smaller, complete-case "
+                    "comparison."
+                ),
             )
-            with st.spinner("Computing…"):
-                r_rm = run_repeated_measures(
-                    _rm_mcq_canonical,
-                    instrument_key="content_mcq_assessment",
-                    construct=None, alpha=0.05,
+            _selected_mcq_keys = [
+                k for k in _mcq_keys if _mcq_labels[k] in _selected_mcq_labels
+            ]
+
+            if len(_selected_mcq_keys) < 2:
+                st.info("Select at least 2 modules to run the repeated-measures test.")
+            else:
+                _mcq_scope_canonical = canonical_df[
+                    canonical_df["instrument_key"].isin(_selected_mcq_keys)
+                ]
+                _rm_mcq_canonical = _render_exclusion_controls(
+                    _mcq_scope_canonical, _selected_mcq_keys, key_prefix="inf_rm_mcq"
                 )
-            _render_result_card(r_rm, score_label="% Correct")
+                with st.spinner("Computing…"):
+                    r_rm = run_repeated_measures(
+                        _rm_mcq_canonical,
+                        instrument_key="content_mcq_assessment",
+                        construct=None, alpha=0.05,
+                    )
+                _render_result_card(r_rm, score_label="% Correct")
 
         else:
             col1, col2 = st.columns(2)
             with col1:
                 rm_survey = st.selectbox(
                     "Survey",
-                    options=["SCCCES", "SIMS"],
+                    options=[_SURVEY_LABELS["b4ai_sccces_survey"], _SURVEY_LABELS["b4ai_sims_survey"]],
                     key="inf_rm_survey",
                 )
             survey_key = (
-                "b4ai_sccces_survey" if rm_survey == "SCCCES"
+                "b4ai_sccces_survey" if rm_survey == _SURVEY_LABELS["b4ai_sccces_survey"]
                 else "b4ai_sims_survey"
             )
             sccces_constructs = [
@@ -2570,7 +2619,7 @@ def _render_inferential_tab(
                 "external_regulation","amotivation",
             ]
             constructs = (
-                sccces_constructs if rm_survey == "SCCCES"
+                sccces_constructs if survey_key == "b4ai_sccces_survey"
                 else sims_constructs
             )
             with col2:
@@ -2580,22 +2629,66 @@ def _render_inferential_tab(
                     key="inf_rm_construct",
                 )
 
-            _survey_keys = [
-                k for k in canonical_df["instrument_key"].unique()
-                if survey_key in k
-            ]
-            _rm_survey_canonical = _render_exclusion_controls(
-                canonical_df, _survey_keys, key_prefix="inf_rm_survey"
+            import re as _re_rm2
+
+            _survey_keys = sorted(
+                (k for k in canonical_df["instrument_key"].unique() if survey_key in k),
+                key=lambda k: int(_re_rm2.search(r"(\d+)", k).group(1))
+                if _re_rm2.search(r"(\d+)", k) else 0,
             )
 
-            with st.spinner("Computing…"):
-                r_rm = run_repeated_measures(
-                    _rm_survey_canonical,
-                    instrument_key=survey_key,
-                    construct=rm_construct,
-                    alpha=0.05,
+            def _survey_module_num(k: str) -> int:
+                m = _re_rm2.search(r"(\d+)", k)
+                return int(m.group(1)) if m else 0
+
+            _survey_labels = {k: f"Module {_survey_module_num(k)}" for k in _survey_keys}
+            _active_nums_survey = {
+                int(d["meta"]["module_id"].split("_", 1)[1])
+                for d in discover_module_definitions(include_inactive=False)
+                if d["meta"]["module_id"].startswith("module_")
+                and d["meta"]["module_id"].split("_", 1)[1].isdigit()
+            }
+            _default_survey_keys = [
+                k for k in _survey_keys if _survey_module_num(k) in _active_nums_survey
+            ]
+            if not _default_survey_keys:
+                _default_survey_keys = _survey_keys
+
+            _selected_survey_labels = st.multiselect(
+                "Modules to include",
+                options=[_survey_labels[k] for k in _survey_keys],
+                default=[_survey_labels[k] for k in _default_survey_keys],
+                key="inf_rm_survey_modules",
+                help=(
+                    "The Friedman test only uses students with data in EVERY "
+                    "selected module. Including a disabled or low-completion "
+                    "module can sharply reduce n -- defaults to currently "
+                    "active modules only; add others deliberately if you "
+                    "want that smaller, complete-case comparison."
+                ),
+            )
+            _selected_survey_keys = [
+                k for k in _survey_keys if _survey_labels[k] in _selected_survey_labels
+            ]
+
+            if len(_selected_survey_keys) < 2:
+                st.info("Select at least 2 modules to run the repeated-measures test.")
+            else:
+                _survey_scope_canonical = canonical_df[
+                    canonical_df["instrument_key"].isin(_selected_survey_keys)
+                ]
+                _rm_survey_canonical = _render_exclusion_controls(
+                    _survey_scope_canonical, _selected_survey_keys, key_prefix="inf_rm_survey"
                 )
-            _render_result_card(r_rm, score_label="Mean Score")
+
+                with st.spinner("Computing…"):
+                    r_rm = run_repeated_measures(
+                        _rm_survey_canonical,
+                        instrument_key=survey_key,
+                        construct=rm_construct,
+                        alpha=0.05,
+                    )
+                _render_result_card(r_rm, score_label="Mean Score")
 
 
 # -----------------------------------------------------------------------
@@ -3683,11 +3776,11 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
         with col1:
             survey_choice = st.selectbox(
                 "Survey",
-                options=["SCCCES", "SIMS"],
+                options=[_SURVEY_LABELS["b4ai_sccces_survey"], _SURVEY_LABELS["b4ai_sims_survey"]],
                 key="irt_survey_choice",
             )
         survey_key = (
-            "b4ai_sccces_survey" if survey_choice == "SCCCES"
+            "b4ai_sccces_survey" if survey_choice == _SURVEY_LABELS["b4ai_sccces_survey"]
             else "b4ai_sims_survey"
         )
         sccces_constructs = [
@@ -3702,7 +3795,7 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
             "external_regulation","amotivation",
         ]
         constructs = (
-            sccces_constructs if survey_choice == "SCCCES"
+            sccces_constructs if survey_key == "b4ai_sccces_survey"
             else sims_constructs
         )
         with col2:
@@ -3746,7 +3839,7 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
                         compute_reliability_report, build_reliability_summary_df
                     )
                     _all_constructs = (
-                        sccces_constructs if survey_choice == "SCCCES"
+                        sccces_constructs if survey_key == "b4ai_sccces_survey"
                         else sims_constructs
                     )
                     _all_reports = []
@@ -7055,9 +7148,40 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
 
             # Across Modules
             if inc_across:
+                import re as _re_rpt_rm
+
+                # The Friedman test drops any student missing data in even
+                # one selected module. Scoping to currently-active modules
+                # by default avoids a disabled/low-completion module (e.g.
+                # one paused mid-pilot) silently collapsing n to just the
+                # handful of students who happened to complete it -- same
+                # fix applied to the live Inferential Statistics tab.
+                _active_nums_rpt = {
+                    int(d["meta"]["module_id"].split("_", 1)[1])
+                    for d in discover_module_definitions(include_inactive=False)
+                    if d["meta"]["module_id"].startswith("module_")
+                    and d["meta"]["module_id"].split("_", 1)[1].isdigit()
+                }
+
+                def _active_scoped_df(instrument_substr: str) -> pd.DataFrame:
+                    keys = [
+                        k for k in canonical_df["instrument_key"].unique()
+                        if instrument_substr in k
+                    ]
+                    active_keys = [
+                        k for k in keys
+                        if (lambda m: int(m.group(1)) if m else None)(
+                            _re_rpt_rm.search(r"(\d+)", k)
+                        ) in _active_nums_rpt
+                    ]
+                    return canonical_df[
+                        canonical_df["instrument_key"].isin(active_keys or keys)
+                    ]
+
                 # MCQ
                 try:
-                    r = run_repeated_measures(canonical_df, "content_mcq_assessment", construct=None)
+                    _mcq_active_df = _active_scoped_df("content_mcq_assessment")
+                    r = run_repeated_measures(_mcq_active_df, "content_mcq_assessment", construct=None)
                     if not r.get("error"):
                         mbt = r.get("means_by_time", {})
                         mbt_df = pd.DataFrame([
@@ -7089,10 +7213,11 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                     ("b4ai_sims_survey",   sims_constructs),
                 ]:
                     survey_label = _SURVEY_LABELS.get(survey_key, survey_key)
+                    _survey_active_df = _active_scoped_df(survey_key)
                     summary_rows = []
                     for construct in constructs:
                         try:
-                            r = run_repeated_measures(canonical_df, survey_key, construct=construct)
+                            r = run_repeated_measures(_survey_active_df, survey_key, construct=construct)
                             if r.get("error"):
                                 continue
                             summary_rows.append({
@@ -7148,7 +7273,11 @@ def _report_irt(canonical_df: pd.DataFrame) -> None:
             irt_model = st.selectbox("Model", ["Rasch (1PL)", "2PL (requires n≥50)"],
                                      key="rpt_irt_model")
         else:
-            irt_survey = st.selectbox("Survey", ["SCCCES", "SIMS"], key="rpt_irt_survey")
+            irt_survey = st.selectbox(
+                "Survey",
+                [_SURVEY_LABELS["b4ai_sccces_survey"], _SURVEY_LABELS["b4ai_sims_survey"]],
+                key="rpt_irt_survey",
+            )
             irt_construct = st.selectbox(
                 "Construct",
                 ["engagement_with_task","effort_and_persistence","experience_of_flow",
@@ -7194,7 +7323,8 @@ def _report_irt(canonical_df: pd.DataFrame) -> None:
                         except Exception:
                             pass
                 else:
-                    survey_key = ("b4ai_sccces_survey" if irt_survey == "SCCCES"
+                    survey_key = ("b4ai_sccces_survey"
+                                  if irt_survey == _SURVEY_LABELS["b4ai_sccces_survey"]
                                   else "b4ai_sims_survey")
                     lmat, litem_ids = build_likert_response_matrix(
                         canonical_df, survey_key, irt_construct
