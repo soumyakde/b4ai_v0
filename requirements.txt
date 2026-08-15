@@ -21,6 +21,7 @@ seaborn
 sentence-transformers
 reportlab
 pingouin
+statsmodels
 scipy
 girth
 pdfplumber

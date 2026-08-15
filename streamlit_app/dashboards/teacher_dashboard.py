@@ -46,6 +46,17 @@ from core.analytics.inferential.inferential_tests import (
     run_repeated_measures,
     run_bland_altman,           # ← NEW
 )
+from core.analytics.correlational.correlation_engine import (
+    compute_construct_reliability,
+    compute_inter_construct_correlation_matrix,
+    compute_composite_scores,
+    compute_rai,
+    DEFAULT_SCCCES_COMPOSITE_MAP,
+    build_person_module_dataset,
+    person_mean_center,
+    run_mixed_model,
+    run_repeated_measures_correlations,
+)
 try:
     from core.analytics.irt.irt_runner import (
         build_binary_response_matrix,
@@ -1819,6 +1830,92 @@ _STAT_HELP = {
         "Greenhouse-Geisser corrected p-value regardless of what Mauchly's "
         "test reports."
     ),
+    "cronbach_alpha": (
+        "**Cronbach's α — Internal Consistency Reliability**\n\n"
+        "For a sub-construct with 3+ items, measures how consistently "
+        "those items move together — the classic reliability check "
+        "before trusting a multi-item score.\n\n"
+        "- **α < 0.70** — Poor\n"
+        "- **0.70 ≤ α < 0.80** — Acceptable\n"
+        "- **0.80 ≤ α < 0.90** — Good\n"
+        "- **α ≥ 0.90** — Excellent\n\n"
+        "A low α means the items aren't measuring one coherent thing — "
+        "treat that sub-construct's mean score cautiously, or consider "
+        "combining it with a related sub-construct."
+    ),
+    "spearman_brown": (
+        "**Spearman-Brown Reliability — 2-Item Scales**\n\n"
+        "Cronbach's α is not appropriate for exactly 2-item scales — this "
+        "step-up formula (r_sb = 2r/(1+r), where r is the correlation "
+        "between the two items) is the recommended alternative. Eisinga, "
+        "R., Te Grotenhuis, M., & Pelzer, B. (2013). The reliability of a "
+        "two-item scale: Pearson, Cronbach, or Spearman-Brown? "
+        "*International Journal of Public Health, 58*(4), 637-642. Read "
+        "using the same 0.70/0.80/0.90 thresholds as Cronbach's α."
+    ),
+    "within_between_centering": (
+        "**Within-Person vs. Between-Person Effects**\n\n"
+        "Person-mean-centering splits a predictor (e.g. engagement) into "
+        "two separate effects: the *within-person* version (this "
+        "student's score in this module, minus their own average — "
+        "\"did this module feel more engaging than usual for them?\") and "
+        "the *between-person* version (that student's own average across "
+        "all modules — \"is this generally a more engaged student?\"). "
+        "Pooling both into one predictor conflates two different "
+        "questions. Enders, C. K., & Tofighi, D. (2007). Centering "
+        "predictors in multilevel regression models. *Psychological "
+        "Methods, 12*(2), 121-138."
+    ),
+    "aic_bic_lrt": (
+        "**AIC / BIC / Likelihood Ratio Test — Model Comparison**\n\n"
+        "Lower AIC/BIC indicates a better-fitting model, penalized for "
+        "complexity — BIC penalizes additional predictors more heavily "
+        "than AIC, and is used here as the primary criterion given this "
+        "study's modest sample size. A likelihood ratio test (LRT) "
+        "formally tests whether adding a block of predictors improves "
+        "fit beyond chance. All block comparisons use maximum-likelihood "
+        "(not REML) fitting — REML likelihoods aren't comparable across "
+        "models with different fixed effects (Pinheiro, J. C., & Bates, "
+        "D. M. (2000). *Mixed-Effects Models in S and S-PLUS*, §2.4)."
+    ),
+    "vif": (
+        "**Variance Inflation Factor (VIF) — Multicollinearity**\n\n"
+        "Checks whether predictors in the same model are too correlated "
+        "with each other to interpret individually. A VIF above roughly "
+        "5-10 for a predictor means its effect is hard to distinguish "
+        "from another predictor's — consider dropping or combining them."
+    ),
+    "rm_corr": (
+        "**Repeated-Measures Correlation (rmcorr)**\n\n"
+        "The within-person correlation between two variables measured "
+        "repeatedly (e.g. engagement and score, across modules) — a "
+        "simpler, single-number companion to the mixed-effects model, "
+        "removing between-student variance rather than blending it in "
+        "like an ordinary correlation would. Bakdash, J. Z., & Marusich, "
+        "L. R. (2017). Repeated measures correlation. *Frontiers in "
+        "Psychology, 8*:456."
+    ),
+    "fdr_bh": (
+        "**FDR (Benjamini-Hochberg) Correction**\n\n"
+        "When testing several predictors at once, some will look "
+        "significant by chance alone. FDR correction controls the "
+        "expected proportion of false positives among the results called "
+        "significant — less conservative than Bonferroni, appropriate for "
+        "exploratory multiple testing. Benjamini, Y., & Hochberg, Y. "
+        "(1995). Controlling the false discovery rate. *Journal of the "
+        "Royal Statistical Society: Series B, 57*(1), 289-300."
+    ),
+    "rai": (
+        "**Relative Autonomy Index (RAI)**\n\n"
+        "A single score placing a student's motivation on the "
+        "self-determination continuum, from autonomous (intrinsic) to "
+        "controlled (external): RAI = 2×Intrinsic + 1×Identified − "
+        "1×External − 2×Amotivation. Ryan, R. M., & Connell, J. P. "
+        "(1989). Perceived locus of causality and internalization. "
+        "*Journal of Personality and Social Psychology, 57*(5), 749-761. "
+        "Amotivation is also kept available separately — it reflects "
+        "active disengagement, not just \"low autonomous motivation.\""
+    ),
 }
 
 _IRT_HELP = {
@@ -2835,6 +2932,415 @@ def _render_inferential_tab(
 
 
 # -----------------------------------------------------------------------
+# Tab 3 — Correlations (engagement/motivation vs. performance)
+# -----------------------------------------------------------------------
+
+_CORR_SURVEY_KEYS = {
+    "Cognitive Engagement (SCCCES)": "b4ai_sccces_survey",
+    "Interest & Motivation (SIMS)":  "b4ai_sims_survey",
+}
+
+
+def _fmt_stat(v, decimals=3):
+    if v is None:
+        return "—"
+    try:
+        if isinstance(v, float) and (v != v):  # NaN
+            return "—"
+        return f"{v:.{decimals}f}"
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def _render_correlations_tab(
+    username: str,
+    canonical_df: pd.DataFrame,
+    demographics_df: pd.DataFrame,
+) -> None:
+    """
+    Tab 3 — Correlations: does engagement/motivation relate to
+    assessment performance?
+
+    Four sub-sections, matching the confirmed research plan:
+      1. Reliability & Redundancy -- assumption gate before any
+         sub-construct is trusted as a predictor.
+      2. Composite Builder -- collapse redundant sub-constructs, RAI.
+      3. Mixed-Effects Model -- primary analysis (within/between-person).
+      4. Repeated-Measures Correlations -- supplementary, reporting-
+         friendly companion to #3.
+    """
+    st.subheader("🔗 Correlations")
+    st.caption(
+        "Does cognitive engagement or motivation relate to assessment "
+        "performance -- within students over time, and/or between "
+        "students overall? Both the primary mixed-effects model and a "
+        "simpler supplementary correlation are shown; nothing here is "
+        "hidden or auto-selected for you."
+    )
+
+    if "corr_section_radio" not in st.session_state:
+        st.session_state["corr_section_radio"] = "Reliability & Redundancy"
+    section = st.radio(
+        "**Analysis step:**",
+        options=[
+            "Reliability & Redundancy", "Composite Builder",
+            "Mixed-Effects Model", "Repeated-Measures Correlations",
+        ],
+        horizontal=True,
+        key="corr_section_radio",
+    )
+    _CORR_COLORS = {
+        "Reliability & Redundancy":        ("#0077BB", "#E6F3FB"),
+        "Composite Builder":               ("#EE7733", "#FFF3E6"),
+        "Mixed-Effects Model":             ("#D55E00", "#FDECE3"),
+        "Repeated-Measures Correlations":  ("#009E73", "#E6F7F1"),
+    }
+    _cc, _cbg = _CORR_COLORS.get(section, ("#333", "#F8F8F8"))
+    st.markdown(
+        f"<div style='background:{_cbg};border-left:5px solid {_cc};"
+        f"border-radius:6px;padding:0.4rem 1rem;margin:0.3rem 0;'>"
+        f"<strong style='color:{_cc};'>Showing: {section}</strong></div>",
+        unsafe_allow_html=True,
+    )
+    st.divider()
+
+    # ====================================================================
+    # Section 1: Reliability & Redundancy
+    # ====================================================================
+    if section == "Reliability & Redundancy":
+        st.markdown("### Reliability & Redundancy Screening")
+        st.caption(
+            "Run this before trusting any sub-construct as a predictor. "
+            "SCCCES and SIMS were both adapted for ages 10-14 (a 4-point "
+            "scale here, vs. the 5-point/7-point scales in the original "
+            "instruments) -- this step checks whether that adaptation "
+            "still holds together statistically for this dataset, rather "
+            "than assuming it transfers intact."
+        )
+
+        survey_label = st.selectbox(
+            "Survey", options=list(_CORR_SURVEY_KEYS.keys()), key="corr_rel_survey",
+        )
+        survey_key = _CORR_SURVEY_KEYS[survey_label]
+
+        rel = compute_construct_reliability(canonical_df, survey_key)
+        if rel.empty:
+            st.info("No data available for this survey with the current filters.")
+        else:
+            st.markdown("**Per-sub-construct reliability**")
+            _rel_display = rel[[
+                "construct", "n_items", "n_subjects", "method", "value", "badge",
+            ]].rename(columns={
+                "construct": "Sub-construct", "n_items": "N items",
+                "n_subjects": "N students", "method": "Method",
+                "value": "Reliability", "badge": "Verdict",
+            })
+            st.dataframe(_rel_display, hide_index=True, width="stretch")
+            st.caption(
+                "3+ items: Cronbach's α. Exactly 2 items: Spearman-Brown "
+                "step-up (Eisinga, Te Grotenhuis & Pelzer, 2013, "
+                "*International Journal of Public Health, 58*(4), 637-642) "
+                "-- raw α is not appropriate at n=2. 1 item: not estimable, "
+                "shown as a limitation, not hidden."
+            )
+            with st.expander("ℹ️ What do these numbers mean?", expanded=False):
+                st.markdown(_STAT_HELP["cronbach_alpha"])
+                st.divider()
+                st.markdown(_STAT_HELP["spearman_brown"])
+
+        st.divider()
+        st.markdown("**Inter-sub-construct correlation matrix**")
+        mat = compute_inter_construct_correlation_matrix(canonical_df, survey_key)
+        if mat["error"]:
+            st.info(mat["error"])
+        else:
+            st.dataframe(mat["matrix"], width="stretch")
+            st.caption(
+                "A live, dataset-specific decision aid for the Composite "
+                "Builder (next section) -- highly correlated sub-constructs "
+                "are candidates for combining into one composite. Heddy et "
+                "al. (2018, *Frontiers in Education, 3*:43) already found, "
+                "via their own exploratory factor analysis (N=513), that "
+                "the 4 \"message appraisal\" sub-constructs (coherency, "
+                "plausibility, credibility, comprehensibility) collapse "
+                "into a single empirical factor -- the default composite "
+                "grouping in the next section follows that a priori "
+                "finding, which this matrix lets you confirm against your "
+                "own data."
+            )
+
+    # ====================================================================
+    # Section 2: Composite Builder
+    # ====================================================================
+    elif section == "Composite Builder":
+        st.markdown("### Composite Builder")
+        st.caption(
+            "Combine redundant sub-constructs into named composites, or "
+            "keep them separate -- your choice, informed by the "
+            "reliability/correlation screening above. Defaults to the "
+            "theory-driven grouping already confirmed for this project."
+        )
+
+        if "_corr_composite_map" not in st.session_state:
+            st.session_state["_corr_composite_map"] = {
+                k: list(v) for k, v in DEFAULT_SCCCES_COMPOSITE_MAP.items()
+            }
+
+        all_sccces_constructs = sorted({
+            c for constructs in DEFAULT_SCCCES_COMPOSITE_MAP.values() for c in constructs
+        })
+        current_map = st.session_state["_corr_composite_map"]
+
+        st.markdown("**SCCCES composites** (edit which sub-constructs belong to each):")
+        new_map: Dict[str, List[str]] = {}
+        for composite_name, default_constructs in DEFAULT_SCCCES_COMPOSITE_MAP.items():
+            selected = st.multiselect(
+                composite_name.replace("_", " "),
+                options=all_sccces_constructs,
+                default=current_map.get(composite_name, default_constructs),
+                key=f"corr_composite_{composite_name}",
+            )
+            if selected:
+                new_map[composite_name] = selected
+
+        if st.button("💾 Save composite definitions", key="corr_save_composites"):
+            st.session_state["_corr_composite_map"] = new_map
+            st.success("Composite definitions saved -- used by Mixed-Effects Model and Repeated-Measures Correlations below.")
+
+        st.divider()
+        st.markdown("**SIMS Relative Autonomy Index (RAI)**")
+        st.caption(
+            "RAI = 2×Intrinsic + 1×Identified − 1×External − 2×Amotivation. "
+            "Ryan, R. M., & Connell, J. P. (1989). Perceived locus of "
+            "causality and internalization: Examining reasons for acting "
+            "in two domains. *Journal of Personality and Social "
+            "Psychology, 57*(5), 749-761. (Not Guay, Vallerand & "
+            "Blanchard 2000 -- that is the SIMS source paper but does not "
+            "itself present the RAI formula.) Amotivation is also kept "
+            "available on its own below -- it is a distinct disengagement "
+            "signal, not just \"low RAI.\""
+        )
+        rai_preview = compute_rai(canonical_df)
+        if not rai_preview.empty:
+            st.caption(
+                f"{rai_preview['rai'].notna().sum()} of {len(rai_preview)} "
+                "(student, module) rows have all 4 SIMS sub-constructs "
+                "present and a computable RAI."
+            )
+        with st.expander("ℹ️ What is RAI?", expanded=False):
+            st.markdown(_STAT_HELP["rai"])
+
+    # ====================================================================
+    # Section 3: Mixed-Effects Model
+    # ====================================================================
+    elif section == "Mixed-Effects Model":
+        st.markdown("### Person-Mean-Centered Mixed-Effects Model")
+        st.caption(
+            "Primary analysis: separates *within-student* effects (did "
+            "this student score better in modules where they felt more "
+            "engaged than usual?) from *between-student* effects (do "
+            "generally more engaged students score higher overall?). "
+            "Enders, C. K., & Tofighi, D. (2007). Centering predictors in "
+            "multilevel regression models. *Psychological Methods, "
+            "12*(2), 121-138."
+        )
+
+        composite_map = st.session_state.get(
+            "_corr_composite_map",
+            {k: list(v) for k, v in DEFAULT_SCCCES_COMPOSITE_MAP.items()},
+        )
+        predictor_options = list(composite_map.keys()) + ["RAI", "Amotivation"]
+        selected_predictors = st.multiselect(
+            "Predictors to include",
+            options=predictor_options,
+            default=predictor_options[:2] if len(predictor_options) >= 2 else predictor_options,
+            key="corr_mm_predictors",
+        )
+
+        if not selected_predictors:
+            st.info("Select at least one predictor to run the model.")
+        else:
+            sccces_key = _CORR_SURVEY_KEYS["Cognitive Engagement (SCCCES)"]
+            sims_key = _CORR_SURVEY_KEYS["Interest & Motivation (SIMS)"]
+            instrument_keys_for_exclusion = [sccces_key, sims_key]
+
+            _mm_canonical = _render_exclusion_controls(
+                canonical_df, instrument_keys_for_exclusion, key_prefix="corr_mm",
+            )
+
+            predictor_frames: Dict[str, pd.DataFrame] = {}
+            for pred in selected_predictors:
+                if pred == "RAI":
+                    predictor_frames["RAI"] = compute_rai(_mm_canonical, sims_key)
+                elif pred == "Amotivation":
+                    cm = compute_construct_means(_mm_canonical, instrument_keys=[
+                        k for k in _mm_canonical["instrument_key"].unique()
+                        if k == sims_key or str(k).endswith("_" + sims_key)
+                    ])
+                    predictor_frames["Amotivation"] = cm[cm["construct"] == "amotivation"][
+                        ["user_id", "module_id", "mean_score"]
+                    ]
+                else:
+                    comp = compute_composite_scores(_mm_canonical, sccces_key, {pred: composite_map[pred]})
+                    predictor_frames[pred] = comp[comp["composite"] == pred]
+
+            if st.button("▶ Run Mixed-Effects Model", type="primary", key="corr_mm_run"):
+                long_df = build_person_module_dataset(_mm_canonical, predictor_frames)
+                centered = person_mean_center(long_df, selected_predictors)
+                st.session_state["_corr_mm_result"] = run_mixed_model(
+                    centered, "pct_correct",
+                    within_cols=selected_predictors, between_cols=selected_predictors,
+                )
+
+            mm = st.session_state.get("_corr_mm_result")
+            if mm:
+                if mm.get("error"):
+                    st.error(f"Could not compute: {mm['error']}")
+                else:
+                    st.warning(f"⚠️ {mm['small_sample_caveat']}")
+                    if mm.get("low_n_warning"):
+                        st.warning("Low N -- fewer than 30 students have complete data across the selected predictors.")
+
+                    st.markdown("**Model comparison (blocks, fit by ML for valid AIC/BIC comparison)**")
+                    block_rows = []
+                    for name, b in mm["blocks"].items():
+                        block_rows.append({
+                            "Block": name, "AIC": _fmt_stat(b.get("aic")),
+                            "BIC": _fmt_stat(b.get("bic")), "Converged": b.get("converged"),
+                            "N obs": b.get("n_obs"), "Error": b.get("error") or "",
+                        })
+                    st.dataframe(pd.DataFrame(block_rows), hide_index=True, width="stretch")
+                    if mm.get("best_block_by_bic"):
+                        st.success(f"✅ **Best model by BIC:** {mm['best_block_by_bic']}")
+
+                    best_name = mm.get("best_block_by_bic")
+                    reml_name = f"{best_name}_reml" if best_name else None
+                    display_block = mm["blocks"].get(reml_name) or (mm["blocks"].get(best_name) if best_name else None)
+                    if display_block and display_block.get("params"):
+                        st.markdown(f"**Coefficients — {reml_name or best_name}**")
+                        param_rows = [
+                            {"Term": term, "Estimate": _fmt_stat(p["estimate"]),
+                             "SE": _fmt_stat(p["se"]), "z": _fmt_stat(p.get("z")),
+                             "p": _fmt_stat(p.get("p"), 6)}
+                            for term, p in display_block["params"].items()
+                        ]
+                        st.dataframe(pd.DataFrame(param_rows), hide_index=True, width="stretch")
+
+                    if mm.get("lrt"):
+                        with st.expander("📊 Likelihood ratio tests between nested blocks", expanded=False):
+                            st.dataframe(pd.DataFrame(mm["lrt"]), hide_index=True, width="stretch")
+
+                    if mm.get("vif"):
+                        with st.expander("📐 Variance Inflation Factors (multicollinearity check)", expanded=False):
+                            vif_df = pd.DataFrame([{"Term": k, "VIF": _fmt_stat(v, 2)} for k, v in mm["vif"].items()])
+                            st.dataframe(vif_df, hide_index=True, width="stretch")
+                            st.caption("VIF > 5-10 suggests problematic multicollinearity between predictors.")
+
+                    with st.expander("ℹ️ What do these numbers mean?", expanded=False):
+                        st.markdown(_STAT_HELP["within_between_centering"])
+                        st.divider()
+                        st.markdown(_STAT_HELP["aic_bic_lrt"])
+                        st.divider()
+                        st.markdown(_STAT_HELP["vif"])
+
+    # ====================================================================
+    # Section 4: Repeated-Measures Correlations
+    # ====================================================================
+    elif section == "Repeated-Measures Correlations":
+        st.markdown("### Repeated-Measures Correlations (Supplementary)")
+        st.caption(
+            "A simpler, easy-to-report companion to the mixed-effects "
+            "model above -- one within-person correlation per predictor. "
+            "Bakdash, J. Z., & Marusich, L. R. (2017). Repeated measures "
+            "correlation. *Frontiers in Psychology, 8*:456."
+        )
+
+        composite_map = st.session_state.get(
+            "_corr_composite_map",
+            {k: list(v) for k, v in DEFAULT_SCCCES_COMPOSITE_MAP.items()},
+        )
+        predictor_options = list(composite_map.keys()) + ["RAI", "Amotivation"]
+        selected_predictors = st.multiselect(
+            "Predictors to include",
+            options=predictor_options,
+            default=predictor_options[:2] if len(predictor_options) >= 2 else predictor_options,
+            key="corr_rmc_predictors",
+        )
+
+        if not selected_predictors:
+            st.info("Select at least one predictor to run.")
+        else:
+            sccces_key = _CORR_SURVEY_KEYS["Cognitive Engagement (SCCCES)"]
+            sims_key = _CORR_SURVEY_KEYS["Interest & Motivation (SIMS)"]
+
+            _rmc_canonical = _render_exclusion_controls(
+                canonical_df, [sccces_key, sims_key], key_prefix="corr_rmc",
+            )
+
+            predictor_frames: Dict[str, pd.DataFrame] = {}
+            for pred in selected_predictors:
+                if pred == "RAI":
+                    predictor_frames["RAI"] = compute_rai(_rmc_canonical, sims_key)
+                elif pred == "Amotivation":
+                    cm = compute_construct_means(_rmc_canonical, instrument_keys=[
+                        k for k in _rmc_canonical["instrument_key"].unique()
+                        if k == sims_key or str(k).endswith("_" + sims_key)
+                    ])
+                    predictor_frames["Amotivation"] = cm[cm["construct"] == "amotivation"][
+                        ["user_id", "module_id", "mean_score"]
+                    ]
+                else:
+                    comp = compute_composite_scores(_rmc_canonical, sccces_key, {pred: composite_map[pred]})
+                    predictor_frames[pred] = comp[comp["composite"] == pred]
+
+            if st.button("▶ Run Repeated-Measures Correlations", type="primary", key="corr_rmc_run"):
+                long_df = build_person_module_dataset(_rmc_canonical, predictor_frames)
+                st.session_state["_corr_rmc_result"] = run_repeated_measures_correlations(
+                    long_df, "pct_correct", selected_predictors,
+                )
+
+            rmc = st.session_state.get("_corr_rmc_result")
+            if rmc:
+                if rmc.get("error"):
+                    st.error(f"Could not compute: {rmc['error']}")
+                elif not rmc.get("fdr"):
+                    st.info("No results to display -- check that predictors have enough complete cases.")
+                else:
+                    rows = [
+                        {"Predictor": r["predictor"], "r": _fmt_stat(r.get("r")),
+                         "N students": r.get("n_subjects"), "p (uncorrected)": _fmt_stat(r.get("p_unc"), 4),
+                         "p (FDR-corrected)": _fmt_stat(r.get("p_fdr"), 4),
+                         "Significant (FDR)": "✅ Yes" if r.get("reject_fdr") else "— No",
+                         "Error": r.get("error") or ""}
+                        for r in rmc["fdr"]
+                    ]
+                    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+                    st.caption(
+                        "FDR (Benjamini-Hochberg) correction applied across this set of "
+                        "tests. Benjamini, Y., & Hochberg, Y. (1995). Controlling the "
+                        "false discovery rate. *Journal of the Royal Statistical "
+                        "Society: Series B, 57*(1), 289-300. See also Curran-Everett, D. "
+                        "(2000). Multiple comparisons: philosophies and illustrations. "
+                        "*American Journal of Physiology-Regulatory, Integrative and "
+                        "Comparative Physiology, 279*(1), R1-R8 (a physiology-methods "
+                        "paper, cited here only as supporting rationale for FDR over "
+                        "Bonferroni in exploratory multiple-testing)."
+                    )
+                    sig = [r for r in rmc["fdr"] if r.get("reject_fdr")]
+                    if sig:
+                        best = max(sig, key=lambda r: abs(r["r"]))
+                        st.success(
+                            f"✅ **Strongest FDR-significant predictor:** {best['predictor']} "
+                            f"(r={_fmt_stat(best['r'])}, p_FDR={_fmt_stat(best['p_fdr'], 4)})"
+                        )
+
+                    with st.expander("ℹ️ What do these numbers mean?", expanded=False):
+                        st.markdown(_STAT_HELP["rm_corr"])
+                        st.divider()
+                        st.markdown(_STAT_HELP["fdr_bh"])
+
+
+# -----------------------------------------------------------------------
 # Tab 4 — Competency Progression (CPI)
 # -----------------------------------------------------------------------
 
@@ -3707,6 +4213,7 @@ def show_teacher_dashboard(username: str) -> None:
     _TAB_OPTIONS = [
         "📊 Basic Statistics",
         "📈 Inferential Statistics",
+        "🔗 Correlations",
         "🤖 LLM Analysis",
         "📉 Competency Progression",
         "🔬 IRT Analysis",
@@ -3724,6 +4231,7 @@ def show_teacher_dashboard(username: str) -> None:
     _TAB_COLORS = {
         "📊 Basic Statistics":       ("#0077BB", "#E6F3FB"),
         "📈 Inferential Statistics": ("#EE7733", "#FFF3E6"),
+        "🔗 Correlations":           ("#D55E00", "#FDECE3"),
         "🤖 LLM Analysis":           ("#CC79A7", "#F9EEF5"),
         "📉 Competency Progression": ("#534AB7", "#EEEDFE"),
         "🔬 IRT Analysis":           ("#009E73", "#E6F7F1"),
@@ -3749,6 +4257,9 @@ def show_teacher_dashboard(username: str) -> None:
 
     elif active_tab == "📈 Inferential Statistics":
         _render_inferential_tab(filtered_canonical, filtered_demographics)
+
+    elif active_tab == "🔗 Correlations":
+        _render_correlations_tab(username, filtered_canonical, filtered_demographics)
 
     elif active_tab == "🔬 IRT Analysis":
         _render_irt_tab(filtered_canonical)

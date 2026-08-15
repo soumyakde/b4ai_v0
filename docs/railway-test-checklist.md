@@ -1,11 +1,11 @@
 # Railway Test-Environment Checklist — Post-pilot enhancements (2026-08-04, updated 2026-08-15)
 
-**Purpose:** confirm the requested changes (Tasks A-K, plus fixes found while testing) work correctly on the real deployed Railway `test` environment. Underlying logic was already verified directly (hand-computed math checks, full data round-trip tests, live SSH confirmation of the bug fix, direct-Python and AppTest verification) — this is your pass to confirm it looks and behaves right from the actual dashboard.
+**Purpose:** confirm the requested changes (Tasks A-L, plus fixes found while testing) work correctly on the real deployed Railway `test` environment. Underlying logic was already verified directly (hand-computed math checks, full data round-trip tests, live SSH confirmation of the bug fix, direct-Python and AppTest verification) — this is your pass to confirm it looks and behaves right from the actual dashboard.
 
 **URL:** https://basics4ai-staging-test.up.railway.app
 **Login:** your own admin account (the `test` environment's database was refreshed from production on 2026-08-04, so your real credentials work here too)
 
-Estimated time: ~80 minutes (Tasks A-D: ~15 min, Task E: ~10 min, Task J: ~15 min, Task K: ~20 min). Tasks A-J already signed off and live in production — skip unless you want a re-check; Task K (below) is new.
+Estimated time: ~110 minutes (Tasks A-D: ~15 min, Task E: ~10 min, Task J: ~15 min, Task K: ~20 min, Task L: ~30 min). Tasks A-K already signed off and live in production — skip unless you want a re-check; Task L (below) is new.
 
 ---
 
@@ -277,6 +277,51 @@ Your dissertation methodology calls for the appropriate inferential test to be d
 ### Cleanup
 
 None needed — read-only/diagnostic, no new data is written.
+
+---
+
+## L. Correlations tab — engagement/motivation vs. assessment performance (30 min)
+
+A new **"🔗 Correlations"** tab now sits right after Inferential Statistics. It answers whether cognitive engagement (SCCCES) or motivation (SIMS) relates to assessment performance — both within students over time, and between students overall — following your confirmed 4-phase methodology.
+
+### L.1 — Reliability & Redundancy (7 min)
+
+1. Go to **🔗 Correlations → Reliability & Redundancy**.
+2. Confirm a **per-sub-construct reliability table** appears for Cognitive Engagement (SCCCES) by default — 10 rows, one per sub-construct. Confirm the 1-item sub-constructs (Engagement with task, Experience of flow) show **"single_item_no_reliability"**, not a blank or a 0.0. Confirm the 2-item ones (Effort and persistence, Attention, Culture, Plausibility, Credibility, Comprehensibility) show **Spearman-Brown** values, and the 3-item ones (Coherency, Personal relevance) show **Cronbach's α**.
+3. Switch the **"Survey"** dropdown to Interest & Motivation (SIMS) — confirm 4 rows (Intrinsic, Identified, External, Amotivation), each 3-4 items, using Cronbach's α or Spearman-Brown as appropriate.
+4. Confirm an **inter-sub-construct correlation matrix** appears below — a 10×10 (SCCCES) or 4×4 (SIMS) table. Open the caption and confirm it references Heddy et al. (2018)'s own factor-analysis finding that the 4 "message appraisal" sub-constructs collapse into one factor.
+5. ✅ Pass if: both tables render for both surveys, single-item constructs are clearly labeled "not estimable" rather than blank, and the citations are visible.
+
+### L.2 — Composite Builder (5 min)
+
+1. Switch to **Composite Builder**. Confirm 4 multiselect boxes appear — Engagement, Message appraisal, Personal relevance, Culture — each pre-populated with the theory-driven default grouping (e.g. Engagement defaults to task+effort+flow+attention).
+2. Try removing one sub-construct from a composite and click **"💾 Save composite definitions"** — confirm a green success message appears.
+3. Confirm the **RAI** explanation appears below, correctly citing **Ryan & Connell (1989)** — not Guay, Vallerand & Blanchard (2000) (the SIMS source paper, which doesn't itself present the RAI formula). Confirm a count like "X of Y (student, module) rows have all 4 SIMS sub-constructs present."
+4. ✅ Pass if: the composite editor works, saving shows confirmation, and the RAI citation is correct.
+
+### L.3 — Mixed-Effects Model (10 min)
+
+1. Switch to **Mixed-Effects Model**. Select 1-2 predictors (e.g. Engagement, RAI).
+2. Open the **"🧪 Exclude flagged participants"** expander (same as Inferential Statistics) if you want to try excluding outliers/missing-data participants first — optional.
+3. Click **"▶ Run Mixed-Effects Model"**. Confirm it completes within a few seconds and:
+   - A **standing yellow caveat** about asymptotic (not small-sample-corrected) standard errors appears — this should always show, every run.
+   - A **model comparison table** appears (M0_null, M1_module, M2_within, M3_full, and possibly M3b_random_slope), each with AIC/BIC/Converged.
+   - A green **"✅ Best model by BIC"** message names one of the blocks.
+   - A **coefficients table** appears for the best model, showing `_within` and `_between` terms separately for each predictor.
+   - Expanding **"📊 Likelihood ratio tests"** and **"📐 Variance Inflation Factors"** shows populated tables.
+4. ✅ Pass if: the model runs without error, the small-sample caveat is always visible, and within/between coefficients are clearly distinguished.
+
+### L.4 — Repeated-Measures Correlations (8 min)
+
+1. Switch to **Repeated-Measures Correlations**. Select the same 1-2 predictors.
+2. Click **"▶ Run Repeated-Measures Correlations"**. Confirm a results table appears with columns for r, N students, uncorrected p, FDR-corrected p, and a "Significant (FDR)" Yes/No column.
+3. If any predictor is FDR-significant, confirm a green **"✅ Strongest FDR-significant predictor"** callout appears.
+4. Open **"ℹ️ What do these numbers mean?"** and confirm it references Bakdash & Marusich (2017) for rmcorr and Benjamini & Hochberg (1995) for FDR.
+5. ✅ Pass if: results render with both uncorrected and FDR-corrected p-values shown side by side (nothing is silently hidden).
+
+### Cleanup
+
+None needed — read-only/diagnostic. The saved composite definitions (L.2) persist only for your current session.
 
 ---
 
