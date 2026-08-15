@@ -3242,9 +3242,10 @@ def _render_correlations_tab(
 
                     if aic_name and aic_name != bic_name:
                         st.markdown(f"**Best model by AIC (less conservative):** {aic_name}")
-                        aic_display = mm["blocks"].get(aic_name)
+                        aic_reml_name = f"{aic_name}_reml"
+                        aic_display = mm["blocks"].get(aic_reml_name) or mm["blocks"].get(aic_name)
                         if aic_display and aic_display.get("params"):
-                            st.markdown(f"**Coefficients — {aic_name}**")
+                            st.markdown(f"**Coefficients — {aic_reml_name if mm['blocks'].get(aic_reml_name) else aic_name}**")
                             st.dataframe(_coef_table(aic_display), hide_index=True, width="stretch")
                             st.caption(
                                 "BIC and AIC disagree here -- BIC favors the simpler model above; "

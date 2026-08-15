@@ -555,9 +555,12 @@ def run_mixed_model(
 
     All nested-block comparisons use reml=False (ML) -- REML
     likelihoods are only comparable across models with identical fixed
-    effects (Pinheiro & Bates 2000, sec 2.4). The best block (by BIC,
-    the more conservative criterion given n~75-110) is refit once with
-    reml=True for reporting-quality SEs.
+    effects (Pinheiro & Bates 2000, sec 2.4). Both the best-by-BIC block
+    (the more conservative criterion given n~75-110) and the best-by-AIC
+    block (when different) are refit with reml=True for reporting-
+    quality SEs -- both are shown to the researcher as primary output,
+    not just BIC's pick, so both need accurate SEs, not just the ML fit
+    used for model selection.
 
     A random-slope variant (module_num | user_id) is attempted behind
     its own try/except when try_random_slope=True, falling back to
@@ -606,10 +609,18 @@ def run_mixed_model(
     n_groups = df[id_col].nunique()
     result["low_n_warning"] = n_groups < LOW_N_THRESHOLD
 
-    def _fit_block(name, formula, reml=False):
+    def _fit_block(name, formula, reml=False, re_formula=None, display_formula=None):
         try:
-            model = smf.mixedlm(formula, df, groups=df[id_col])
+            kwargs = {"re_formula": re_formula} if re_formula else {}
+            model = smf.mixedlm(formula, df, groups=df[id_col], **kwargs)
             fit = model.fit(reml=reml)
+            if not fit.converged:
+                return {
+                    "aic": None, "bic": None, "llf": None, "converged": False,
+                    "n_obs": None, "n_groups": n_groups,
+                    "formula": display_formula or formula, "params": {},
+                    "error": f"{name} did not converge.",
+                }
             params = {
                 term: {
                     "estimate": round(float(fit.params[term]), 4),
@@ -623,12 +634,13 @@ def run_mixed_model(
                 "aic": round(float(fit.aic), 3), "bic": round(float(fit.bic), 3),
                 "llf": round(float(fit.llf), 3), "converged": bool(fit.converged),
                 "n_obs": int(fit.nobs), "n_groups": n_groups,
-                "formula": formula, "params": params, "error": None,
+                "formula": display_formula or formula, "params": params, "error": None,
             }
         except Exception as e:
             return {
                 "aic": None, "bic": None, "llf": None, "converged": False,
-                "n_obs": None, "n_groups": n_groups, "formula": formula,
+                "n_obs": None, "n_groups": n_groups,
+                "formula": display_formula or formula,
                 "params": {}, "error": str(e),
             }
 
@@ -648,46 +660,24 @@ def run_mixed_model(
         rhs += f" + {between_terms}"
         formulas["M3_full"] = f"{outcome_col} ~ {rhs}"
 
+    # Track each block's (formula, re_formula) so the REML reporting
+    # refit below can reuse the exact same specification, including for
+    # the random-slope block -- both the BIC-best and AIC-best blocks
+    # get this refit, not just whichever one BIC happens to prefer.
+    block_specs: Dict[str, tuple] = {}
+
     for name, formula in formulas.items():
         result["blocks"][name] = _fit_block(name, formula, reml=False)
+        block_specs[name] = (formula, None)
 
     if try_random_slope and "M3_full" in formulas:
-        try:
-            model = smf.mixedlm(
-                formulas["M3_full"], df, groups=df[id_col],
-                re_formula="~module_num",
-            )
-            fit = model.fit(reml=False)
-            if fit.converged:
-                params = {
-                    term: {
-                        "estimate": round(float(fit.params[term]), 4),
-                        "se": round(float(fit.bse[term]), 4),
-                        "z": round(float(fit.tvalues[term]), 4) if term in fit.tvalues else None,
-                        "p": round(float(fit.pvalues[term]), 6) if term in fit.pvalues else None,
-                    }
-                    for term in fit.params.index
-                }
-                result["blocks"]["M3b_random_slope"] = {
-                    "aic": round(float(fit.aic), 3), "bic": round(float(fit.bic), 3),
-                    "llf": round(float(fit.llf), 3), "converged": True,
-                    "n_obs": int(fit.nobs), "n_groups": n_groups,
-                    "formula": formulas["M3_full"] + " + (module_num | user_id)",
-                    "params": params, "error": None,
-                }
-            else:
-                result["blocks"]["M3b_random_slope"] = {
-                    "aic": None, "bic": None, "llf": None, "converged": False,
-                    "n_obs": None, "n_groups": n_groups,
-                    "formula": formulas["M3_full"] + " + (module_num | user_id)",
-                    "params": {}, "error": "Random-slope model did not converge.",
-                }
-        except Exception as e:
-            result["blocks"]["M3b_random_slope"] = {
-                "aic": None, "bic": None, "llf": None, "converged": False,
-                "n_obs": None, "n_groups": n_groups, "formula": None,
-                "params": {}, "error": str(e),
-            }
+        rs_formula = formulas["M3_full"]
+        rs_display = rs_formula + " + (module_num | user_id)"
+        result["blocks"]["M3b_random_slope"] = _fit_block(
+            "M3b_random_slope", rs_formula, reml=False,
+            re_formula="~module_num", display_formula=rs_display,
+        )
+        block_specs["M3b_random_slope"] = (rs_formula, "~module_num")
 
     # LRT between successively nested blocks (same random-effects
     # structure, growing fixed effects) -- 2*(llf_bigger - llf_smaller),
@@ -710,15 +700,28 @@ def run_mixed_model(
 
     valid_blocks = {k: v for k, v in result["blocks"].items() if v.get("aic") is not None}
     if valid_blocks:
-        result["best_block_by_aic"] = min(valid_blocks, key=lambda k: valid_blocks[k]["aic"])
+        best_aic_name = min(valid_blocks, key=lambda k: valid_blocks[k]["aic"])
         best_bic_name = min(valid_blocks, key=lambda k: valid_blocks[k]["bic"])
+        result["best_block_by_aic"] = best_aic_name
         result["best_block_by_bic"] = best_bic_name
 
-        # Refit the BIC-best block with reml=True for reporting SEs.
-        best_formula = result["blocks"][best_bic_name]["formula"]
-        if "(module_num | user_id)" not in best_formula:
-            reporting = _fit_block(best_bic_name + "_reml", best_formula, reml=True)
-            result["blocks"][best_bic_name + "_reml"] = reporting
+        # Refit whichever block(s) are selected as "best" with reml=True
+        # for reporting-quality SEs -- both BIC's and AIC's picks, since
+        # both are now shown to the researcher as primary output, not
+        # just BIC's. Skipped (falls back to the ML fit already in
+        # `blocks`) only if the model's own (formula, re_formula) spec
+        # somehow wasn't tracked.
+        for best_name in {best_bic_name, best_aic_name}:
+            spec = block_specs.get(best_name)
+            if spec is None:
+                continue
+            formula, re_formula = spec
+            reporting = _fit_block(
+                best_name + "_reml", formula, reml=True,
+                re_formula=re_formula,
+                display_formula=result["blocks"][best_name]["formula"],
+            )
+            result["blocks"][best_name + "_reml"] = reporting
 
     # VIF on the richest converged fixed-effects design (M3_full or
     # whichever full-predictor block converged), intercept excluded.
