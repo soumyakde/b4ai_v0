@@ -286,7 +286,24 @@ def show_admin_dashboard(username: str):
             "(responses, completions, scores) for this user. "
             "This cannot be undone."
         )
-        delete_user_input = st.text_input("Username to delete", key="del_user_input")
+        # Same swallowed-flash-message bug as Pending Approvals (M.14) --
+        # st.success() called right before st.rerun() never reaches the
+        # screen. Same session-state flash fix.
+        if st.session_state.get("del_user_flash"):
+            st.success(st.session_state.pop("del_user_flash"))
+
+        # The "Username to delete"/"confirm" boxes kept showing the just-
+        # deleted username afterward, since a text_input's value persists
+        # under its key across reruns unless the key itself changes. Same
+        # generation-counter technique already used elsewhere in this file
+        # to force a fresh file_uploader after a batch completes -- bumping
+        # "del_user_gen" gives both boxes a brand-new key next run, so
+        # there's no stale value left to redisplay.
+        st.session_state.setdefault("del_user_gen", 0)
+        _du_gen = st.session_state["del_user_gen"]
+        delete_user_input = st.text_input(
+            "Username to delete", key=f"del_user_input_{_du_gen}"
+        )
 
         # Live data preview before deletion
         if delete_user_input and delete_user_input.strip():
@@ -310,7 +327,7 @@ def show_admin_dashboard(username: str):
 
         _del_confirm = st.text_input(
             "Type the username again to confirm deletion",
-            key="del_user_confirm",
+            key=f"del_user_confirm_{_du_gen}",
         )
         if st.button("🗑 Delete User + All Data", key="del_user_btn", type="primary"):
             _du = delete_user_input.strip() if delete_user_input else ""
@@ -328,9 +345,10 @@ def show_admin_dashboard(username: str):
                             delete_all_transcripts_for_participant(_du)
                         except Exception:
                             pass
-                    st.success(
+                    st.session_state["del_user_flash"] = (
                         f"✅ User **{_du}** and all associated research data deleted."
                     )
+                    st.session_state["del_user_gen"] += 1
                     st.rerun()
                 except Exception as e:
                     st.error(f"Delete error: {e}")
