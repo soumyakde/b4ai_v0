@@ -425,9 +425,14 @@ def run_grm_model(
 
         result["item_params"]   = pd.DataFrame(rows)
         result["item_fit"]      = pd.DataFrame({"item_id": item_ids})
+
+        thetas, theta_se = _estimate_thetas_grm(data, discriminations, difficulties)
+        result["_thetas"] = thetas
+
         result["person_params"] = pd.DataFrame({
-            "user_id": user_ids,
-            "theta":   [0.0] * len(user_ids),  # placeholder
+            "user_id":  user_ids[:len(thetas)],
+            "theta":    [round(float(t), 4) for t in thetas],
+            "theta_se": [round(float(s), 4) for s in theta_se],
         })
 
     except Exception as e:
@@ -487,6 +492,81 @@ def _estimate_thetas(
                 log_likelihood += np.log(1 - prob)
 
         # Normalize to get posterior
+        log_likelihood -= log_likelihood.max()
+        posterior = np.exp(log_likelihood) * prior
+        total     = posterior.sum()
+
+        if total > 0:
+            posterior /= total
+            thetas[p]   = (theta_grid * posterior).sum()
+            theta_se[p] = np.sqrt(
+                ((theta_grid - thetas[p]) ** 2 * posterior).sum()
+            )
+        else:
+            thetas[p]   = 0.0
+            theta_se[p] = 1.0
+
+    return thetas, theta_se
+
+
+def _estimate_thetas_grm(
+    data: np.ndarray,
+    discriminations: np.ndarray,
+    difficulties: List[np.ndarray],
+    n_points: int = 41,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    EAP (Expected A Posteriori) person ability estimates for the
+    Graded Response Model (polytomous items).
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Items x Persons matrix of 0-indexed category responses
+        (category 0 .. K-1).
+    discriminations : np.ndarray
+        Item discrimination parameters (one per item).
+    difficulties : list of np.ndarray
+        Per-item category-threshold parameters. Each entry is a scalar
+        (2-category item) or a 1d array of K-1 thresholds for a
+        K-category item; NaN padding (from ragged category counts) is
+        dropped.
+    n_points : int
+        Quadrature points for numerical integration.
+    """
+    theta_grid = np.linspace(-4, 4, n_points)
+    prior      = stats.norm.pdf(theta_grid)
+    prior     /= prior.sum()
+
+    n_items, n_persons = data.shape
+    thetas   = np.zeros(n_persons)
+    theta_se = np.zeros(n_persons)
+
+    # Precompute each item's category-response-probability curves
+    # over the theta grid via the standard cumulative-logit GRM formula:
+    # P*(score >= k) = 1 / (1 + exp(-a*(theta - b_k))), P*(>=0)=1, P*(>=K)=0
+    item_cat_probs = []
+    for i in range(n_items):
+        thr = np.atleast_1d(difficulties[i]).astype(float)
+        thr = thr[~np.isnan(thr)]
+        a   = discriminations[i]
+        cum_above = np.vstack(
+            [np.ones(n_points)]
+            + [1 / (1 + np.exp(-a * (theta_grid - t))) for t in thr]
+            + [np.zeros(n_points)]
+        )
+        cat_probs = np.clip(cum_above[:-1] - cum_above[1:], 1e-10, 1.0)
+        item_cat_probs.append(cat_probs)
+
+    for p in range(n_persons):
+        log_likelihood = np.zeros(n_points)
+        for i in range(n_items):
+            k = int(data[i, p])
+            cat_probs = item_cat_probs[i]
+            if k < 0 or k >= cat_probs.shape[0]:
+                continue
+            log_likelihood += np.log(cat_probs[k])
+
         log_likelihood -= log_likelihood.max()
         posterior = np.exp(log_likelihood) * prior
         total     = posterior.sum()

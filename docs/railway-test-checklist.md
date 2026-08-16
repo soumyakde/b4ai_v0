@@ -346,6 +346,76 @@ None needed — read-only/diagnostic. The saved composite definitions (L.2) pers
 
 ---
 
+## M. Bug-fix batch — issues found while building the workflow diagrams (30 min)
+
+While building the 3-part workflow-diagram series of this app, ~13 real issues surfaced by reading the actual code (not guessed). This batch fixes the 10 that were confirmed bugs/gaps; 3 design questions (dual scoring paths, DTA completion gating, cohort rename) are deliberately out of scope here and tracked separately.
+
+### M.1 — CPI: "Load past CPI_qual run" no longer errors (3 min)
+
+1. Go to **📉 Competency Progression (CPI)**. If any stored CPI runs exist, find the **"Load past CPI_qual run"** control and click it.
+2. ✅ Pass if: it loads without a `NameError` crash (previously this button was broken — the function it called was never imported).
+
+### M.2 — IRT tab text no longer references "mirt"/R (2 min)
+
+1. Go to **🔬 IRT Analysis**. Read the caption under the tab title and the spinner text after clicking "Run IRT Analysis" / "Run GRM Analysis".
+2. ✅ Pass if: all text now says the analysis is powered by the **girth** Python library — no mention of "mirt" or "R" anywhere on this tab.
+
+### M.3 — GRM person-ability scores are now real (5 min)
+
+1. Still in **🔬 IRT Analysis**, select **Survey (GRM)** and run a GRM model on a construct with enough respondents (n≥50).
+2. Look at the **person parameters** table/download.
+3. ✅ Pass if: the `theta` column shows varied, non-zero values (previously every single student showed exactly `0.0` — a hardcoded placeholder that never actually estimated anything).
+
+### M.4 — Admin: Impersonation is now audit-logged (3 min)
+
+1. As super admin, go to **User Management → Impersonation**, enter a real username, click **"Impersonate"**.
+2. Then go to **Diagnostics** (or wherever admin actions are logged) and check for a new **IMPERSONATE_USER** entry.
+3. ✅ Pass if: the impersonation still works exactly as before, AND a new audit-log entry now appears for it (previously this was the only sensitive admin action with no audit trail).
+
+### M.5 — Admin: bulk-approve count is accurate (3 min)
+
+1. Go to **Pending Approvals**, select a few pending students, bulk-approve them.
+2. ✅ Pass if: the success message's count of approved users exactly matches how many you selected (this was already usually correct, but relied on a fragile SQLite behavior that isn't guaranteed across versions — now counted directly and reliably).
+
+### M.6 — Admin: deleting a user also removes their transcripts (5 min)
+
+1. If you have a test user with an uploaded interview or observer transcript, note it in **Research Operations**.
+2. Go to **User Management → Delete User**, type that username in both fields, and check the **preview text above the delete button** — it should now mention a transcript count alongside responses/completions/scores.
+3. Delete the user, then check **Research Operations** again.
+4. ✅ Pass if: the deleted user's transcript(s) are gone too (previously they were silently left behind, orphaned under a username that no longer exists — a real data-governance gap).
+
+### M.7 — Admin: no unconditional debug text (2 min)
+
+1. With the sidebar **"DEBUG MODE"** checkbox left **unchecked**, go to **Diagnostics**.
+2. ✅ Pass if: you do NOT see a "DEBUG — survey_scores rows: ..." line (previously this printed regardless of the DEBUG toggle). Checking the DEBUG box should now make it appear.
+
+### M.8 — Report Generation: Inferential Statistics PDF now matches the live tab (8 min)
+
+1. Go to **📄 Report Generation → ii. Inferential Statistics**.
+2. Notice new **"🧪 Exclude flagged participants"** expanders now appear above the "Generate PDF" button (matching the live Inferential Statistics tab) — try excluding something or leave it default.
+3. Click **"📄 Generate Inferential Statistics PDF"** and open it.
+4. ✅ Pass if: the PDF now includes a **"Method Agreement (Bland-Altman)"** section for each Pre vs Post pair (previously entirely missing from this report, even though the live tab has always shown it), and exclusion choices are respected.
+
+### M.9 — Report Generation: Correlations PDF predictor set now matches the live tab's default (5 min)
+
+1. Go to **📄 Report Generation → vi. Correlations**.
+2. Notice a new **"Predictors to include"** multiselect — defaults to the first 2 predictors, same as the live Correlations tab's Mixed-Effects Model / Repeated-Measures Correlations sections (previously this report silently always used the full predictor set with no way to narrow it here).
+3. Generate the PDF.
+4. ✅ Pass if: the PDF's Mixed-Effects Model and Repeated-Measures Correlations sections reflect whichever predictors you selected, not always all of them.
+
+### M.10 — Report Generation: Full Programme Report now includes Correlations and CPI+ (5 min)
+
+1. Go to **📄 Report Generation → vii. Full Programme Report**.
+2. Confirm **"Correlations"** and **"Competency Progression (CPI+)"** now appear as selectable sections (previously the bundle only ever covered Basic Statistics, Inferential Statistics, IRT, ITA, and DTA — Correlations and CPI were silently missing).
+3. Generate the report.
+4. ✅ Pass if: the PDF includes brief Correlations and CPI+ summary sections, each pointing to the standalone report for full detail.
+
+### Cleanup
+
+If you created a test user for M.6, its transcript deletion is already exercised by that step — no separate cleanup needed. Everything else in this batch is read-only or already covered by existing reset flows.
+
+---
+
 ## If anything fails
 
 Note which item failed and what you saw, then let Claude know — don't try to fix anything yourself. This is all on the disposable `test` environment; nothing here touches the real pilot data on `production`.

@@ -62,10 +62,17 @@ def reset_student_data(admin_user: str, user_id: str) -> None:
 
 def count_student_data_footprint(user_id: str) -> dict:
     """
-    Return row counts across all four data tables for a single student,
-    without deleting anything. Same table list as reset_student_data() —
-    used to detect "zero saved data" candidates and to preview exactly
-    what a bulk cleanup would remove before it happens.
+    Return row counts across all data holding a student's research data,
+    without deleting anything. Used to detect "zero saved data" candidates
+    and to preview exactly what a bulk cleanup would remove before it
+    happens.
+
+    Includes a "transcripts" count (interview/observer transcripts, keyed
+    on participant_id == username) alongside the four responses.db tables
+    reset_student_data() clears, so a student who only has an uploaded
+    transcript is correctly treated as having data, not "zero saved data".
+    Transcript counting is best-effort: if the LLM/transcript module isn't
+    installed, "transcripts" is omitted rather than raising.
     """
     conn   = get_connection()
     cursor = conn.cursor()
@@ -83,6 +90,13 @@ def count_student_data_footprint(user_id: str) -> dict:
         counts[table] = cursor.fetchone()[0]
 
     conn.close()
+
+    try:
+        from core.analytics.llm.transcript_store import count_transcripts_for_participant
+        counts["transcripts"] = count_transcripts_for_participant(user_id)
+    except Exception:
+        pass
+
     return counts
 
 

@@ -319,6 +319,43 @@ def delete_transcript(
     conn.close()
 
 
+def count_transcripts_for_participant(
+    participant_id: str,
+    db_path: Optional[Path] = None,
+) -> int:
+    """Count stored transcripts (any source_type) for one participant."""
+    init_transcript_table(db_path)
+    conn = _get_ts_conn(db_path)
+    n = conn.execute(
+        "SELECT COUNT(*) FROM transcripts WHERE participant_id=?",
+        (participant_id,)
+    ).fetchone()[0]
+    conn.close()
+    return n
+
+
+def delete_all_transcripts_for_participant(
+    participant_id: str,
+    db_path: Optional[Path] = None,
+) -> int:
+    """
+    Delete every stored transcript for a participant, across all
+    source_types (interview, observer, etc.). Used when a user account
+    is deleted, so transcripts don't become orphaned data tied to a
+    username that no longer exists. Returns the number of rows deleted.
+    """
+    init_transcript_table(db_path)
+    conn = _get_ts_conn(db_path)
+    cursor = conn.execute(
+        "DELETE FROM transcripts WHERE participant_id=?",
+        (participant_id,)
+    )
+    n = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return n
+
+
 # -----------------------------------------------------------------------
 # Single-transcript save — called by admin_dashboard explicit ID mapping
 # -----------------------------------------------------------------------

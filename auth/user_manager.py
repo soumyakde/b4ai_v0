@@ -347,13 +347,14 @@ def bulk_approve(approver: str, usernames: list[str]) -> int:
     """
     if not is_super_admin(approver):
         raise PermissionError("Only the super admin can bulk-approve users.")
+    count = 0
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.executemany(
-            "UPDATE users SET status = 'approved' WHERE username = ?",
-            [(u,) for u in usernames],
-        )
-        count = cursor.rowcount
+        for u in usernames:
+            cursor.execute(
+                "UPDATE users SET status = 'approved' WHERE username = ?", (u,)
+            )
+            count += cursor.rowcount
         conn.commit()
     return count
 

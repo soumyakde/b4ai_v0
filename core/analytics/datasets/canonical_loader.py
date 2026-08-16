@@ -18,6 +18,26 @@ Architecture rules:
   values so DatasetBuilder receives them without pre-resolution
 - Caching (st.cache_data) is the CALLER's responsibility
 
+Two independent scoring passes exist by design, not by accident: this
+loader re-scores raw `responses` rows fresh from the YAML instrument/
+scoring-rule definitions every time canonical_df is built, and never
+reads the `assessment_scores`/`survey_scores` tables that
+core/submission_engine.py writes at submission time. This lets scoring
+rules be corrected or adjusted after the fact and have every dashboard
+recompute from the same raw responses, without a DB migration or a
+re-submission pass. Confirmed as the intended design (2026-08-16).
+
+Known open item, pilot-scoped (flagged 2026-08-16): the researcher has
+found scoring errors in the YAML rule definitions while reviewing
+dashboard output. Because of the re-scoring design above, correcting a
+YAML rule immediately changes what every dashboard/report shows for
+that instrument — there is no need to re-run submission_engine or touch
+the DB. This needs a dedicated pass to (a) find and fix the specific
+YAML errors, and (b) decide whether historical `assessment_scores`/
+`survey_scores` rows (submission-time scores, never read by the
+dashboard) should be corrected or left as an audit trail of what was
+shown to students in the moment. Revisit post-pilot.
+
 File layout assumptions (derived from __file__ path):
     core/analytics/datasets/canonical_loader.py
     → parents[3] = project root

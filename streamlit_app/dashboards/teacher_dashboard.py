@@ -3516,6 +3516,7 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
             save_cpi_qual_result,
             save_cpi_summary,
             load_cpi_summary,
+            load_cpi_qual_results,
             list_cpi_runs,
             update_cpi_run_status,
         )
@@ -4421,7 +4422,7 @@ def show_teacher_dashboard(username: str) -> None:
 # -----------------------------------------------------------------------
 
 def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
-    """Tab 2 — IRT Analysis using mirt via rpy2."""
+    """Tab 2 — IRT Analysis using the pure-Python girth library."""
 
     st.subheader("🔬 IRT Analysis")
     st.info("🚧 This section is functional but earmarked for further development.")
@@ -4434,7 +4435,7 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
         return
 
     st.caption(
-        "Item Response Theory analysis powered by R's **mirt** package. "
+        "Item Response Theory analysis powered by the **girth** Python library. "
         "Rasch (1PL) runs at any n with a low-n warning. "
         f"2PL and GRM require n ≥ {MIN_N_2PL}."
     )
@@ -4555,7 +4556,7 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
             st.warning("Insufficient data to fit IRT model (n < 3)."); return
 
         if st.button("▶ Run IRT Analysis", key="irt_run_binary"):
-            with st.spinner("Fitting model in R via mirt…"):
+            with st.spinner("Fitting model…"):
                 if "2PL" in model_choice:
                     result = run_2pl_model(matrix, item_ids)
                 else:
@@ -4613,7 +4614,7 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
         st.caption(f"Matrix: {n} persons × {len(litem_ids)} items")
 
         if st.button("▶ Run GRM Analysis", key="irt_run_grm"):
-            with st.spinner("Fitting GRM in R via mirt…"):
+            with st.spinner("Fitting GRM…"):
                 result = run_grm_model(lmatrix, litem_ids)
             _render_irt_result(result, litem_ids, lmatrix)
 
@@ -4930,8 +4931,8 @@ def _render_irt_result(
         st.plotly_chart(fig, width='content')
     elif icc_df.empty:
         st.caption(
-            "ICC data unavailable. This may occur with mirt versions "
-            "that require additional extraction steps."
+            "ICC data unavailable. This may occur when additional "
+            "extraction steps are required for this model."
         )
 
 
@@ -8227,6 +8228,50 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
         key="rpt_inf_multiselect",
     )
 
+    # Exclusion controls -- same "diagnose, don't auto-remove" pattern the
+    # live Inferential Statistics tab uses, applied once per report section
+    # (rather than per sub-test) to keep the report UI from exploding into
+    # dozens of checkboxes across every instrument/group combination.
+    _rpt_inf_pp_df = canonical_df
+    if "Pre vs Post" in inf_selected:
+        _pp_keys_all = [
+            "precourse_pre_ai_misconceptions_assessment",
+            "postcourse_post_ai_misconceptions_assessment",
+            "precourse_pre_aici_assessment",
+            "postcourse_post_aici_assessment",
+        ]
+        _rpt_inf_pp_df = _render_exclusion_controls(
+            canonical_df, _pp_keys_all, key_prefix="rpt_inf_pp"
+        )
+
+    _rpt_inf_bg_df = canonical_df
+    if "Between Groups" in inf_selected:
+        _bg_keys_all = [
+            "precourse_pre_ai_misconceptions_assessment",
+            "postcourse_post_ai_misconceptions_assessment",
+        ]
+        _rpt_inf_bg_df = _render_exclusion_controls(
+            canonical_df, _bg_keys_all, key_prefix="rpt_inf_bg"
+        )
+
+    _rpt_inf_mcq_df = canonical_df
+    _rpt_inf_survey_df = canonical_df
+    if "Across Modules" in inf_selected:
+        _mcq_keys_all = [
+            k for k in canonical_df["instrument_key"].unique()
+            if "content_mcq_assessment" in k
+        ]
+        _rpt_inf_mcq_df = _render_exclusion_controls(
+            canonical_df, _mcq_keys_all, key_prefix="rpt_inf_across_mcq"
+        )
+        _survey_keys_all = [
+            k for k in canonical_df["instrument_key"].unique()
+            if "b4ai_sccces_survey" in k or "b4ai_sims_survey" in k
+        ]
+        _rpt_inf_survey_df = _render_exclusion_controls(
+            canonical_df, _survey_keys_all, key_prefix="rpt_inf_across_survey"
+        )
+
     if st.button("📄 Generate Inferential Statistics PDF", key="rpt_inf_gen", type="primary"):
         inf_sel     = st.session_state.get("rpt_inf_multiselect", _INF_OPTIONS)
         inc_prepost = "Pre vs Post"     in inf_sel
@@ -8245,7 +8290,7 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                 for label, pre_k, post_k in pairs:
                     try:
                         r = run_paired_comparison(
-                            canonical_df, pre_k, post_k, alpha=0.05, include_wilcoxon=True,
+                            _rpt_inf_pp_df, pre_k, post_k, alpha=0.05, include_wilcoxon=True,
                         )
                         if r.get("error"):
                             continue
@@ -8262,6 +8307,42 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                             ),
                         })
                     except Exception:
+                        continue
+
+                    # Bland-Altman method agreement -- same pairing the live
+                    # Inferential Statistics tab shows right after each
+                    # paired comparison (added for M.9 Report/tab parity).
+                    try:
+                        _ba = run_bland_altman(
+                            _rpt_inf_pp_df, pre_k, post_k, use_pct=True
+                        )
+                        if _ba.get("error"):
+                            continue
+                        _ba_body = (
+                            f"N pairs: {_ba['n_pairs']}  |  "
+                            f"Bias d̄: {_ba['mean_diff']:+.3f}  |  "
+                            f"SD(diff): {_ba['sd_diff']:.3f}\n"
+                            f"Limits of agreement: {_ba['loa_lower']:+.3f} to {_ba['loa_upper']:+.3f}"
+                        )
+                        _r_val = _ba.get("proportional_bias_r")
+                        if _ba.get("proportional_bias"):
+                            _ba_body += (
+                                f"\nProportional bias detected (r = {_r_val:.3f}, "
+                                f"p = {_ba.get('proportional_bias_p'):.4f})."
+                            )
+                        elif _r_val is not None:
+                            _ba_body += f"\nNo proportional bias (r = {_r_val:.3f})."
+                        sections.append({
+                            "heading": f"Method Agreement (Bland-Altman) — {label}",
+                            "body": _ba_body,
+                            "caption": (
+                                "Bland, J. M., & Altman, D. G. (1990). A note on the use "
+                                "of the intraclass correlation coefficient in the "
+                                "evaluation of agreement between two methods of "
+                                "measurement."
+                            ),
+                        })
+                    except Exception:
                         pass
 
             # Between Groups
@@ -8272,10 +8353,10 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                 ]
                 for label, key in bg_instruments:
                     for group_col in ["grade", "gender"]:
-                        if group_col not in canonical_df.columns:
+                        if group_col not in _rpt_inf_bg_df.columns:
                             continue
                         try:
-                            r = run_between_groups(canonical_df, key, group_col=group_col, alpha=0.05)
+                            r = run_between_groups(_rpt_inf_bg_df, key, group_col=group_col, alpha=0.05)
                             if r.get("error"):
                                 continue
                             sections.append({
@@ -8309,9 +8390,9 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                     and d["meta"]["module_id"].split("_", 1)[1].isdigit()
                 }
 
-                def _active_scoped_df(instrument_substr: str) -> pd.DataFrame:
+                def _active_scoped_df(df: pd.DataFrame, instrument_substr: str) -> pd.DataFrame:
                     keys = [
-                        k for k in canonical_df["instrument_key"].unique()
+                        k for k in df["instrument_key"].unique()
                         if instrument_substr in k
                     ]
                     active_keys = [
@@ -8320,13 +8401,13 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                             _re_rpt_rm.search(r"(\d+)", k)
                         ) in _active_nums_rpt
                     ]
-                    return canonical_df[
-                        canonical_df["instrument_key"].isin(active_keys or keys)
+                    return df[
+                        df["instrument_key"].isin(active_keys or keys)
                     ]
 
                 # MCQ
                 try:
-                    _mcq_active_df = _active_scoped_df("content_mcq_assessment")
+                    _mcq_active_df = _active_scoped_df(_rpt_inf_mcq_df, "content_mcq_assessment")
                     r = run_repeated_measures(_mcq_active_df, "content_mcq_assessment", construct=None)
                     if not r.get("error"):
                         mbt = r.get("means_by_time", {})
@@ -8366,7 +8447,7 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                     ("b4ai_sims_survey",   sims_constructs),
                 ]:
                     survey_label = _SURVEY_LABELS.get(survey_key, survey_key)
-                    _survey_active_df = _active_scoped_df(survey_key)
+                    _survey_active_df = _active_scoped_df(_rpt_inf_survey_df, survey_key)
                     summary_rows = []
                     for construct in constructs:
                         try:
@@ -8727,10 +8808,8 @@ def _report_correlations(canonical_df: pd.DataFrame) -> None:
         "model, and repeated-measures correlations — the same 4-phase "
         "methodology as the live Correlations tab, recomputed fresh from "
         "the current filtered dataset. Uses the default composite "
-        "grouping and the full predictor set (all composites + RAI + "
-        "Amotivation) rather than requiring you to re-select predictors "
-        "here; adjust and preview interactively in the Correlations tab "
-        "first if you want a narrower report."
+        "grouping, matching the live Correlations tab's default predictor "
+        "selection below (adjustable here, same as on that tab)."
     )
 
     _CORR_RPT_OPTIONS = [
@@ -8744,12 +8823,34 @@ def _report_correlations(canonical_df: pd.DataFrame) -> None:
         key="rpt_corr_multiselect",
     )
 
+    # Predictor set for Mixed-Effects Model / Repeated-Measures Correlations
+    # -- mirrors the live Correlations tab's own default (first 2 predictors,
+    # adjustable), instead of silently always using the full predictor set
+    # (M.9: bring the PDF path in line with the live tab's default).
+    _rpt_corr_predictor_options = (
+        list(DEFAULT_SCCCES_COMPOSITE_MAP.keys()) + ["RAI", "Amotivation"]
+    )
+    if "Mixed-Effects Model" in corr_rpt_selected or "Repeated-Measures Correlations" in corr_rpt_selected:
+        rpt_corr_predictors = st.multiselect(
+            "Predictors to include (Mixed-Effects Model / Repeated-Measures Correlations)",
+            options=_rpt_corr_predictor_options,
+            default=(
+                _rpt_corr_predictor_options[:2]
+                if len(_rpt_corr_predictor_options) >= 2
+                else _rpt_corr_predictor_options
+            ),
+            key="rpt_corr_predictors",
+        )
+    else:
+        rpt_corr_predictors = _rpt_corr_predictor_options[:2]
+
     if st.button("📄 Generate Correlations PDF", key="rpt_corr_gen", type="primary"):
         corr_sel = st.session_state.get("rpt_corr_multiselect", _CORR_RPT_OPTIONS)
         inc_rel = "Reliability & Redundancy" in corr_sel
         inc_mat = "Composite Correlation Matrix" in corr_sel
         inc_mm  = "Mixed-Effects Model" in corr_sel
         inc_rmc = "Repeated-Measures Correlations" in corr_sel
+        corr_predictors = st.session_state.get("rpt_corr_predictors", rpt_corr_predictors)
 
         with st.spinner("Running correlational analyses and building PDF…"):
             sections = [{
@@ -8817,15 +8918,20 @@ def _report_correlations(canonical_df: pd.DataFrame) -> None:
                     except Exception as e:
                         sections.append({"heading": f"Correlation Matrix — {survey_label}", "body": f"Could not compute: {e}"})
 
-            # Shared predictor set (all composites + RAI + Amotivation),
-            # built once and reused by both Mixed-Effects Model and
-            # Repeated-Measures Correlations below, mirroring how the
-            # live tab builds predictor_frames per section.
+            # Shared predictor set, built once and reused by both
+            # Mixed-Effects Model and Repeated-Measures Correlations below,
+            # mirroring how the live tab builds predictor_frames per
+            # section. Uses the predictor selection made above (default:
+            # first 2, same as the live tab), not always the full set.
             long_df = None
             predictor_frames: Dict[str, pd.DataFrame] = {}
-            if inc_mm or inc_rmc:
-                predictor_options = list(composite_map.keys()) + ["RAI", "Amotivation"]
-                for pred in predictor_options:
+            if (inc_mm or inc_rmc) and not corr_predictors:
+                sections.append({
+                    "heading": "Mixed-Effects Model / Repeated-Measures Correlations",
+                    "body": "No predictors selected — select at least one predictor above and regenerate.",
+                })
+            if (inc_mm or inc_rmc) and corr_predictors:
+                for pred in corr_predictors:
                     try:
                         if pred == "RAI":
                             predictor_frames["RAI"] = compute_rai(canonical_df, sims_key)
@@ -8963,7 +9069,8 @@ def _report_full_programme(
     )
 
     _FULL_OPTIONS = (
-        ["Basic Statistics", "Inferential Statistics"] +
+        ["Basic Statistics", "Inferential Statistics", "Correlations",
+         "Competency Progression (CPI+)"] +
         (["IRT Analysis"] if _IRT_AVAILABLE else []) +
         (["ITA (latest run)", "DTA (latest run)"] if _LLM_AVAILABLE else [])
     )
@@ -8983,11 +9090,13 @@ def _report_full_programme(
     if st.button("📄 Generate Full Programme Report (PDF)",
                  key="rpt_full_gen", type="primary"):
         full_sel = st.session_state.get("rpt_full_multiselect", _FULL_OPTIONS)
-        inc_bs  = "Basic Statistics"      in full_sel
-        inc_inf = "Inferential Statistics" in full_sel
-        inc_irt = "IRT Analysis"          in full_sel
-        inc_ita = "ITA (latest run)"      in full_sel
-        inc_dta = "DTA (latest run)"      in full_sel
+        inc_bs   = "Basic Statistics"      in full_sel
+        inc_inf  = "Inferential Statistics" in full_sel
+        inc_corr = "Correlations"          in full_sel
+        inc_cpi  = "Competency Progression (CPI+)" in full_sel
+        inc_irt  = "IRT Analysis"          in full_sel
+        inc_ita  = "ITA (latest run)"      in full_sel
+        inc_dta  = "DTA (latest run)"      in full_sel
 
         with st.spinner("Compiling all sections — this may take a moment…"):
             import io as _io2
@@ -9050,6 +9159,78 @@ def _report_full_programme(
                                 ),
                             })
                 _safe_add("Inferential Statistics", _add_inf)
+
+            if inc_corr:
+                def _add_corr(secs):
+                    secs.append({"heading": "─── CORRELATIONS ───", "body": ""})
+                    sccces_key = _CORR_SURVEY_KEYS["Cognitive Engagement (SCCCES)"]
+                    sims_key = _CORR_SURVEY_KEYS["Interest & Motivation (SIMS)"]
+                    for survey_label, survey_key in _CORR_SURVEY_KEYS.items():
+                        rel = compute_construct_reliability(canonical_df, survey_key)
+                        if not rel.empty:
+                            n_ok = (rel["badge"].astype(str).str.contains("Good|Acceptable", case=False, na=False)).sum()
+                            secs.append({
+                                "heading": f"Reliability — {survey_label}",
+                                "body": f"{n_ok}/{len(rel)} sub-constructs at acceptable reliability or better.",
+                            })
+                    composite_map = {k: list(v) for k, v in DEFAULT_SCCCES_COMPOSITE_MAP.items()}
+                    predictors = list(composite_map.keys())[:2] + ["RAI"]
+                    predictor_frames: Dict[str, pd.DataFrame] = {}
+                    for pred in predictors:
+                        try:
+                            if pred == "RAI":
+                                predictor_frames["RAI"] = compute_rai(canonical_df, sims_key)
+                            else:
+                                comp = compute_composite_scores(canonical_df, sccces_key, {pred: composite_map[pred]})
+                                predictor_frames[pred] = comp[comp["composite"] == pred]
+                        except Exception:
+                            pass
+                    if predictor_frames:
+                        long_df = build_person_module_dataset(canonical_df, predictor_frames)
+                        if long_df is not None and not long_df.empty:
+                            rmc = run_repeated_measures_correlations(long_df, "pct_correct", list(predictor_frames.keys()))
+                            if rmc.get("fdr"):
+                                rows = [
+                                    {"Predictor": r["predictor"], "r": _fmt_stat(r.get("r")),
+                                     "p (FDR)": _fmt_stat(r.get("p_fdr"), 4),
+                                     "Significant": "Yes" if r.get("reject_fdr") else "No"}
+                                    for r in rmc["fdr"]
+                                ]
+                                secs.append({
+                                    "heading": "Repeated-Measures Correlations vs. Assessment Performance",
+                                    "body": "Full detail (reliability, composite matrix, mixed-effects model) available in the standalone Correlations Report.",
+                                    "table": pd.DataFrame(rows),
+                                })
+                _safe_add("Correlations", _add_corr)
+
+            if inc_cpi:
+                def _add_cpi(secs):
+                    secs.append({"heading": "─── COMPETENCY PROGRESSION (CPI+) ───", "body": ""})
+                    cpi_df = None
+                    try:
+                        from core.analytics.cpi.cpi_store import list_cpi_runs, load_cpi_summary
+                        runs = list_cpi_runs()
+                        if runs:
+                            cpi_df = load_cpi_summary(runs[0]["run_id"])
+                    except Exception:
+                        pass
+                    if cpi_df is None or (hasattr(cpi_df, "empty") and cpi_df.empty):
+                        try:
+                            from core.analytics.cpi.cpi_engine import compute_cpi_plus
+                            cpi_df = compute_cpi_plus(canonical_df)
+                        except Exception:
+                            cpi_df = None
+                    if cpi_df is not None and not cpi_df.empty:
+                        cpi_col = "cpi_plus" if "cpi_plus" in cpi_df.columns else cpi_df.columns[-1]
+                        mean_cpi = cpi_df[cpi_col].mean()
+                        secs.append({
+                            "heading": "CPI+ Group Summary",
+                            "body": (
+                                f"N = {len(cpi_df)}  |  Mean CPI+ = {mean_cpi:.3f}"
+                                if not pd.isna(mean_cpi) else f"N = {len(cpi_df)}"
+                            ) + "\nFull per-student detail available in the standalone Competency Progression Report.",
+                        })
+                _safe_add("Competency Progression (CPI+)", _add_cpi)
 
             if inc_ita and _LLM_AVAILABLE:
                 def _add_ita(secs):

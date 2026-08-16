@@ -4,8 +4,6 @@ Admin Dashboard for Basics4AI
 
 Changes v3:
   - All use_container_width replaced with width='stretch'
-  - Full LLM analysis section: provider selector, run modes,
-    SQLite result cache, cost estimator, result display
 """
 
 import os
@@ -38,6 +36,7 @@ try:
         get_persistent_transcripts,
         get_transcript_count,
         delete_transcript,
+        delete_all_transcripts_for_participant,
         load_for_analysis,
     )
     _TRANSCRIPT_STORE_AVAILABLE = True
@@ -287,13 +286,17 @@ def show_admin_dashboard(username: str):
             try:
                 from core.admin.data_service import count_student_data_footprint as _du_footprint
                 _fp = _du_footprint(_du_prev)
-                st.info(
+                _fp_msg = (
                     f"User **{_du_prev}**: "
                     f"{_fp['responses']} response rows · "
                     f"{_fp['completions']} completion records · "
                     f"{_fp['survey_scores']} survey score(s) · "
-                    f"{_fp['assessment_scores']} assessment score(s) will also be deleted."
+                    f"{_fp['assessment_scores']} assessment score(s)"
                 )
+                if "transcripts" in _fp:
+                    _fp_msg += f" · {_fp['transcripts']} transcript(s)"
+                _fp_msg += " will also be deleted."
+                st.info(_fp_msg)
             except Exception:
                 pass
 
@@ -312,6 +315,11 @@ def show_admin_dashboard(username: str):
                     from core.admin.data_service import reset_student_data
                     reset_student_data(username, _du)
                     user_service.delete_user(username, _du)
+                    if _TRANSCRIPT_STORE_AVAILABLE:
+                        try:
+                            delete_all_transcripts_for_participant(_du)
+                        except Exception:
+                            pass
                     st.success(
                         f"✅ User **{_du}** and all associated research data deleted."
                     )
@@ -378,13 +386,16 @@ def show_admin_dashboard(username: str):
                 _bc_preview_rows = []
                 for _u in _bc_selected:
                     _fp = _bc_footprint(_u)
-                    _bc_preview_rows.append({
+                    _bc_row = {
                         "Username": _u,
                         "Responses": _fp["responses"],
                         "Completions": _fp["completions"],
                         "Survey Scores": _fp["survey_scores"],
                         "Assessment Scores": _fp["assessment_scores"],
-                    })
+                    }
+                    if "transcripts" in _fp:
+                        _bc_row["Transcripts"] = _fp["transcripts"]
+                    _bc_preview_rows.append(_bc_row)
                 _bc_preview_df = _bc_pd.DataFrame(_bc_preview_rows)
                 st.dataframe(_bc_preview_df, hide_index=True, width="stretch")
 
@@ -422,6 +433,11 @@ def show_admin_dashboard(username: str):
                             try:
                                 _bc_reset(username, _u)
                                 user_service.delete_user(username, _u)
+                                if _TRANSCRIPT_STORE_AVAILABLE:
+                                    try:
+                                        delete_all_transcripts_for_participant(_u)
+                                    except Exception:
+                                        pass
                                 _bc_deleted.append(_u)
                             except Exception as _bc_err:
                                 _bc_failed.append(f"{_u} ({_bc_err})")
@@ -614,6 +630,15 @@ def show_admin_dashboard(username: str):
         impersonate_user = st.text_input("Username to impersonate")
         if st.button("Impersonate"):
             if impersonate_user:
+                try:
+                    from core.admin.audit_logger import log_admin_action, AdminAction
+                    log_admin_action(
+                        username,
+                        AdminAction.IMPERSONATE_USER,
+                        f"target_user={impersonate_user}",
+                    )
+                except Exception:
+                    pass
                 st.session_state.username = impersonate_user
                 st.rerun()
 
@@ -1473,19 +1498,21 @@ def show_admin_dashboard(username: str):
                 st.warning(st.session_state.pop("admin_obs_upload_flash_warn"))
 
         # ── Dataset Metrics ───────────────────────────────────────────────────
-        # --- Begin DEBUG for ensuring correct database is being read to read survey scores
-        from core.db_utils import get_connection
-        
-        conn = get_connection()
-        cursor = conn.cursor()
-        try:
-            cursor.execute("SELECT COUNT(*) FROM survey_scores")
-            st.write("DEBUG — survey_scores rows:", cursor.fetchone()[0])
-        except Exception as e:
-            st.write("DEBUG ERROR:", e)
-        conn.close()
-        # ---END of DEBUG
-        
+        if DEBUG:
+            # --- Begin DEBUG for ensuring correct database is being read to read survey scores
+            from core.db_utils import get_connection
+
+            conn = get_connection()
+            cursor = conn.cursor()
+            try:
+                cursor.execute("SELECT COUNT(*) FROM survey_scores")
+                st.write("DEBUG — survey_scores rows:", cursor.fetchone()[0])
+            except Exception as e:
+                st.write("DEBUG ERROR:", e)
+            conn.close()
+            # ---END of DEBUG
+
+
         st.subheader("Dataset Metrics")
         try:
             metrics = diagnostics_service.get_research_metrics()
