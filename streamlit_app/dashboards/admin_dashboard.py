@@ -156,6 +156,14 @@ def show_admin_dashboard(username: str):
     if _is_sa:
         with tabs[0]:
             st.subheader("Pending Registration Approvals")
+            # A st.success()/st.warning() called right before st.rerun() never
+            # reaches the screen -- the rerun happens before the browser
+            # paints it. Same fix already used for cohort_mgmt_flash /
+            # admin_obs_upload_flash elsewhere in this file.
+            if st.session_state.get("pending_approvals_flash"):
+                st.success(st.session_state.pop("pending_approvals_flash"))
+            if st.session_state.get("pending_approvals_flash_warn"):
+                st.warning(st.session_state.pop("pending_approvals_flash_warn"))
             pending = get_pending_users()
             if not pending:
                 st.success("✅ No pending registrations.")
@@ -173,14 +181,14 @@ def show_admin_dashboard(username: str):
                     if col_a.button("Approve", key=f"approve_{u}"):
                         try:
                             approve_user(username, u)
-                            st.success(f"{u} approved.")
+                            st.session_state["pending_approvals_flash"] = f"{u} approved."
                             st.rerun()
                         except Exception as e:
                             st.error(str(e))
                     if col_r.button("Reject", key=f"reject_{u}"):
                         try:
                             reject_user(username, u)
-                            st.warning(f"{u} rejected.")
+                            st.session_state["pending_approvals_flash_warn"] = f"{u} rejected."
                             st.rerun()
                         except Exception as e:
                             st.error(str(e))
@@ -189,7 +197,7 @@ def show_admin_dashboard(username: str):
                 if st.button("✅ Approve ALL pending"):
                     try:
                         n = bulk_approve(username, [p["username"] for p in pending])
-                        st.success(f"{n} user(s) approved.")
+                        st.session_state["pending_approvals_flash"] = f"{n} user(s) approved."
                         st.rerun()
                     except Exception as e:
                         st.error(str(e))
