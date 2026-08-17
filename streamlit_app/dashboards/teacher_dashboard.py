@@ -9083,8 +9083,12 @@ def _report_full_programme(
 
     # Cohort(s) actually present in the current filtered data (i.e.
     # whatever the sidebar's Cohort filter is already scoping to). This
-    # field is a label only (report title + filename); it never filters
-    # the data itself.
+    # multiselect both labels the report header AND further narrows the
+    # report's data to just the selected cohort(s) -- confirmed with the
+    # user 2026-08-16 after they selected a single cohort here, saw the
+    # participant count didn't change, and expected it to actually filter
+    # (an earlier label-only version was ambiguous/confusing next to
+    # "Include sections", which does filter).
     #
     # A plain st.text_input's `value=` only seeds the widget the FIRST
     # time it's created for that key -- once a user has interacted with
@@ -9093,11 +9097,11 @@ def _report_full_programme(
     # broke "update the default when the sidebar's Cohort filter
     # changes" (found live: changing the sidebar filter to BuffaloPrep
     # didn't touch this field at all). Switched to a multiselect (same
-    # pattern/UX as "Include sections" above, per explicit request) keyed
-    # on a generation counter that bumps whenever the active-cohort set
-    # changes, forcing a fresh all-selected widget at that point --
-    # same technique already used elsewhere in this file for a stale-
-    # widget-selection problem of the same shape.
+    # pattern/UX as "Include sections" above) keyed on a generation
+    # counter that bumps whenever the active-cohort set changes, forcing
+    # a fresh all-selected widget at that point -- same technique already
+    # used elsewhere in this file for a stale-widget-selection problem of
+    # the same shape.
     _active_cohorts_full = (
         sorted(canonical_df["cohort_id"].dropna().unique().tolist())
         if "cohort_id" in canonical_df.columns else []
@@ -9110,17 +9114,18 @@ def _report_full_programme(
         )
     _cohort_gen = st.session_state.get("_rpt_full_cohort_gen", 0)
 
+    _selected_cohorts_for_label = _active_cohorts_full
     if _active_cohorts_full:
         _selected_cohorts_for_label = st.multiselect(
-            "Cohort(s) for report header",
+            "Cohort(s) to include in this report",
             options=_active_cohorts_full,
             default=_active_cohorts_full,
             key=f"rpt_full_cohort_ms_{_cohort_gen}",
             help=(
-                "Label only — appears in the report's title and filename. "
-                "It does not filter the data: the report already reflects "
-                "whichever cohort(s) are active in the sidebar's Cohort "
-                "filter. Deselect here only to shorten the label."
+                "Narrows this report to the selected cohort(s) and labels "
+                "the report's title/filename. Starts from whatever the "
+                "sidebar's Cohort filter is already scoping to; deselect "
+                "here to narrow further just for this report."
             ),
         )
         cohort_name = ", ".join(_selected_cohorts_for_label) or "Basics4AI"
@@ -9142,6 +9147,27 @@ def _report_full_programme(
         inc_irt  = "IRT Analysis"          in full_sel
         inc_ita  = "ITA (latest run)"      in full_sel
         inc_dta  = "DTA (latest run)"      in full_sel
+
+        # Apply the cohort narrowing chosen above. Reassigning these two
+        # names here (shadowing the function parameters) is sufficient --
+        # every _add_* closure defined below looks up canonical_df/
+        # demographics_df by name in this enclosing scope at call time,
+        # not by value at definition time, so they all pick up the
+        # narrowed data automatically.
+        if _active_cohorts_full and not _selected_cohorts_for_label:
+            st.warning("No cohorts selected — showing all active cohorts instead.")
+        elif _active_cohorts_full and set(_selected_cohorts_for_label) != set(_active_cohorts_full):
+            canonical_df = canonical_df[canonical_df["cohort_id"].isin(_selected_cohorts_for_label)]
+            # demographics_df has no cohort_id column of its own -- cohort
+            # membership only exists via cohort_map ({user_id: cohort_id}).
+            # Same pattern _apply_filters() already uses for the sidebar's
+            # own Cohort filter (found here only because the first version
+            # of this fix guarded on a column that never exists, so it
+            # silently filtered canonical_df but not demographics_df --
+            # exactly why the PDF's "Participants: N" count didn't move).
+            demographics_df = demographics_df[
+                demographics_df["user_id"].map(cohort_map).isin(_selected_cohorts_for_label)
+            ]
 
         with st.spinner("Compiling all sections — this may take a moment…"):
             import io as _io2
