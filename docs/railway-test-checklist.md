@@ -440,6 +440,30 @@ If you created a test DTA run for N.1, no cleanup needed — DTA runs aren't cur
 
 ---
 
+## O. Resume interrupted ITA/DTA runs (10 min)
+
+Found live: the Groq daily token limit (100K/day free tier) was hit mid-analysis, and there was no way to continue an interrupted run — clicking "Run" again always started over from scratch, re-spending tokens on phases already completed. Both pipelines now save their progress and offer a way to pick up where they left off, without redoing already-completed (and already-paid-for) work.
+
+### O.1 — ITA resume (5 min)
+
+1. Start an ITA run and let it get partway through (or use a run that previously failed/stopped before reaching Step 6 — check phase_reached in Step 6 → any run list).
+2. Go to **🧠 LLM Analysis → Inductive Thematic Analysis (ITA) → Step 5 — Run Analysis**. If any run stopped before Phase 6, you'll see a **"⏯ Resume an interrupted run"** expander above the usual model/source settings.
+3. Open it, select the stopped run, click **"⏯ Resume This Run"**.
+4. ✅ Pass if: phases already completed show as **"loaded from earlier run"** (near-instant, no spinner) rather than being recomputed, and only the remaining phases actually run — ending in "✅ ITA complete!" without having redone the earlier phases.
+
+### O.2 — DTA resume (5 min)
+
+1. Start a DTA run and let Phase 2 (the per-participant × construct coding loop) complete — this is the expensive part. If Phase 5 (narrative summary) then fails for any reason, the run's Phase 2 data is still saved.
+2. Go to **🧠 LLM Analysis → Deductive Thematic Analysis (DTA)**. You'll see a **"⏯ Resume a run (Phase 2 already saved)"** expander above the "▶ Run DTA" button, listing any run with saved Phase 2 data.
+3. Open it, select the run, click **"⏯ Resume This Run"**.
+4. ✅ Pass if: it skips straight to "Phase 3 — Building evidence matrix" and "Phase 5 — Generating narrative summary" (no re-coding pass, no new per-participant × construct API calls), ending in "DTA complete."
+
+### Cleanup
+
+No cleanup needed — resuming doesn't create new data, it reuses an existing run_id's already-saved results.
+
+---
+
 ## If anything fails
 
 Note which item failed and what you saw, then let Claude know — don't try to fix anything yourself. This is all on the disposable `test` environment; nothing here touches the real pilot data on `production`.

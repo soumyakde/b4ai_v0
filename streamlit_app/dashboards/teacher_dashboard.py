@@ -5706,6 +5706,49 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
             "**Cohort scope:** " + (", ".join(_ita_cohort_ids) if _ita_cohort_ids else "All cohorts (no filter)")
         )
 
+        # ── Resume an interrupted run (Task O, 2026-08-17) ───────────────
+        # Every phase is saved as it completes, so a run stopped mid-way
+        # (rate limit, network error, etc.) doesn't have to restart from
+        # Phase 1 -- picking it up here reuses whatever was already paid
+        # for and only computes the remaining phases.
+        _ita_incomplete = [
+            r for r in _ita_list_runs(created_by=username)
+            if 0 < r.get("phase_reached", 0) < 6
+        ]
+        if _ita_incomplete:
+            with st.expander(
+                f"⏯ Resume an interrupted run ({len(_ita_incomplete)} available)",
+                expanded=False,
+            ):
+                st.caption(
+                    "These runs stopped before Phase 6 (report writing) — "
+                    "resuming reuses the codes/themes already computed instead "
+                    "of recomputing them, saving both time and tokens."
+                )
+                _ita_resume_opts = {
+                    f"{r['model'].upper()} T={r['temperature']} — "
+                    f"{r['created_at'][:16]} — stopped at Phase {r['phase_reached']}/6": r["run_id"]
+                    for r in _ita_incomplete
+                }
+                _ita_resume_choice = st.selectbox(
+                    "Select run to resume", list(_ita_resume_opts.keys()),
+                    key="ita_g_resume_choice",
+                )
+                if st.button("⏯ Resume This Run", key="ita_g_resume_btn"):
+                    _run_ita_pipeline(
+                        username=username, sources=sources, per_run_files=per_run_files,
+                        models=[], temperature=0.0,
+                        n_themes=int(st.session_state.get("ita_g_n_themes", 5)),
+                        n_codes=int(st.session_state.get("ita_g_n_codes", 3)),
+                        dedup_threshold=float(st.session_state.get("ita_g_dedup", 0.85)),
+                        cohort_ids=_ita_cohort_ids,
+                        custom_sys_prompt=st.session_state.get("ita_g_sys_saved"),
+                        custom_p2_prompt=st.session_state.get("ita_g_p2_saved"),
+                        custom_p3_prompt=st.session_state.get("ita_g_p3_saved"),
+                        resume_run_id=_ita_resume_opts[_ita_resume_choice],
+                    )
+            st.divider()
+
         models = st.session_state.get("ita_g_models", [])
 
         temperature = float(st.session_state.get("ita_g_temp", 0.0))
@@ -6082,16 +6125,43 @@ def _run_ita_pipeline(
     custom_p2_prompt=None,
     custom_p3_prompt=None,
     cohort_ids=None,
+    resume_run_id=None,
 ):
-    src_label = " + ".join(sources) if sources else "none"
-    with st.spinner(f"Loading transcripts from: {src_label}..."):
-        try:
-            transcripts = _load_combined_transcripts(sources, per_run_files, cohort_ids=cohort_ids)
-        except Exception as e:
-            st.error(f"Could not load transcripts: {e}"); return
+    # ── Resume mode (Task O, 2026-08-17) ────────────────────────────────
+    # Every phase's raw result was already being persisted per-phase
+    # (save_phase_result()), but nothing ever read it back -- a rate-
+    # limit or other interruption meant the only way forward was
+    # clicking "Run" again, which always created a brand-new run_id and
+    # restarted at Phase 1, re-spending tokens on phases already done.
+    # When resume_run_id is set, this run's model/temperature come from
+    # the stored run record (not the UI), and each phase block below
+    # loads its cached result instead of recomputing it, for every phase
+    # already <= that run's phase_reached.
+    _resume_phase_reached = 0
+    if resume_run_id:
+        _resume_rec = _ita_get_run(resume_run_id)
+        if not _resume_rec:
+            st.error("Could not find that run to resume."); return
+        models = [_resume_rec["model"]]
+        temperature = float(_resume_rec["temperature"])
+        _resume_phase_reached = int(_resume_rec["phase_reached"] or 0)
 
-    if not transcripts:
-        st.warning(f"No transcript data found in: {src_label}."); return
+    # Transcripts are only actually consumed by Phases 1-2 (chunking +
+    # code generation). If resuming past Phase 2, the cached dedup'd
+    # codes already cover that ground, so a resumed run doesn't need
+    # transcripts to be re-loadable at all -- lets a resume succeed even
+    # if the original source selection changed since the interrupted run.
+    transcripts = []
+    if not (resume_run_id and _resume_phase_reached >= 2):
+        src_label = " + ".join(sources) if sources else "none"
+        with st.spinner(f"Loading transcripts from: {src_label}..."):
+            try:
+                transcripts = _load_combined_transcripts(sources, per_run_files, cohort_ids=cohort_ids)
+            except Exception as e:
+                st.error(f"Could not load transcripts: {e}"); return
+
+        if not transcripts:
+            st.warning(f"No transcript data found in: {src_label}."); return
 
     # ── Per-type subsetting ──────────────────────────────────────────
     # Split loaded transcripts by source_types tag, apply limits, then
@@ -6128,157 +6198,199 @@ def _run_ita_pipeline(
     if custom_p3_prompt and custom_p3_prompt != _PHASE3_PROMPT:
         _ita_mod._PHASE3_PROMPT = custom_p3_prompt
 
-    st.info(f"Loaded {len(transcripts)} participant(s). "
-            f"Running {len(models)} model(s).")
+    if resume_run_id and _resume_phase_reached >= 2:
+        st.info(
+            f"Resuming run {resume_run_id[:8]}… from Phase {_resume_phase_reached + 1} "
+            f"— codes and themes already computed are reused, not recomputed."
+        )
+    else:
+        st.info(f"Loaded {len(transcripts)} participant(s). "
+                f"Running {len(models)} model(s).")
 
     for model in models:
-        st.markdown(f"---\n#### {_llm_display_name(model)}")
-        run_id = _ita_create_run(
-            model=model, temperature=temperature,
-            source_type="+".join(sources),
-            created_by=username,
-            notes=f"n_themes={n_themes}, n_codes={n_codes}",
-            cohort_scope=", ".join(cohort_ids) if cohort_ids else "All cohorts",
-        )
-
-        with st.status("Phase 1 — Chunking...", expanded=False) as s:
-            chunks = run_phase1(transcripts, chunk_size=2500)
-            s.update(label=f"Phase 1 ✅ — {len(chunks)} chunks", state="complete")
-
-        with st.expander(
-            f"🧩 AI Coding Process Insights — Phase 1: Chunking  "
-            f"({len(chunks)} chunk(s) created)",
-            expanded=False,
-        ):
-            st.caption(
-                "The AI splits each participant's text into overlapping chunks "
-                "so that long responses are not cut off mid-thought. "
-                f"**{len(chunks)} chunk(s)** were created from "
-                f"{len(transcripts)} participant text(s)."
+        existing_phase_reached = _resume_phase_reached if resume_run_id else 0
+        if resume_run_id:
+            run_id = resume_run_id
+            st.markdown(f"---\n#### {_llm_display_name(model)} — resuming")
+        else:
+            run_id = _ita_create_run(
+                model=model, temperature=temperature,
+                source_type="+".join(sources),
+                created_by=username,
+                notes=f"n_themes={n_themes}, n_codes={n_codes}",
+                cohort_scope=", ".join(cohort_ids) if cohort_ids else "All cohorts",
             )
+            st.markdown(f"---\n#### {_llm_display_name(model)}")
 
-        with st.status(f"Phase 2 — Generating codes (T={temperature})...",
-                       expanded=False) as s:
-            p2 = run_phase2(chunks, model, temperature,
-                            n_codes=n_codes, run_id=run_id)
-            n_codes_raw = p2.get("n_codes_raw", 0)
-            _p2_ok = n_codes_raw > 0
-            s.update(
-                label=f"Phase 2 {'✅' if _p2_ok else '⚠️'} — {n_codes_raw} codes",
-                state="complete" if _p2_ok else "error",
-            )
-
-        with st.expander(
-            f"🧩 AI Coding Process Insights — Phase 2: Code Extraction  "
-            f"({'✅ ' + str(n_codes_raw) + ' codes extracted' if _p2_ok else '⚠️ 0 codes — see details below'})",
-            expanded=not _p2_ok,
-        ):
-            st.caption(
-                "The AI reads each chunk and extracts short descriptive labels "
-                "called **codes** — concise phrases that capture a key idea in "
-                "the text (e.g. 'uncertainty about AI decisions'). "
-                f"**{n_codes_raw} code(s)** were extracted across all chunks."
-            )
-            if _p2_ok:
-                st.caption("Sample codes (first 3):")
-                st.json(p2.get("codes", [])[:3])
-            else:
-                st.warning("No codes were extracted. Details below.")
-                _p2_errors = p2.get("errors")
-                if _p2_errors:
-                    st.caption("Errors captured inside the pipeline:")
-                    st.json(_p2_errors) if isinstance(_p2_errors, (list, dict)) \
-                        else st.code(str(_p2_errors))
-                else:
-                    st.caption("No error details stored — check ita_pipeline.run_phase2().")
-
-        with st.status("Phase 2b — Deduplicating codes...", expanded=False) as s:
-            dedup = run_phase2_dedup(p2["codes"], threshold=dedup_threshold)
-            save_phase_result(run_id, 2, {**p2, "dedup": dedup})
-            s.update(
-                label=f"Phase 2b ✅ — "
-                      f"{dedup['n_before']}→{dedup['n_after']} codes "
-                      f"({dedup.get('n_removed', 0)} removed)",
+        if existing_phase_reached >= 2:
+            _p2_loaded = load_phase_result(run_id, 2) or {}
+            dedup = _p2_loaded.get("dedup", {"codes_dedup": [], "n_before": 0, "n_after": 0, "n_removed": 0})
+            st.status(
+                f"Phases 1-2b ✅ — loaded from earlier run "
+                f"({dedup.get('n_after', 0)} codes)",
                 state="complete",
             )
+        else:
+            with st.status("Phase 1 — Chunking...", expanded=False) as s:
+                chunks = run_phase1(transcripts, chunk_size=2500)
+                s.update(label=f"Phase 1 ✅ — {len(chunks)} chunks", state="complete")
 
-        with st.expander(
-            f"🧩 AI Coding Process Insights — Phase 2b: Deduplication  "
-            f"({dedup.get('n_before', 0)} → {dedup.get('n_after', 0)} codes, "
-            f"{dedup.get('n_removed', 0)} removed)",
-            expanded=False,
-        ):
-            st.caption(
-                "Different chunks often produce very similar codes. "
-                "Deduplication uses semantic similarity to merge near-duplicates, "
-                "keeping the code list clean before themes are built. "
-                f"Threshold used: **{dedup_threshold}** "
-                "(higher = stricter, keeps more codes)."
-            )
+            with st.expander(
+                f"🧩 AI Coding Process Insights — Phase 1: Chunking  "
+                f"({len(chunks)} chunk(s) created)",
+                expanded=False,
+            ):
+                st.caption(
+                    "The AI splits each participant's text into overlapping chunks "
+                    "so that long responses are not cut off mid-thought. "
+                    f"**{len(chunks)} chunk(s)** were created from "
+                    f"{len(transcripts)} participant text(s)."
+                )
 
-        with st.status("Phase 3 — Identifying themes...", expanded=False) as s:
-            p3 = run_phase3(dedup["codes_dedup"], model, temperature,
-                            n_themes=n_themes, run_id=run_id)
-            if p3.get("error"):
-                s.update(label=f"Phase 3 ❌ — {p3['error']}", state="error")
-            else:
+            with st.status(f"Phase 2 — Generating codes (T={temperature})...",
+                           expanded=False) as s:
+                p2 = run_phase2(chunks, model, temperature,
+                                n_codes=n_codes, run_id=run_id)
+                n_codes_raw = p2.get("n_codes_raw", 0)
+                _p2_ok = n_codes_raw > 0
                 s.update(
-                    label=f"Phase 3 ✅ — {p3['n_themes']} themes identified",
+                    label=f"Phase 2 {'✅' if _p2_ok else '⚠️'} — {n_codes_raw} codes",
+                    state="complete" if _p2_ok else "error",
+                )
+
+            with st.expander(
+                f"🧩 AI Coding Process Insights — Phase 2: Code Extraction  "
+                f"({'✅ ' + str(n_codes_raw) + ' codes extracted' if _p2_ok else '⚠️ 0 codes — see details below'})",
+                expanded=not _p2_ok,
+            ):
+                st.caption(
+                    "The AI reads each chunk and extracts short descriptive labels "
+                    "called **codes** — concise phrases that capture a key idea in "
+                    "the text (e.g. 'uncertainty about AI decisions'). "
+                    f"**{n_codes_raw} code(s)** were extracted across all chunks."
+                )
+                if _p2_ok:
+                    st.caption("Sample codes (first 3):")
+                    st.json(p2.get("codes", [])[:3])
+                else:
+                    st.warning("No codes were extracted. Details below.")
+                    _p2_errors = p2.get("errors")
+                    if _p2_errors:
+                        st.caption("Errors captured inside the pipeline:")
+                        st.json(_p2_errors) if isinstance(_p2_errors, (list, dict)) \
+                            else st.code(str(_p2_errors))
+                    else:
+                        st.caption("No error details stored — check ita_pipeline.run_phase2().")
+
+            with st.status("Phase 2b — Deduplicating codes...", expanded=False) as s:
+                dedup = run_phase2_dedup(p2["codes"], threshold=dedup_threshold)
+                save_phase_result(run_id, 2, {**p2, "dedup": dedup})
+                s.update(
+                    label=f"Phase 2b ✅ — "
+                          f"{dedup['n_before']}→{dedup['n_after']} codes "
+                          f"({dedup.get('n_removed', 0)} removed)",
                     state="complete",
                 )
 
-        with st.expander(
-            f"🧩 AI Coding Process Insights — Phase 3: Theme Identification  "
-            f"({'❌ ' + str(p3.get('error','')) if p3.get('error') else '✅ ' + str(p3.get('n_themes', 0)) + ' theme(s) identified'})",
-            expanded=bool(p3.get("error")),
-        ):
-            st.caption(
-                "The AI groups related codes into broader **themes** — "
-                "recurring patterns that cut across multiple participants and chunks. "
-                f"**{p3.get('n_themes', 0)} theme(s)** were identified from "
-                f"{dedup.get('n_after', 0)} deduplicated codes."
+            with st.expander(
+                f"🧩 AI Coding Process Insights — Phase 2b: Deduplication  "
+                f"({dedup.get('n_before', 0)} → {dedup.get('n_after', 0)} codes, "
+                f"{dedup.get('n_removed', 0)} removed)",
+                expanded=False,
+            ):
+                st.caption(
+                    "Different chunks often produce very similar codes. "
+                    "Deduplication uses semantic similarity to merge near-duplicates, "
+                    "keeping the code list clean before themes are built. "
+                    f"Threshold used: **{dedup_threshold}** "
+                    "(higher = stricter, keeps more codes)."
+                )
+
+        if existing_phase_reached >= 3:
+            p3 = load_phase_result(run_id, 3) or {}
+            st.status(
+                f"Phase 3 ✅ — loaded from earlier run ({p3.get('n_themes', 0)} themes)",
+                state="complete",
             )
-            if p3.get("error"):
-                st.error(p3["error"])
+        else:
+            with st.status("Phase 3 — Identifying themes...", expanded=False) as s:
+                p3 = run_phase3(dedup["codes_dedup"], model, temperature,
+                                n_themes=n_themes, run_id=run_id)
+                if p3.get("error"):
+                    s.update(label=f"Phase 3 ❌ — {p3['error']}", state="error")
+                else:
+                    s.update(
+                        label=f"Phase 3 ✅ — {p3['n_themes']} themes identified",
+                        state="complete",
+                    )
+
+            with st.expander(
+                f"🧩 AI Coding Process Insights — Phase 3: Theme Identification  "
+                f"({'❌ ' + str(p3.get('error','')) if p3.get('error') else '✅ ' + str(p3.get('n_themes', 0)) + ' theme(s) identified'})",
+                expanded=bool(p3.get("error")),
+            ):
+                st.caption(
+                    "The AI groups related codes into broader **themes** — "
+                    "recurring patterns that cut across multiple participants and chunks. "
+                    f"**{p3.get('n_themes', 0)} theme(s)** were identified from "
+                    f"{dedup.get('n_after', 0)} deduplicated codes."
+                )
+                if p3.get("error"):
+                    st.error(p3["error"])
 
         if p3.get("error"):
             continue
 
-        with st.status("Phase 4 — Reviewing themes (T=1.0)...", expanded=False) as s:
-            p4 = run_phase4(dedup["codes_dedup"], model, temperature=1.0,
-                            n_themes=n_themes, run_id=run_id)
-            if p4.get("error"):
-                s.update(label=f"Phase 4 ❌ — {p4['error']}", state="error")
-            else:
-                s.update(
-                    label=f"Phase 4 ✅ — {p4['n_themes']} themes at T=1.0 "
-                          f"(stability check)",
-                    state="complete",
-                )
-
-        with st.expander(
-            f"🧩 AI Coding Process Insights — Phase 4: Theme Stability Check  "
-            f"({'❌ error' if p4.get('error') else str(p4.get('n_themes', 0)) + ' theme(s) at T=1.0'})",
-            expanded=False,
-        ):
-            st.caption(
-                "The same theme search is re-run at **Temperature = 1.0** "
-                "(more creative/varied). If the themes found here closely match "
-                "Phase 3 (agreement > 0.80), it confirms the themes are robust "
-                "and not just an artefact of one particular run. "
-                "You can compare these in Step 6 → Phase 4 Review."
-            )
-            if p4.get("error"):
-                st.error(p4["error"])
-
-        with st.status("Phase 5 — Defining themes...", expanded=False) as s:
-            p5 = run_phase5(p3["themes"], dedup["codes_dedup"], model,
-                            temperature, run_id=run_id)
-            n_defined = len(p5.get("themes_defined", []))
-            s.update(
-                label=f"Phase 5 ✅ — {n_defined} themes defined with descriptions",
+        if existing_phase_reached >= 4:
+            p4 = load_phase_result(run_id, 4) or {}
+            st.status(
+                f"Phase 4 ✅ — loaded from earlier run ({p4.get('n_themes', 0)} themes at T=1.0)",
                 state="complete",
             )
+        else:
+            with st.status("Phase 4 — Reviewing themes (T=1.0)...", expanded=False) as s:
+                p4 = run_phase4(dedup["codes_dedup"], model, temperature=1.0,
+                                n_themes=n_themes, run_id=run_id)
+                if p4.get("error"):
+                    s.update(label=f"Phase 4 ❌ — {p4['error']}", state="error")
+                else:
+                    s.update(
+                        label=f"Phase 4 ✅ — {p4['n_themes']} themes at T=1.0 "
+                              f"(stability check)",
+                        state="complete",
+                    )
+
+            with st.expander(
+                f"🧩 AI Coding Process Insights — Phase 4: Theme Stability Check  "
+                f"({'❌ error' if p4.get('error') else str(p4.get('n_themes', 0)) + ' theme(s) at T=1.0'})",
+                expanded=False,
+            ):
+                st.caption(
+                    "The same theme search is re-run at **Temperature = 1.0** "
+                    "(more creative/varied). If the themes found here closely match "
+                    "Phase 3 (agreement > 0.80), it confirms the themes are robust "
+                    "and not just an artefact of one particular run. "
+                    "You can compare these in Step 6 → Phase 4 Review."
+                )
+                if p4.get("error"):
+                    st.error(p4["error"])
+
+        if existing_phase_reached >= 5:
+            p5 = load_phase_result(run_id, 5) or {}
+            n_defined = len(p5.get("themes_defined", []))
+            st.status(
+                f"Phase 5 ✅ — loaded from earlier run ({n_defined} themes defined)",
+                state="complete",
+            )
+        else:
+            with st.status("Phase 5 — Defining themes...", expanded=False) as s:
+                p5 = run_phase5(p3["themes"], dedup["codes_dedup"], model,
+                                temperature, run_id=run_id)
+                n_defined = len(p5.get("themes_defined", []))
+                s.update(
+                    label=f"Phase 5 ✅ — {n_defined} themes defined with descriptions",
+                    state="complete",
+                )
 
         with st.expander(
             f"🧩 AI Coding Process Insights — Phase 5: Theme Definition  "
@@ -6667,6 +6779,49 @@ def _render_dta_run_panel(username: str, canonical_df: pd.DataFrame) -> None:
             "dta_p5_prompt", "dta_p5_saved", "_dta_reset_p5", _DTA_PHASE5_PROMPT, height=180,
         )
 
+    # ── Resume a run whose Phase 2 already succeeded (Task O, 2026-08-17) ──
+    # Phase 2 (the expensive per-participant x construct loop) is saved
+    # once it finishes; if Phase 5 (narrative summary) then fails --
+    # exactly the scenario hit live: Phase 2 succeeded, Phase 5 hit the
+    # Groq daily token limit -- resuming reuses that saved Phase 2 data
+    # instead of redoing the whole expensive loop for a one-call retry.
+    _dta_resumable = [r for r in _dta_list_runs(created_by=username)
+                      if r.get("phase_reached", 0) >= 2
+                      and r.get("construct_groups","[]") != '["learning_objectives"]']
+    if _dta_resumable:
+        with st.expander(
+            f"⏯ Resume a run (Phase 2 already saved) ({len(_dta_resumable)} available)",
+            expanded=False,
+        ):
+            st.caption(
+                "These runs already have coded evidence saved — resuming "
+                "skips straight to rebuilding the summary and retrying the "
+                "narrative report, without repeating the expensive per-"
+                "participant coding pass."
+            )
+            _dta_resume_opts = {
+                f"{r['model'].upper()} T={r['temperature']} — "
+                f"{r['created_at'][:16]}": r["run_id"]
+                for r in _dta_resumable
+            }
+            _dta_resume_choice = st.selectbox(
+                "Select run to resume", list(_dta_resume_opts.keys()),
+                key="dta_resume_choice",
+            )
+            if st.button("⏯ Resume This Run", key="dta_resume_btn"):
+                _execute_dta_run(
+                    username=username, sources=sources, per_run_files=per_run_files,
+                    models=[], temperature=0.0,
+                    construct_groups=dta_groups,
+                    show_stream=st.session_state.get("dta_show_stream", False),
+                    custom_sys_prompt=st.session_state.get("dta_sys_saved"),
+                    custom_p2_prompt=st.session_state.get("dta_p2_saved"),
+                    custom_p5_prompt=st.session_state.get("dta_p5_saved"),
+                    cohort_ids=dta_cohort_ids,
+                    resume_run_id=_dta_resume_opts[_dta_resume_choice],
+                )
+        st.divider()
+
     col_r, col_lo = st.columns(2)
     run_dta = col_r.button("▶ Run DTA",         key="dta_run_btn", type="primary")
     run_lo  = col_lo.button("▶ Run LO Analysis", key="lo_run_btn")
@@ -6701,40 +6856,78 @@ def _execute_dta_run(username, sources, per_run_files,
                      custom_sys_prompt=None,
                      custom_p2_prompt=None,
                      custom_p5_prompt=None,
-                     cohort_ids=None):
-    src_label = " + ".join(sources)
-    with st.spinner(f"Loading data from: {src_label}..."):
-        try:
-            transcripts = _load_combined_transcripts(sources, per_run_files, cohort_ids=cohort_ids)
-        except Exception as e:
-            st.error(f"Could not load data: {e}"); return
+                     cohort_ids=None,
+                     resume_run_id=None):
+    # ── Resume mode (Task O, 2026-08-17) ────────────────────────────────
+    # Phase 2 (the expensive per-participant x construct loop) already
+    # saves its results once, at the end, via save_dta_results() -- but
+    # nothing ever read that data back. If Phase 5 (the single narrative-
+    # writing call) failed afterward -- exactly what happened live: Phase
+    # 2 succeeded and was saved, then Phase 5 hit the Groq daily token
+    # limit -- clicking "Run DTA" again created a brand-new run_id and
+    # redid the entire expensive Phase 2 loop for nothing. When
+    # resume_run_id is set, Phases 1/2/4 are skipped entirely and Phase 3
+    # is rebuilt (cheap, no LLM call) from the already-saved Phase 2 data.
+    _resume_p2_results = None
+    if resume_run_id:
+        _resume_recs = [r for r in _dta_list_runs(created_by=username) if r["run_id"] == resume_run_id]
+        if not _resume_recs:
+            st.error("Could not find that run to resume."); return
+        _resume_rec = _resume_recs[0]
+        models = [_resume_rec["model"]]
+        temperature = float(_resume_rec["temperature"])
+        _resume_df = load_dta_results(resume_run_id)
+        if _resume_df.empty:
+            st.error(
+                "That run has no saved Phase 2 data to resume from — "
+                "start a fresh run instead."
+            ); return
+        _resume_p2_results = _resume_df.to_dict("records")
 
-    if not transcripts:
-        st.warning(f"No transcript data found in: {src_label}."); return
+    if resume_run_id:
+        transcripts = []
+    else:
+        src_label = " + ".join(sources)
+        with st.spinner(f"Loading data from: {src_label}..."):
+            try:
+                transcripts = _load_combined_transcripts(sources, per_run_files, cohort_ids=cohort_ids)
+            except Exception as e:
+                st.error(f"Could not load data: {e}"); return
 
-    # Per-type subsetting
-    if max_reflections is not None or max_interviews is not None:
-        refs   = [t for t in transcripts if "reflections" in t.get("source_types", [])]
-        ints   = [t for t in transcripts if "interview"   in t.get("source_types", [])]
-        others = [t for t in transcripts
-                  if "reflections" not in t.get("source_types", [])
-                  and "interview"  not in t.get("source_types", [])]
-        if max_reflections is not None:
-            refs = refs[:max_reflections]
-        if max_interviews is not None:
-            ints = ints[:max_interviews]
-        transcripts = refs + ints + others
-        st.caption(
-            f"Using {len(refs)} reflection(s) + {len(ints)} interview(s)"
-            + (f" + {len(others)} other(s)" if others else "") + "."
+        if not transcripts:
+            st.warning(f"No transcript data found in: {src_label}."); return
+
+    if resume_run_id:
+        constructs_to_run = {}
+        st.info(
+            f"Resuming run {resume_run_id[:8]}… — Phase 2 data already saved "
+            f"({len(_resume_p2_results)} participant×construct cells) is reused; "
+            f"only Phase 3 (rebuild, free) and Phase 5 (retry) run."
         )
+    else:
+        # Per-type subsetting
+        if max_reflections is not None or max_interviews is not None:
+            refs   = [t for t in transcripts if "reflections" in t.get("source_types", [])]
+            ints   = [t for t in transcripts if "interview"   in t.get("source_types", [])]
+            others = [t for t in transcripts
+                      if "reflections" not in t.get("source_types", [])
+                      and "interview"  not in t.get("source_types", [])]
+            if max_reflections is not None:
+                refs = refs[:max_reflections]
+            if max_interviews is not None:
+                ints = ints[:max_interviews]
+            transcripts = refs + ints + others
+            st.caption(
+                f"Using {len(refs)} reflection(s) + {len(ints)} interview(s)"
+                + (f" + {len(others)} other(s)" if others else "") + "."
+            )
 
-    constructs_to_run = {k: v for k, v in _DTA_CODEBOOK.items()
-                         if v["group"] in construct_groups}
-    st.info(f"Loaded {len(transcripts)} participant(s). "
-            f"Analysing {len(constructs_to_run)} constructs × {len(models)} model(s).")
-    st.caption(f"Estimated API calls: "
-               f"{len(transcripts) * len(constructs_to_run) * len(models)}")
+        constructs_to_run = {k: v for k, v in _DTA_CODEBOOK.items()
+                             if v["group"] in construct_groups}
+        st.info(f"Loaded {len(transcripts)} participant(s). "
+                f"Analysing {len(constructs_to_run)} constructs × {len(models)} model(s).")
+        st.caption(f"Estimated API calls: "
+                   f"{len(transcripts) * len(constructs_to_run) * len(models)}")
 
     import json as _j
     from datetime import datetime as _dt
@@ -6749,32 +6942,48 @@ def _execute_dta_run(username, sources, per_run_files,
     sys_p = custom_sys_prompt or DTA_SYSTEM_PROMPT
 
     for model in models:
-        st.markdown(f"---\n#### {_llm_display_name(model)}")
-        run_id = _dta_create_run(
-            model=model, temperature=temperature,
-            source_type="+".join(sources),
-            construct_groups=construct_groups,
-            created_by=username,
-            cohort_scope=", ".join(cohort_ids) if cohort_ids else "All cohorts",
-        )
+        if resume_run_id:
+            run_id = resume_run_id
+            st.markdown(f"---\n#### {_llm_display_name(model)} — resuming")
+        else:
+            run_id = _dta_create_run(
+                model=model, temperature=temperature,
+                source_type="+".join(sources),
+                construct_groups=construct_groups,
+                created_by=username,
+                cohort_scope=", ".join(cohort_ids) if cohort_ids else "All cohorts",
+            )
+            st.markdown(f"---\n#### {_llm_display_name(model)}")
         st.caption(f"Run ID: `{run_id[:8]}...`")
 
-        n_total  = len(transcripts) * len(constructs_to_run)
-        progress = st.progress(0, text="Phase 1 — Chunking...")
-
-        # Phase 1
-        with st.status("Phase 1 — Preparing transcripts...",
-                       expanded=False) as s1:
-            total_chars = sum(len(t.get("content","")) for t in transcripts)
-            s1.update(
-                label=f"Phase 1 ✅ — {len(transcripts)} participant(s) "
-                      f"({total_chars:,} characters)",
+        if resume_run_id:
+            p2_results = _resume_p2_results
+            st.status(
+                f"Phases 1-2 ✅ — loaded from earlier run "
+                f"({len(p2_results)} cell(s))",
                 state="complete",
             )
+            progress = None
+        else:
+            n_total  = len(transcripts) * len(constructs_to_run)
+            progress = st.progress(0, text="Phase 1 — Chunking...")
 
-        # Phase 2 — per-construct streaming
+            # Phase 1
+            with st.status("Phase 1 — Preparing transcripts...",
+                           expanded=False) as s1:
+                total_chars = sum(len(t.get("content","")) for t in transcripts)
+                s1.update(
+                    label=f"Phase 1 ✅ — {len(transcripts)} participant(s) "
+                          f"({total_chars:,} characters)",
+                    state="complete",
+                )
+
+        # Phase 2 — per-construct streaming (skipped entirely on resume)
         stream_area = st.container() if show_stream else None
-        p2_results  = []
+        if resume_run_id:
+            pass
+        else:
+            p2_results  = []
         step        = 0
         now_s       = _dt.utcnow().isoformat()
 
@@ -6855,71 +7064,82 @@ def _execute_dta_run(username, sources, per_run_files,
                             else:
                                 st.caption("No indicator phrases directly matched.")
 
-        progress.progress(1.0, text="Phase 2 complete")
-        save_dta_results(run_id, p2_results)
-        n_ev = sum(r.get("evidence_count",0) for r in p2_results)
-        st.caption(f"Phase 2 — {len(p2_results)} cells coded, {n_ev} evidence instances.")
+        if resume_run_id:
+            n_ev = sum(r.get("evidence_count",0) for r in p2_results)
+            st.caption(f"Phase 2 — {len(p2_results)} cells coded, {n_ev} evidence instances (loaded).")
+        else:
+            progress.progress(1.0, text="Phase 2 complete")
+            save_dta_results(run_id, p2_results)
+            n_ev = sum(r.get("evidence_count",0) for r in p2_results)
+            st.caption(f"Phase 2 — {len(p2_results)} cells coded, {n_ev} evidence instances.")
 
         # Phase 3
         with st.status("Phase 3 — Building evidence matrix...", expanded=False) as s3:
             p3 = run_dta_phase3(p2_results)
             s3.update(label="Phase 3 ✅ — Evidence matrix built", state="complete")
 
-        # Phase 4 — re-examine zero-evidence at T=1.0
-        with st.status("Phase 4 — Reviewing zero-evidence constructs (T=1.0)...",
-                       expanded=False) as s4:
-            zero_keys = set(r["construct_name"] for r in p2_results
-                            if r.get("evidence_count",0)==0 and not r.get("error"))
-            if not zero_keys:
-                s4.update(label="Phase 4 ✅ — All constructs had evidence; no review needed",
-                          state="complete")
-            else:
-                p4_index = {}
-                for transcript in transcripts:
-                    pid  = transcript.get("participant_id","unknown")
-                    text = str(transcript.get("content","")).strip()
-                    if not text: continue
-                    for cname, cdef in constructs_to_run.items():
-                        if cname not in zero_keys: continue
-                        ind_block = "\n".join(('  - "'+i+'"') for i in cdef["indicators"])
-                        prompt4 = _DTA_PHASE2_PROMPT.format(
-                            construct_name=cname.replace("_"," ").title(),
-                            definition=cdef["definition"],
-                            analytic_focus=", ".join(cdef["analytic_focus"]),
-                            indicators=ind_block, text=text[:3000],
-                        )
-                        r4 = _llm_call_model(model, prompt4, system=sys_p,
-                                             temperature=1.0, max_tokens=1500)
-                        raw4 = r4.get("text","")
-                        parsed4 = _parse_dta_json(raw4) if not r4.get("error") else None
-                        if parsed4:
-                            insts4 = parsed4.get("instances",[])
-                            if insts4:
-                                p4_index[(pid, cname)] = {
-                                    "evidence_count":   parsed4.get("evidence_count", len(insts4)),
-                                    "instances":        insts4,
-                                    "valence_positive": sum(1 for i in insts4 if i.get("valence")=="positive"),
-                                    "valence_negative": sum(1 for i in insts4 if i.get("valence")=="negative"),
-                                    "valence_neutral":  sum(1 for i in insts4 if i.get("valence")=="neutral"),
-                                    "raw_prompt":       prompt4,
-                                    "raw_response":     raw4,
-                                    "phase4_recovery":  True,
-                                }
+        # Phase 4 — re-examine zero-evidence at T=1.0 (skipped on resume:
+        # whatever Phase 4 recovered before is already baked into the
+        # loaded Phase 2 data, since save_dta_results() upserts by
+        # (run_id, participant_id, construct_name))
+        if resume_run_id:
+            st.status("Phase 4 ✅ — using previously loaded results (not re-run)",
+                      state="complete")
+        else:
+            with st.status("Phase 4 — Reviewing zero-evidence constructs (T=1.0)...",
+                           expanded=False) as s4:
+                zero_keys = set(r["construct_name"] for r in p2_results
+                                if r.get("evidence_count",0)==0 and not r.get("error"))
+                if not zero_keys:
+                    s4.update(label="Phase 4 ✅ — All constructs had evidence; no review needed",
+                              state="complete")
+                else:
+                    p4_index = {}
+                    for transcript in transcripts:
+                        pid  = transcript.get("participant_id","unknown")
+                        text = str(transcript.get("content","")).strip()
+                        if not text: continue
+                        for cname, cdef in constructs_to_run.items():
+                            if cname not in zero_keys: continue
+                            ind_block = "\n".join(('  - "'+i+'"') for i in cdef["indicators"])
+                            prompt4 = _DTA_PHASE2_PROMPT.format(
+                                construct_name=cname.replace("_"," ").title(),
+                                definition=cdef["definition"],
+                                analytic_focus=", ".join(cdef["analytic_focus"]),
+                                indicators=ind_block, text=text[:3000],
+                            )
+                            r4 = _llm_call_model(model, prompt4, system=sys_p,
+                                                 temperature=1.0, max_tokens=1500)
+                            raw4 = r4.get("text","")
+                            parsed4 = _parse_dta_json(raw4) if not r4.get("error") else None
+                            if parsed4:
+                                insts4 = parsed4.get("instances",[])
+                                if insts4:
+                                    p4_index[(pid, cname)] = {
+                                        "evidence_count":   parsed4.get("evidence_count", len(insts4)),
+                                        "instances":        insts4,
+                                        "valence_positive": sum(1 for i in insts4 if i.get("valence")=="positive"),
+                                        "valence_negative": sum(1 for i in insts4 if i.get("valence")=="negative"),
+                                        "valence_neutral":  sum(1 for i in insts4 if i.get("valence")=="neutral"),
+                                        "raw_prompt":       prompt4,
+                                        "raw_response":     raw4,
+                                        "phase4_recovery":  True,
+                                    }
 
-                recovered = 0
-                for i, r in enumerate(p2_results):
-                    key = (r["participant_id"], r["construct_name"])
-                    if key in p4_index:
-                        p2_results[i] = {**r, **p4_index[key]}
-                        recovered += 1
+                    recovered = 0
+                    for i, r in enumerate(p2_results):
+                        key = (r["participant_id"], r["construct_name"])
+                        if key in p4_index:
+                            p2_results[i] = {**r, **p4_index[key]}
+                            recovered += 1
 
-                save_dta_results(run_id, p2_results)
-                p3 = run_dta_phase3(p2_results)  # rebuild with recoveries
-                s4.update(
-                    label=f"Phase 4 ✅ — {len(zero_keys)} reviewed, "
-                          f"{recovered} recovered at T=1.0",
-                    state="complete",
-                )
+                    save_dta_results(run_id, p2_results)
+                    p3 = run_dta_phase3(p2_results)  # rebuild with recoveries
+                    s4.update(
+                        label=f"Phase 4 ✅ — {len(zero_keys)} reviewed, "
+                              f"{recovered} recovered at T=1.0",
+                        state="complete",
+                    )
 
         # Phase 5
         with st.status("Phase 5 — Generating narrative summary...", expanded=False) as s5:
