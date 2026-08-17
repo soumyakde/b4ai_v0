@@ -416,6 +416,30 @@ If you created a test user for M.6, its transcript deletion is already exercised
 
 ---
 
+## N. Category 3 follow-ups — DTA completeness gate + cohort rename (10 min)
+
+Two of the three open design questions from the diagram-review findings, decided and implemented 2026-08-16 (the third, the dual-scoring-path question, was resolved as "intentional, documented" and needed no code change).
+
+### N.1 — DTA runs now need full construct-group coverage before they're report-eligible (5 min)
+
+1. Go to **🧠 LLM Analysis → Run Analysis (DTA)**. Run a DTA analysis with only 1-2 of the 6 construct-group checkboxes checked (uncheck the rest first).
+2. Go to **📄 Report Generation → iv. LLM Analysis** (DTA side) and separately check **vii. Full Programme Report**'s DTA section.
+3. ✅ Pass if: that partial-coverage run does **NOT** appear as selectable/included (previously ANY DTA run, however few construct groups it covered, was offered — only the special Learning-Objectives-only mode was excluded).
+4. Now run a DTA analysis with all 6 construct-group checkboxes checked (the default). Confirm this run **does** appear as selectable/included in both places.
+
+### N.2 — Cohort rename (5 min)
+
+1. As super admin, go to **User Management → Cohort Management → Rename a cohort**.
+2. Select an existing cohort with at least one student assigned to it, type a new ID, click **Rename**.
+3. ✅ Pass if: a confirmation message shows the user/transcript counts updated, the old cohort ID disappears from every cohort picker, the new ID appears in its place, and the previously-assigned student(s) now show the new cohort ID in User Management — with **no separate delete+recreate step**, and none of their data lost.
+4. Try renaming a cohort to a name that already exists as a separate cohort — confirm it's refused with a clear message (not silently merged).
+
+### Cleanup
+
+If you created a test DTA run for N.1, no cleanup needed — DTA runs aren't currently deletable via the UI and don't affect pilot data. If you renamed a real cohort for N.2, you can rename it back the same way.
+
+---
+
 ## If anything fails
 
 Note which item failed and what you saw, then let Claude know — don't try to fix anything yourself. This is all on the disposable `test` environment; nothing here touches the real pilot data on `production`.

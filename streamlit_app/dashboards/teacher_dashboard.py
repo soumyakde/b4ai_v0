@@ -6984,6 +6984,29 @@ def _execute_lo_run(username, models, temperature,
 
 
 # -----------------------------------------------------------------------
+# DTA completeness gate (Task N, 2026-08-16)
+# -----------------------------------------------------------------------
+def _dta_run_is_complete(run: dict) -> bool:
+    """
+    A DTA run counts as "report-eligible" once it covers every construct
+    group, not however many happened to be checked when it was started.
+    DTA has no phase-progress concept analogous to ITA's phase_reached
+    (save_dta_results() only ever advances phase_reached to 2 and status
+    to "running", never "complete") -- construct-group coverage is the
+    closest equivalent completeness signal, confirmed with the user
+    2026-08-16. Also naturally excludes the special
+    construct_groups=["learning_objectives"] runs (a different analysis
+    mode entirely), since that value covers none of the 6 real groups.
+    """
+    import json
+    try:
+        groups = set(json.loads(run.get("construct_groups", "[]")))
+    except Exception:
+        return False
+    return groups >= set(_DTA_GROUPS.keys())
+
+
+# -----------------------------------------------------------------------
 # DTA Results panel
 # -----------------------------------------------------------------------
 
@@ -8721,8 +8744,7 @@ def _report_llm() -> None:
         if not _LLM_AVAILABLE:
             st.warning("LLM modules not available.")
         else:
-            dta_runs = [r for r in _dta_list_runs()
-                        if r.get("construct_groups","[]") != '["learning_objectives"]']
+            dta_runs = [r for r in _dta_list_runs() if _dta_run_is_complete(r)]
             if not dta_runs:
                 st.info("No DTA runs found. Run DTA first.")
             else:
@@ -9337,8 +9359,7 @@ def _report_full_programme(
             if inc_dta and _LLM_AVAILABLE:
                 def _add_dta(secs):
                     secs.append({"heading": "─── DTA ANALYSIS ───", "body": ""})
-                    runs = [r for r in _dta_list_runs()
-                            if r.get("construct_groups","[]") != '["learning_objectives"]']
+                    runs = [r for r in _dta_list_runs() if _dta_run_is_complete(r)]
                     if runs:
                         r  = runs[0]
                         df = load_dta_results(r["run_id"])

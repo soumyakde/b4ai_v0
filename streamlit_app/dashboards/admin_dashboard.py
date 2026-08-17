@@ -690,6 +690,46 @@ def show_admin_dashboard(username: str):
                 except Exception as e:
                     st.error(f"Error: {e}")
 
+        st.markdown("**Rename a cohort**")
+        st.caption(
+            "Updates the registry entry and every real reference to it "
+            "(users, transcripts) in place — no delete+recreate, so "
+            "nothing gets orphaned along the way."
+        )
+        _rename_cohorts = user_service.get_all_cohorts()
+        if _rename_cohorts:
+            # Fresh widget keys after a successful rename -- the old
+            # cohort_id disappears from _rename_cohorts on the next render,
+            # and a selectbox/text_input whose session_state value is no
+            # longer in its options list is the same stale-widget-key bug
+            # class already fixed elsewhere in this file (e.g. the
+            # bulk-cohort-selector generation counter). Bumping the key
+            # generation forces brand-new, blank widgets instead.
+            st.session_state.setdefault("cohort_mgmt_rename_gen", 0)
+            _rn_gen = st.session_state["cohort_mgmt_rename_gen"]
+            _rename_from = st.selectbox(
+                "Cohort to rename", options=["— select —"] + _rename_cohorts,
+                key=f"cohort_mgmt_rename_from_{_rn_gen}",
+            )
+            if _rename_from != "— select —":
+                _rename_to = st.text_input(
+                    f"New ID for '{_rename_from}'", key=f"cohort_mgmt_rename_to_{_rn_gen}",
+                )
+                if st.button(f"✏️ Rename '{_rename_from}'", key="cohort_mgmt_rename_btn"):
+                    _rn_result = user_service.rename_cohort(_rename_from, _rename_to)
+                    if _rn_result["renamed"]:
+                        st.session_state["cohort_mgmt_flash"] = (
+                            f"Cohort '{_rename_from}' renamed to "
+                            f"'{_rename_to.strip()}' — {_rn_result['users']} user(s), "
+                            f"{_rn_result['transcripts']} transcript(s) updated."
+                        )
+                        st.session_state["cohort_mgmt_rename_gen"] += 1
+                        st.rerun()
+                    else:
+                        st.warning(_rn_result["reason"])
+        else:
+            st.caption("No cohorts registered yet.")
+
         st.markdown("**Delete a cohort**")
         st.caption(
             "Only allowed when nothing currently references the cohort — "

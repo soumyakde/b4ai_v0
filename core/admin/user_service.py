@@ -179,6 +179,69 @@ def delete_cohort(cohort_id: str) -> dict:
     return {"deleted": True, **usage}
 
 
+def rename_cohort(old_cohort_id: str, new_cohort_id: str) -> dict:
+    """
+    Rename a cohort in place: updates the registry entry and every real
+    reference to it (users.cohort_id, transcripts.cohort_id) atomically
+    per-database, so no user or transcript is silently orphaned the way
+    delete-then-recreate would leave them.
+
+    ita_runs/dta_runs' cohort_scope is deliberately NOT touched here --
+    it's a descriptive snapshot of which cohort(s) were active when that
+    run was created (can be "All cohorts" or a comma-joined list), not a
+    live reference the way users.cohort_id/transcripts.cohort_id are.
+
+    Returns {"renamed": bool, "reason": str | None, "users": int,
+    "transcripts": int} -- usage counts reflect however many rows were
+    updated, so the caller can confirm the rename's real-world impact.
+    """
+    old_cohort_id = (old_cohort_id or "").strip()
+    new_cohort_id = (new_cohort_id or "").strip()
+
+    if not old_cohort_id or not new_cohort_id:
+        return {"renamed": False, "reason": "Both old and new cohort IDs are required.",
+                "users": 0, "transcripts": 0}
+    if old_cohort_id == new_cohort_id:
+        return {"renamed": False, "reason": "New cohort ID is the same as the old one.",
+                "users": 0, "transcripts": 0}
+    if new_cohort_id in get_all_cohorts():
+        return {"renamed": False,
+                "reason": f"'{new_cohort_id}' already exists as a separate cohort -- "
+                          f"rename would silently merge two cohorts, refusing.",
+                "users": 0, "transcripts": 0}
+
+    conn = get_connection()
+    conn.execute(
+        "UPDATE cohorts SET cohort_id = ? WHERE cohort_id = ?",
+        (new_cohort_id, old_cohort_id)
+    )
+    users_updated = conn.execute(
+        "UPDATE users SET cohort_id = ? WHERE cohort_id = ?",
+        (new_cohort_id, old_cohort_id)
+    ).rowcount
+    conn.commit()
+    conn.close()
+
+    transcripts_updated = 0
+    try:
+        from core.db_utils import get_connection as _get_responses_conn
+        rconn = _get_responses_conn()
+        try:
+            transcripts_updated = rconn.execute(
+                "UPDATE transcripts SET cohort_id = ? WHERE cohort_id = ?",
+                (new_cohort_id, old_cohort_id)
+            ).rowcount
+            rconn.commit()
+        except Exception:
+            pass  # transcripts table may not exist yet on a fresh DB
+        rconn.close()
+    except Exception:
+        pass
+
+    return {"renamed": True, "reason": None,
+            "users": users_updated, "transcripts": transcripts_updated}
+
+
 # ---------------------------------------------------------
 # CREATE USER
 # ---------------------------------------------------------
