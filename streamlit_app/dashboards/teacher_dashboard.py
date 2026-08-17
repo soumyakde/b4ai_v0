@@ -9081,33 +9081,56 @@ def _report_full_programme(
         key="rpt_full_multiselect",
     )
 
-    # Default to the cohort(s) actually present in the current filtered
-    # data (i.e. whatever the sidebar's Cohort filter is already scoping
-    # to), not an arbitrary entry from cohort_map -- the old default
-    # (list(cohort_map.values())[0]) was just "whichever user happens to
-    # come first in the dict", unrelated to what's actually in the report.
-    # This field is a label only (report title + filename); it never
-    # filters the data itself, which is why the help text says so.
+    # Cohort(s) actually present in the current filtered data (i.e.
+    # whatever the sidebar's Cohort filter is already scoping to). This
+    # field is a label only (report title + filename); it never filters
+    # the data itself.
+    #
+    # A plain st.text_input's `value=` only seeds the widget the FIRST
+    # time it's created for that key -- once a user has interacted with
+    # it (or even just rendered it once), Streamlit keeps whatever's in
+    # session_state and ignores `value=` on later reruns. That silently
+    # broke "update the default when the sidebar's Cohort filter
+    # changes" (found live: changing the sidebar filter to BuffaloPrep
+    # didn't touch this field at all). Switched to a multiselect (same
+    # pattern/UX as "Include sections" above, per explicit request) keyed
+    # on a generation counter that bumps whenever the active-cohort set
+    # changes, forcing a fresh all-selected widget at that point --
+    # same technique already used elsewhere in this file for a stale-
+    # widget-selection problem of the same shape.
     _active_cohorts_full = (
         sorted(canonical_df["cohort_id"].dropna().unique().tolist())
         if "cohort_id" in canonical_df.columns else []
     )
-    _default_cohort_name = (
-        ", ".join(_active_cohorts_full) if _active_cohorts_full
-        else (list(cohort_map.values())[0] if cohort_map else "Basics4AI")
-    )
-    cohort_name = st.text_input(
-        "Cohort / study name for report header",
-        value=_default_cohort_name,
-        key="rpt_full_cohort",
-        help=(
-            "Label only — appears in the report's title and filename. "
-            "It does not filter the data: the report already reflects "
-            "whichever cohort(s) are active in the sidebar's Cohort filter. "
-            "Edit freely (e.g. a study name) if you don't want the raw "
-            "cohort ID(s) shown here."
-        ),
-    )
+    _cohorts_key_str = ",".join(_active_cohorts_full)
+    if st.session_state.get("_rpt_full_cohort_last_seen") != _cohorts_key_str:
+        st.session_state["_rpt_full_cohort_last_seen"] = _cohorts_key_str
+        st.session_state["_rpt_full_cohort_gen"] = (
+            st.session_state.get("_rpt_full_cohort_gen", 0) + 1
+        )
+    _cohort_gen = st.session_state.get("_rpt_full_cohort_gen", 0)
+
+    if _active_cohorts_full:
+        _selected_cohorts_for_label = st.multiselect(
+            "Cohort(s) for report header",
+            options=_active_cohorts_full,
+            default=_active_cohorts_full,
+            key=f"rpt_full_cohort_ms_{_cohort_gen}",
+            help=(
+                "Label only — appears in the report's title and filename. "
+                "It does not filter the data: the report already reflects "
+                "whichever cohort(s) are active in the sidebar's Cohort "
+                "filter. Deselect here only to shorten the label."
+            ),
+        )
+        cohort_name = ", ".join(_selected_cohorts_for_label) or "Basics4AI"
+    else:
+        cohort_name = st.text_input(
+            "Cohort / study name for report header",
+            value=(list(cohort_map.values())[0] if cohort_map else "Basics4AI"),
+            key="rpt_full_cohort",
+            help="Label only — appears in the report's title and filename.",
+        )
 
     if st.button("📄 Generate Full Programme Report (PDF)",
                  key="rpt_full_gen", type="primary"):
