@@ -9081,10 +9081,32 @@ def _report_full_programme(
         key="rpt_full_multiselect",
     )
 
+    # Default to the cohort(s) actually present in the current filtered
+    # data (i.e. whatever the sidebar's Cohort filter is already scoping
+    # to), not an arbitrary entry from cohort_map -- the old default
+    # (list(cohort_map.values())[0]) was just "whichever user happens to
+    # come first in the dict", unrelated to what's actually in the report.
+    # This field is a label only (report title + filename); it never
+    # filters the data itself, which is why the help text says so.
+    _active_cohorts_full = (
+        sorted(canonical_df["cohort_id"].dropna().unique().tolist())
+        if "cohort_id" in canonical_df.columns else []
+    )
+    _default_cohort_name = (
+        ", ".join(_active_cohorts_full) if _active_cohorts_full
+        else (list(cohort_map.values())[0] if cohort_map else "Basics4AI")
+    )
     cohort_name = st.text_input(
         "Cohort / study name for report header",
-        value=list(cohort_map.values())[0] if cohort_map else "Basics4AI",
+        value=_default_cohort_name,
         key="rpt_full_cohort",
+        help=(
+            "Label only — appears in the report's title and filename. "
+            "It does not filter the data: the report already reflects "
+            "whichever cohort(s) are active in the sidebar's Cohort filter. "
+            "Edit freely (e.g. a study name) if you don't want the raw "
+            "cohort ID(s) shown here."
+        ),
     )
 
     if st.button("📄 Generate Full Programme Report (PDF)",
