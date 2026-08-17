@@ -45,16 +45,6 @@ except Exception as _ts_err:
     _TRANSCRIPT_STORE_ERR = str(_ts_err)
 
 # ---------------------------------------------------------
-# DEBUG MODE TOGGLE
-# ---------------------------------------------------------
-if "DEBUG_MODE" not in st.session_state:
-    st.session_state.DEBUG_MODE = False
-
-st.sidebar.checkbox("DEBUG MODE", value=st.session_state.DEBUG_MODE, key="DEBUG_MODE")
-DEBUG = st.session_state.DEBUG_MODE
-
-
-# ---------------------------------------------------------
 # COHORT SELECTOR — shared by both transcript upload sections
 # ---------------------------------------------------------
 
@@ -122,6 +112,19 @@ def _cohort_selector(key_prefix: str, label: str = "Cohort") -> str | None:
 # ---------------------------------------------------------
 def show_admin_dashboard(username: str):
     """Renders the Admin Dashboard."""
+
+    # DEBUG MODE TOGGLE -- must live inside this function, not at module
+    # level. A Streamlit server shares one Python process (and one
+    # sys.modules cache) across every connected session; a widget placed at
+    # true module level in an *imported* file only ever executes once, the
+    # first time any session triggers the import after a deploy/restart --
+    # every other session (or even the same admin's next rerun) simply
+    # never sees it. Found live: the checkbox appeared "sometimes, seemingly
+    # tied to a restart" rather than reliably on every page load.
+    if "DEBUG_MODE" not in st.session_state:
+        st.session_state.DEBUG_MODE = False
+    st.sidebar.checkbox("DEBUG MODE", value=st.session_state.DEBUG_MODE, key="DEBUG_MODE")
+    DEBUG = st.session_state.DEBUG_MODE
 
     st.title("⚙️ Admin Dashboard")
     st.caption(f"Administrator: {username}")
