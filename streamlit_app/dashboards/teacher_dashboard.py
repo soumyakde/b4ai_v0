@@ -5414,13 +5414,13 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
         st.caption(
             "You can run multiple models on the same data and compare results — "
             "useful for checking consistency across providers. "
-            "**Groq (Llama 3.3 70B) is always free** — no billing required. "
+            "**Groq (GPT-OSS 120B) is always free** — no billing required. "
             "Paid models appear in the list only when their API key is present in .env."
         )
 
         # Build options list — only show models whose keys are available
         _model_options = {
-            "groq":   "Llama 3.3 70B (Groq — free ✅)",
+            "groq":   "GPT-OSS 120B (Groq — free ✅)",
             "claude": "Claude (Anthropic)",
             "gemini": "Gemini (Google)",
             "gpt":    "GPT (OpenAI)",

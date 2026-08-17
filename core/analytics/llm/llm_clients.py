@@ -318,10 +318,12 @@ def call_groq(
     system: str = "",
     temperature: float = 0.3,
     max_tokens: int = 4096,           # raised from 2000 — Llama descriptions are verbose
-    model_id: str = "llama-3.3-70b-versatile",
+    model_id: str = "openai/gpt-oss-120b",
 ) -> Dict[str, Any]:
     """
-    Call Groq API (Llama 3.3 70B).
+    Call Groq API (gpt-oss-120b — Groq deprecated llama-3.3-70b-versatile,
+    confirmed removed from /v1/models 2026-08-17; gpt-oss-120b is the
+    current largest general-purpose model on Groq's free tier).
 
     Free tier limits (as of 2025)
     ------------------------------
@@ -418,14 +420,14 @@ _DEFAULT_MODELS = {
     "claude": "claude-sonnet-4-5",
     "gemini": "gemini-2.5-flash",
     "gpt":    "gpt-4o-mini",
-    "groq":   "llama-3.3-70b-versatile",
+    "groq":   "openai/gpt-oss-120b",
 }
 
 _DISPLAY_NAMES = {
     "claude": "Claude (Anthropic)",
     "gemini": "Gemini (Google)",
     "gpt":    "GPT (OpenAI)",
-    "groq":   "Llama 3.3 70B (Groq — free)",
+    "groq":   "GPT-OSS 120B (Groq — free)",
 }
 
 

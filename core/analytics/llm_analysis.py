@@ -45,10 +45,10 @@ _DB_PATH = Path(__file__).resolve().parents[2] / "research.db"
 # ---------------------------------------------------------------------
 PROVIDER_PRICING: dict[str, dict] = {
     "groq_llama3": {
-        "label":         "Llama 3.1 70B via Groq — free tier ✅",
+        "label":         "GPT-OSS 120B via Groq — free tier ✅",
         "input_per_1k":  0.0,
         "output_per_1k": 0.0,
-        "model":         "llama-3.3-70b-versatile",
+        "model":         "openai/gpt-oss-120b",
         "free":          True,
         "key_name":      "GROQ_API_KEY",
         "llm_client_key": "groq",
