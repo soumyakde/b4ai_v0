@@ -9199,7 +9199,16 @@ def _report_full_programme(
                     secs.append({"heading": "─── BASIC STATISTICS ───", "body": ""})
                     asc = compute_assessment_scores(canonical_df)
                     if not asc.empty:
-                        for inst_key in sorted(asc["instrument_key"].unique())[:4]:
+                        # Previously capped to the first 4 instruments,
+                        # alphabetically -- since module MCQ instrument keys
+                        # ("module1_..." .. "module7_...") sort before the
+                        # pre/post ones ("postcourse_...", "precourse_..."),
+                        # that silently cut off at Module 4 and omitted
+                        # AICI/AI-Misconceptions entirely. Found live 2026-
+                        # 08-16 while verifying the Correlations/CPI+
+                        # additions to this report. Each instrument is one
+                        # short line, so showing all of them stays compact.
+                        for inst_key in sorted(asc["instrument_key"].unique()):
                             label = _ASSESSMENT_LABELS.get(inst_key, inst_key)
                             asc_f = asc[asc["instrument_key"] == inst_key]
                             summ  = summarize_scores(asc_f)
@@ -9214,10 +9223,18 @@ def _report_full_programme(
             if inc_inf:
                 def _add_inf(secs):
                     secs.append({"heading": "─── INFERENTIAL STATISTICS ───", "body": ""})
+                    # Previously only listed AI Misconceptions -- AICI was
+                    # missing entirely. Found live 2026-08-16 alongside the
+                    # Basic Statistics instrument-cap bug above. Matches the
+                    # pairs list already used by the standalone Inferential
+                    # Statistics report (_report_inferential).
                     for label, pre_k, post_k in [
                         ("AI Misconceptions",
                          "precourse_pre_ai_misconceptions_assessment",
                          "postcourse_post_ai_misconceptions_assessment"),
+                        ("AI Conceptual Inventory (AICI)",
+                         "precourse_pre_aici_assessment",
+                         "postcourse_post_aici_assessment"),
                     ]:
                         r = run_paired_comparison(canonical_df, pre_k, post_k)
                         if not r.get("error"):
