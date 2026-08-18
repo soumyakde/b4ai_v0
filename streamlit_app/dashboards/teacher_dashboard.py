@@ -7211,19 +7211,27 @@ def _dta_run_is_complete(run: dict) -> bool:
     A DTA run counts as "report-eligible" once it covers every construct
     group, not however many happened to be checked when it was started.
     DTA has no phase-progress concept analogous to ITA's phase_reached
-    (save_dta_results() only ever advances phase_reached to 2 and status
-    to "running", never "complete") -- construct-group coverage is the
-    closest equivalent completeness signal, confirmed with the user
-    2026-08-16. Also naturally excludes the special
-    construct_groups=["learning_objectives"] runs (a different analysis
-    mode entirely), since that value covers none of the 6 real groups.
+    reaching "complete" (save_dta_results() only ever advances
+    phase_reached to 2 and status to "running", never "complete") --
+    construct-group coverage is the closest equivalent completeness
+    signal, confirmed with the user 2026-08-16. Also naturally excludes
+    the special construct_groups=["learning_objectives"] runs (a
+    different analysis mode entirely), since that value covers none of
+    the 6 real groups.
+
+    Coverage alone isn't enough, though (found 2026-08-18, N.1 testing):
+    a run that requested full coverage but errored out before Phase 2
+    ever saved anything (phase_reached stays 0) would otherwise pass this
+    gate with zero actual evidence -- selecting it would produce an empty
+    report. save_dta_results() always bumps phase_reached to >=2 once
+    Phase 2 genuinely saves data, so requiring that too closes the gap.
     """
     import json
     try:
         groups = set(json.loads(run.get("construct_groups", "[]")))
     except Exception:
         return False
-    return groups >= set(_DTA_GROUPS.keys())
+    return groups >= set(_DTA_GROUPS.keys()) and run.get("phase_reached", 0) >= 2
 
 
 # -----------------------------------------------------------------------
