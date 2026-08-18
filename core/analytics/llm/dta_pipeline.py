@@ -1459,6 +1459,37 @@ def load_dta_results(
     return df
 
 
+def load_dta_report(
+    run_id: str,
+    db_path: Optional[Path] = None,
+) -> str:
+    """
+    Load the Phase 5 narrative summary for a run, if one was generated.
+
+    run_dta_phase5() saves the narrative under the special row
+    (participant_id='_report_', construct_name='_phase5_'), which
+    load_dta_results() deliberately excludes from the evidence table --
+    this is the counterpart reader for that one row. Returns "" if no
+    report was generated for this run (e.g. Phase 5 errored or was never
+    reached).
+    """
+    _init_dta_schema(db_path)
+    conn = _get_conn(db_path)
+    row = conn.execute(
+        """SELECT instances_json FROM dta_results
+           WHERE run_id=? AND participant_id='_report_'
+           AND construct_name='_phase5_'""",
+        (run_id,)
+    ).fetchone()
+    conn.close()
+    if not row or not row[0]:
+        return ""
+    try:
+        return json.loads(row[0]).get("report", "")
+    except Exception:
+        return ""
+
+
 def list_dta_runs(
     created_by: Optional[str] = None,
     db_path: Optional[Path] = None,

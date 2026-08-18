@@ -108,7 +108,7 @@ try:
         run_dta_phase2, run_dta_phase3, run_dta_phase5,
         run_lo_analysis,
         create_dta_run       as _dta_create_run,
-        save_dta_results, load_dta_results,
+        save_dta_results, load_dta_results, load_dta_report,
         list_dta_runs        as _dta_list_runs,
         _DTA_PHASE2_PROMPT, _DTA_LO_PROMPT, _DTA_PHASE5_PROMPT,
         DTA_SYSTEM_PROMPT,
@@ -7152,6 +7152,9 @@ def _execute_dta_run(username, sources, per_run_files,
 
         st.session_state["dta_last_run_id"] = run_id
         st.success("DTA complete — view results in the Results tab.")
+        if p5.get("report_text"):
+            with st.expander("📝 Narrative summary", expanded=True):
+                st.markdown(p5["report_text"])
 
 
 def _execute_lo_run(username, models, temperature,
@@ -7258,6 +7261,11 @@ def _render_dta_results_panel(username: str) -> None:
 
     df = load_dta_results(run_id)
     if df.empty: st.info("No results for this run."); return
+
+    report_text = load_dta_report(run_id)
+    if report_text:
+        with st.expander("📝 Narrative summary", expanded=False):
+            st.markdown(report_text)
 
     view = st.radio("View as",
                     ["Construct Table", "Evidence Heatmap", "Participant Profiles"],
@@ -8988,6 +8996,7 @@ def _report_llm() -> None:
                         run_id = dta_opts[sel_dta]
                         run_rec = next(r for r in dta_runs if r["run_id"] == run_id)
                         df_dta  = load_dta_results(run_id)
+                        dta_report_text = load_dta_report(run_id)
 
                         sections = [{
                             "heading": "Deductive Thematic Analysis Report",
@@ -8998,6 +9007,12 @@ def _report_llm() -> None:
                                 f"Cohort scope: {run_rec.get('cohort_scope') or 'All cohorts'}"
                             ),
                         }]
+
+                        if dta_report_text:
+                            sections.append({
+                                "heading": "Phase 5 — Narrative Summary",
+                                "body":    dta_report_text,
+                            })
 
                         if not df_dta.empty:
                             # Construct-level summary
@@ -9591,6 +9606,12 @@ def _report_full_programme(
                     if runs:
                         r  = runs[0]
                         df = load_dta_results(r["run_id"])
+                        report_text = load_dta_report(r["run_id"])
+                        if report_text:
+                            secs.append({
+                                "heading": f"DTA — {_llm_display_name(r['model'])} T={r['temperature']}",
+                                "body":    report_text[:2000] + ("…" if len(report_text) > 2000 else ""),
+                            })
                         if not df.empty:
                             summ = df.groupby("construct_name").agg(
                                 evidence=("evidence_count","sum"),
