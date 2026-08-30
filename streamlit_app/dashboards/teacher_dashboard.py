@@ -158,6 +158,18 @@ _INTERPRETATION_NOTES: Dict[str, str] = {
         "combining them here rather than treating them as four separate "
         "scales."
     ),
+    "llm_analysis_disclaimer": (
+        "This automated analysis is a rapid, exploratory first pass on the "
+        "qualitative data -- not a substitute for careful human qualitative "
+        "review, and not validated as equivalent to independent human "
+        "coding. Large language model outputs are not fully reproducible "
+        "even at fixed settings (temperature 0 does not guarantee identical "
+        "output across runs), and agreement between models reflects shared "
+        "conclusions, not confirmed accuracy. Per classical measurement "
+        "theory, a method's reliability sets an upper bound on its validity "
+        "(Nunnally & Bernstein, 1994) -- use these results to spot patterns "
+        "worth a closer look, not as a final finding."
+    ),
 }
 
 
@@ -5231,6 +5243,7 @@ def _source_checkboxes(prefix: str, default_reflections: bool = True):
 def _render_llm_tab(username: str, canonical_df: pd.DataFrame) -> None:
     """Tab 3 — LLM Analysis: ITA + DTA."""
     st.subheader("🤖 LLM Analysis")
+    st.info(_interpretation_caption("llm_analysis_disclaimer"))
 
     if not _LLM_AVAILABLE:
         st.error(
@@ -8971,6 +8984,7 @@ def _report_llm() -> None:
                                 f"Source: {run.get('source_type','—')}  |  "
                                 f"Cohort scope: {run.get('cohort_scope') or 'All cohorts'}"
                             ),
+                            "caption": _interpretation_caption("llm_analysis_disclaimer"),
                         }]
 
                         if p6 and p6.get("report_text"):
@@ -9084,6 +9098,7 @@ def _report_llm() -> None:
                                 f"Source: {run_rec.get('source_type','—')}  |  "
                                 f"Cohort scope: {run_rec.get('cohort_scope') or 'All cohorts'}"
                             ),
+                            "caption": _interpretation_caption("llm_analysis_disclaimer"),
                         }]
 
                         if dta_report_text:
