@@ -158,6 +158,20 @@ _INTERPRETATION_NOTES: Dict[str, str] = {
         "combining them here rather than treating them as four separate "
         "scales."
     ),
+    "theme_comparator_matching": (
+        "Themes are paired using the Hungarian algorithm (Kuhn, 1955) -- "
+        "the best possible one-to-one matching between the two runs' "
+        "themes, so one theme can no longer be claimed as the \"best "
+        "match\" by two different themes at once. A pair scoring below "
+        "0.30 is flagged matched = False -- its score still counts toward "
+        "the overall agreement average (a weak match is real information, "
+        "not something to discard), but the flag shows at a glance which "
+        "themes have no real counterpart in the other run. If the two "
+        "runs proposed different numbers of themes, the extras get no "
+        "match at all, which is itself evidence the runs didn't converge "
+        "on the same theme structure. (0.30 is a provisional threshold, "
+        "not yet calibrated against human-coded data.)"
+    ),
     "llm_analysis_disclaimer": (
         "This automated analysis is a rapid, exploratory first pass on the "
         "qualitative data -- not a substitute for careful human qualitative "
@@ -6157,6 +6171,7 @@ def _render_ita_guided(username: str, canonical_df: pd.DataFrame) -> None:
                 bm = pd.DataFrame(cmp.get("best_matches", []))
                 if not bm.empty:
                     st.dataframe(bm, hide_index=True, width="stretch")
+                    st.caption("ℹ️ " + _interpretation_caption("theme_comparator_matching"))
 
 
 # -----------------------------------------------------------------------
@@ -6603,6 +6618,7 @@ def _render_ita_results(username: str) -> None:
             bm = pd.DataFrame(cmp.get("best_matches", []))
             if not bm.empty:
                 st.dataframe(bm, hide_index=True, width="stretch")
+                st.caption("ℹ️ " + _interpretation_caption("theme_comparator_matching"))
 
 
 # -----------------------------------------------------------------------
@@ -8116,6 +8132,21 @@ published instrument for full item listings.
                 "https://doi.org/10.1177/16094069231183620"
             ),
             "note": "Deductive Thematic Analysis (DTA) pipeline methodology used in the LLM Analysis tab.",
+        },
+        {
+            "section": "Qualitative / LLM Analysis",
+            "tag": "Matching", "color": "#FFF3E6", "border": "#EE7733",
+            "citation": (
+                "Kuhn, H. W. (1955). The Hungarian method for the assignment "
+                "problem. *Naval Research Logistics Quarterly, 2*(1-2), "
+                "83–97. https://doi.org/10.1002/nav.3800020109"
+            ),
+            "note": (
+                "Optimal one-to-one theme matching used in the LLM Analysis "
+                "'Compare Runs' feature, replacing a greedy nearest-match "
+                "approach that could let multiple themes claim the same "
+                "counterpart at once."
+            ),
         },
     ]
 

@@ -8,11 +8,47 @@ different models and/or temperatures.
 Answers two research questions from De Paoli (2024):
     1. Do different LLMs produce consistent themes? (model comparison)
     2. Do higher temperatures produce different themes? (temp comparison)
+(The two research questions above are De Paoli's; the agreement formula,
+matching algorithm, and thresholds below are original to this codebase,
+not adapted from his paper -- his own comparison method is qualitative,
+with no numeric metric at all.)
 
 Metrics:
     Cosine similarity  — semantic overlap between theme descriptions
     Jaccard similarity — lexical overlap between theme name token sets
     Agreement score    — weighted composite of both
+
+Matching (compare_runs, compare_all_runs):
+    Theme pairs are found via the Hungarian algorithm (Kuhn, 1955) --
+    the optimal one-to-one assignment between run_a and run_b's themes,
+    not a greedy "each theme claims its nearest neighbor independently"
+    approach (which previously let multiple run_a themes claim the same
+    run_b theme, silently inflating agreement). A pair scoring below
+    MATCH_FLOOR is flagged matched=False but its real score still counts
+    toward the average -- a weak match is real information, not something
+    to discard. If the two runs have different theme counts, the surplus
+    themes get no counterpart at all (matched=False, best_match_b=None),
+    which is itself evidence the runs didn't converge on the same
+    structure, not just content-level disagreement.
+
+    compare_all_runs additionally fixed a hidden asymmetry: it used to
+    compute compare_runs(A, B) once and mirror that single score into
+    both directions of the summary matrix, silently assuming symmetry
+    that Hungarian matching on a rectangular (unequal theme count) matrix
+    does not guarantee. It now computes both directions and averages them.
+
+Embedding backend:
+    Default is the local sentence-transformers model (all-MiniLM-L6-v2,
+    free, no API calls). compare_runs/compare_all_runs also accept
+    embedding_backend="openai" (text-embedding-3-small) as an optional,
+    architecturally distinct second encoder for a robustness check -- per
+    MTEB (Muennighoff et al., 2023), no single embedding model dominates
+    across tasks, so a result that only holds under one specific encoder's
+    geometry is a weaker claim than one that holds under two. This is
+    deliberately NOT wired into the Teacher Dashboard UI: unlike the
+    default backend, it costs real OpenAI API money per call, so it's a
+    callable available for methods-paper/validation use rather than a
+    button any everyday dashboard use could trigger unexpectedly.
 
 Public API:
 -----------
@@ -37,6 +73,14 @@ from __future__ import annotations
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 import pandas as pd
+from scipy.optimize import linear_sum_assignment
+
+# Similarity floor below which an assigned pair is flagged "matched: False"
+# in compare_runs' output. A provisional default, not yet empirically
+# calibrated -- Phase 6 of the ongoing methodology work will calibrate
+# this against a human-coded subset via ROC/Youden's J rather than leave
+# it as a guessed constant indefinitely.
+MATCH_FLOOR = 0.3
 
 
 # -----------------------------------------------------------------------
@@ -69,8 +113,38 @@ def _get_model():
         )
 
 
-def _embed(texts: List[str]) -> np.ndarray:
-    """Encode texts using cached sentence-transformers model."""
+def _embed_openai(texts: List[str], model_id: str = "text-embedding-3-small") -> np.ndarray:
+    """
+    Encode texts via OpenAI's embeddings API -- a second, architecturally
+    distinct embedding backend used only for robustness checks (see module
+    docstring). Costs real API money per call, unlike the default local
+    backend. Raises RuntimeError with a clear message if OPENAI_API_KEY
+    isn't configured; callers (compare_runs) already catch and surface
+    exceptions as result["error"], so no extra handling is needed here.
+    """
+    from core.analytics.llm.llm_clients import _load_keys
+    api_key = _load_keys().get("openai")
+    if not api_key:
+        raise RuntimeError(
+            "OPENAI_API_KEY not found -- required for embedding_backend="
+            "'openai'. Add it to .env or st.secrets, or use the default "
+            "'minilm' backend instead."
+        )
+    from openai import OpenAI
+    client = OpenAI(api_key=api_key)
+    response = client.embeddings.create(model=model_id, input=texts)
+    return np.array([d.embedding for d in response.data])
+
+
+def _embed(texts: List[str], backend: str = "minilm") -> np.ndarray:
+    """
+    Encode texts using the requested embedding backend.
+
+    backend : "minilm" (default, local, free) | "openai" (robustness
+        check only -- see module docstring).
+    """
+    if backend == "openai":
+        return _embed_openai(texts)
     model = _get_model()
     return model.encode(texts, convert_to_numpy=True,
                         show_progress_bar=False)
@@ -146,6 +220,7 @@ def compare_runs(
     label_b: str = "Run B",
     cosine_weight: float = 0.7,
     jaccard_weight: float = 0.3,
+    embedding_backend: str = "minilm",
 ) -> Dict[str, Any]:
     """
     Pairwise comparison of two theme lists.
@@ -153,8 +228,8 @@ def compare_runs(
     Computes:
         - Pairwise cosine similarity matrix (n_a × n_b)
         - Pairwise Jaccard similarity matrix (n_a × n_b)
-        - Weighted agreement score per theme in run_a
-        - Overall agreement score (mean of best-match scores)
+        - Optimal one-to-one theme matching (Hungarian algorithm, Kuhn 1955)
+        - Overall agreement score (mean over run_a themes' matched scores)
         - Interpretation label
 
     Parameters
@@ -165,18 +240,26 @@ def compare_runs(
         Display labels for the two runs.
     cosine_weight, jaccard_weight : float
         Weights for composite score. Must sum to 1.0.
+    embedding_backend : str
+        "minilm" (default, local, free) or "openai" (text-embedding-3-small,
+        a robustness-check backend -- see module docstring; costs real API
+        money and requires OPENAI_API_KEY).
 
     Returns
     -------
     dict:
         label_a, label_b,
-        n_themes_a, n_themes_b,
+        n_themes_a, n_themes_b, embedding_backend,
         cosine_matrix     pd.DataFrame  (n_a × n_b)
         jaccard_matrix    pd.DataFrame  (n_a × n_b)
         agreement_matrix  pd.DataFrame  (n_a × n_b, weighted composite)
         best_matches      list of dicts  per theme in run_a:
-            {theme_a, best_match_b, cosine, jaccard, agreement}
-        overall_agreement float  mean of best-match agreement scores
+            {theme_a, best_match_b, cosine, jaccard, agreement, matched}
+            best_match_b/cosine/jaccard are None when run_a has more
+            themes than run_b and this one received no assignment at all.
+        overall_agreement float  mean of best_matches' agreement scores
+            (unmatched/unassigned themes' scores still count -- see
+            module docstring on why this isn't survivorship-biased)
         interpretation    str    "strong"|"moderate"|"weak"|"poor"
         error             str|None
     """
@@ -185,6 +268,7 @@ def compare_runs(
         "label_b": label_b,
         "n_themes_a": len(run_a),
         "n_themes_b": len(run_b),
+        "embedding_backend": embedding_backend,
         "error": None,
     }
 
@@ -206,7 +290,7 @@ def compare_runs(
 
         # Embed all texts together for efficiency
         all_texts  = texts_a + texts_b
-        all_embeds = _embed(all_texts)
+        all_embeds = _embed(all_texts, backend=embedding_backend)
         embeds_a   = all_embeds[:len(texts_a)]
         embeds_b   = all_embeds[len(texts_a):]
 
@@ -234,24 +318,46 @@ def compare_runs(
         result["agreement_matrix"] = pd.DataFrame(
             np.round(agreement_mat,4), index=names_a, columns=names_b)
 
-        # Best match per theme in run_a
+        # Optimal one-to-one assignment (Hungarian algorithm) instead of a
+        # greedy per-row argmax -- prevents multiple run_a themes silently
+        # claiming the same run_b theme. linear_sum_assignment minimizes
+        # cost, so negate the agreement matrix to maximize agreement.
+        # On a rectangular matrix it returns min(na, nb) pairs; any run_a
+        # row not in row_ind (only possible when na > nb) gets no
+        # assignment at all -- handled explicitly below, not silently
+        # dropped.
+        row_ind, col_ind = linear_sum_assignment(-agreement_mat)
+        assigned = dict(zip(row_ind.tolist(), col_ind.tolist()))
+
         best_matches = []
         best_scores  = []
 
         for i, theme_a in enumerate(run_a):
-            best_j    = int(np.argmax(agreement_mat[i]))
-            best_cos  = round(float(cosine_mat[i, best_j]),   4)
-            best_jac  = round(float(jaccard_mat[i, best_j]),  4)
-            best_agr  = round(float(agreement_mat[i, best_j]),4)
-            best_scores.append(best_agr)
-
-            best_matches.append({
-                "theme_a":    theme_a["name"],
-                "best_match_b": run_b[best_j]["name"],
-                "cosine":     best_cos,
-                "jaccard":    best_jac,
-                "agreement":  best_agr,
-            })
+            if i in assigned:
+                j = assigned[i]
+                best_cos = round(float(cosine_mat[i, j]),    4)
+                best_jac = round(float(jaccard_mat[i, j]),   4)
+                best_agr = round(float(agreement_mat[i, j]), 4)
+                best_scores.append(best_agr)
+                best_matches.append({
+                    "theme_a":      theme_a["name"],
+                    "best_match_b": run_b[j]["name"],
+                    "cosine":       best_cos,
+                    "jaccard":      best_jac,
+                    "agreement":    best_agr,
+                    "matched":      best_agr >= MATCH_FLOOR,
+                })
+            else:
+                # na > nb: genuinely no counterpart for this theme.
+                best_scores.append(0.0)
+                best_matches.append({
+                    "theme_a":      theme_a["name"],
+                    "best_match_b": None,
+                    "cosine":       None,
+                    "jaccard":      None,
+                    "agreement":    0.0,
+                    "matched":      False,
+                })
 
         result["best_matches"] = best_matches
 
@@ -273,6 +379,7 @@ def compare_all_runs(
     runs_dict: Dict[str, List[Dict[str, Any]]],
     cosine_weight: float = 0.7,
     jaccard_weight: float = 0.3,
+    embedding_backend: str = "minilm",
 ) -> Dict[str, Any]:
     """
     Compare all pairs in a dict of {label: themes}.
@@ -290,13 +397,24 @@ def compare_all_runs(
     ----------
     runs_dict : dict
         Keys = display labels, values = theme lists.
+    embedding_backend : str
+        See compare_runs() -- "minilm" (default) or "openai".
 
     Returns
     -------
     dict:
         labels          list of str
         pairwise        dict of {(label_a, label_b): compare_runs result}
-        summary_matrix  pd.DataFrame  (labels × labels, overall_agreement)
+            -- contains BOTH directions for every unordered pair (i.e.
+            both (A, B) and (B, A) are present, each a real, independently
+            computed compare_runs() call, not one mirrored into the other)
+        summary_matrix  pd.DataFrame  (labels × labels) -- off-diagonal
+            cells are the AVERAGE of both directions' overall_agreement,
+            not a single direction copied into both cells. compare_runs'
+            Hungarian matching on a rectangular (unequal theme-count)
+            matrix is not guaranteed symmetric, so computing only one
+            direction and mirroring it (the previous behavior) silently
+            assumed a symmetry that doesn't always hold.
         error           str|None
     """
     labels = list(runs_dict.keys())
@@ -317,17 +435,30 @@ def compare_all_runs(
     for i in range(n):
         for j in range(i + 1, n):
             la, lb = labels[i], labels[j]
-            r = compare_runs(
+            r_ab = compare_runs(
                 runs_dict[la], runs_dict[lb],
                 label_a=la, label_b=lb,
                 cosine_weight=cosine_weight,
                 jaccard_weight=jaccard_weight,
+                embedding_backend=embedding_backend,
             )
-            pairwise[(la, lb)] = r
-            if not r.get("error"):
-                score = r["overall_agreement"]
+            r_ba = compare_runs(
+                runs_dict[lb], runs_dict[la],
+                label_a=lb, label_b=la,
+                cosine_weight=cosine_weight,
+                jaccard_weight=jaccard_weight,
+                embedding_backend=embedding_backend,
+            )
+            pairwise[(la, lb)] = r_ab
+            pairwise[(lb, la)] = r_ba
+
+            scores = [
+                r["overall_agreement"] for r in (r_ab, r_ba) if not r.get("error")
+            ]
+            if scores:
+                score = float(np.mean(scores))
                 summary[i, j] = score
-                summary[j, i] = score  # symmetric
+                summary[j, i] = score  # symmetric by construction (averaged)
 
     summary_df = pd.DataFrame(
         np.round(summary, 4),
