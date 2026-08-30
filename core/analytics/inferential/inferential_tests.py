@@ -37,7 +37,7 @@ LOW_N_THRESHOLD : int = 30
 """
 
 from __future__ import annotations
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Union, Any
 import math
 import warnings
 
@@ -300,13 +300,23 @@ def _get_user_pct_correct(
 def _get_construct_means_by_module(
     canonical_df: pd.DataFrame,
     instrument_key: str,
-    construct: Optional[str] = None,
+    construct: Optional[Union[str, List[str]]] = None,
 ) -> pd.DataFrame:
     """
     Extract per-user per-module mean scores for a survey instrument.
 
     Returns a DataFrame with user_id as index and module_id columns.
-    If construct is specified, filters to that construct only.
+    If construct is a single string, filters to that construct only.
+    If construct is a list of strings, pools items across all of them
+    into one item-weighted mean per user per module -- i.e. a composite
+    construct (e.g. DEFAULT_SCCCES_COMPOSITE_MAP["Message_appraisal"] in
+    correlation_engine.py). Mathematically identical to that module's
+    compute_composite_scores() (both are total_score / n_items across
+    the same construct set) -- kept as separate code paths since one
+    operates per-module (this function, feeding the Friedman/RM-ANOVA
+    tests below) and the other collapses across modules for a different
+    use case, but both read the same canonical DEFAULT_SCCCES_COMPOSITE_MAP
+    definition so the sub-construct list itself never drifts between them.
     """
     mask = (
         (canonical_df["instrument_key"] == instrument_key) |
@@ -315,7 +325,10 @@ def _get_construct_means_by_module(
     subset = canonical_df[mask].copy()
 
     if construct:
-        subset = subset[subset["construct"] == construct]
+        if isinstance(construct, (list, tuple, set)):
+            subset = subset[subset["construct"].isin(construct)]
+        else:
+            subset = subset[subset["construct"] == construct]
 
     subset = subset[subset["item_score"].notna()]
 
@@ -692,7 +705,7 @@ def run_between_groups(
 def run_repeated_measures(
     canonical_df: pd.DataFrame,
     instrument_key: str,
-    construct: Optional[str] = None,
+    construct: Optional[Union[str, List[str]]] = None,
     alpha: float = DEFAULT_ALPHA,
 ) -> Dict[str, Any]:
     """
@@ -709,8 +722,11 @@ def run_repeated_measures(
     instrument_key : str
         Survey base key (e.g. "b4ai_sims_survey") or MCQ key
         (e.g. "module_content_mcq_assessment" — partial match used).
-    construct : str | None
-        For surveys: filter to this construct.
+    construct : str | list[str] | None
+        For surveys: a single construct name filters to that construct.
+        A list of construct names pools items across all of them into one
+        composite (e.g. the SCCCES "Message_appraisal" composite — see
+        DEFAULT_SCCCES_COMPOSITE_MAP in correlation_engine.py).
         For MCQ: leave None.
     alpha : float
 

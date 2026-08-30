@@ -139,6 +139,42 @@ _SURVEY_LABELS: Dict[str, str] = {
     "b4ai_sims_survey":   "SIMS (Motivation)",
 }
 
+# -----------------------------------------------------------------------
+# Interpretation-assistance notes -- short, citation-backed plain-language
+# text shown next to specific results so a teacher/researcher doesn't need
+# to consult a separate paper or book to understand what a stat means.
+# Plain text only (no markdown/HTML) so the same string renders correctly
+# both as a live st.caption()/st.info() and as a reportlab Paragraph() in
+# the exported PDF reports -- one source of truth for both call sites.
+# -----------------------------------------------------------------------
+_INTERPRETATION_NOTES: Dict[str, str] = {
+    "message_appraisal_composite": (
+        "Message_appraisal combines Coherency, Plausibility, Credibility, "
+        "and Comprehensibility of Messaging into one composite score. "
+        "Heddy, Taasoobshirazi, Chancey & Danielson (2018) -- the CCCES "
+        "source instrument's own validation study (N=513) -- found these "
+        "four sub-constructs collapse into a single dominant empirical "
+        "factor accounting for 70.96% of item variance, the basis for "
+        "combining them here rather than treating them as four separate "
+        "scales."
+    ),
+}
+
+
+def _interpretation_caption(key: str) -> str:
+    """Look up a plain-text interpretation/citation note by key. Returns
+    '' if the key isn't found, so a missing note degrades silently rather
+    than crashing a call site."""
+    return _INTERPRETATION_NOTES.get(key, "")
+
+
+# Display label for the Message_appraisal composite option in construct
+# pickers -- distinguishes it from the raw individual sub-constructs.
+_MESSAGE_APPRAISAL_LABEL = (
+    "Message_appraisal (composite: coherency + plausibility + "
+    "credibility + comprehensibility)"
+)
+
 # Maps module_id (canonical) → display label
 _MODULE_LABELS: Dict[str, str] = {
     **{f"module_{n}": f"Module {n}" for n in discover_all_module_numbers()},
@@ -2954,6 +2990,7 @@ def _render_inferential_tab(
                 "plausibility_of_messaging","credibility_of_messaging",
                 "comprehensibility_of_messaging","attention",
                 "culture","personal_relevance",
+                _MESSAGE_APPRAISAL_LABEL,
             ]
             sims_constructs = [
                 "intrinsic_motivation","identified_regulation",
@@ -2969,6 +3006,13 @@ def _render_inferential_tab(
                     options=constructs,
                     key="inf_rm_construct",
                 )
+            _rm_is_composite = rm_construct == _MESSAGE_APPRAISAL_LABEL
+            _rm_construct_arg = (
+                DEFAULT_SCCCES_COMPOSITE_MAP["Message_appraisal"]
+                if _rm_is_composite else rm_construct
+            )
+            if _rm_is_composite:
+                st.caption("ℹ️ " + _interpretation_caption("message_appraisal_composite"))
 
             import re as _re_rm2
 
@@ -3026,7 +3070,7 @@ def _render_inferential_tab(
                     r_rm = run_repeated_measures(
                         _rm_survey_canonical,
                         instrument_key=survey_key,
-                        construct=rm_construct,
+                        construct=_rm_construct_arg,
                         alpha=0.05,
                     )
                 _render_result_card(r_rm, score_label="Mean Score")
@@ -8695,9 +8739,17 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                     pass
 
                 # Survey constructs
+                # NOTE: this list previously only had 5 of the 10 SCCCES
+                # sub-constructs (missing credibility_of_messaging,
+                # comprehensibility_of_messaging, attention, culture,
+                # personal_relevance) -- a real live-tab/report parity gap,
+                # fixed here to match the live Inferential Statistics tab's
+                # own sccces_constructs list exactly.
                 sccces_constructs = [
                     "engagement_with_task", "effort_and_persistence", "experience_of_flow",
                     "coherency_of_messaging", "plausibility_of_messaging",
+                    "credibility_of_messaging", "comprehensibility_of_messaging",
+                    "attention", "culture", "personal_relevance",
                 ]
                 sims_constructs = ["intrinsic_motivation", "identified_regulation",
                                    "external_regulation", "amotivation"]
@@ -8724,12 +8776,38 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                             })
                         except Exception:
                             pass
+
+                    # Message_appraisal composite -- mirrors the live tab's
+                    # composite option (Heddy et al., 2018), added here so
+                    # the PDF report and the live tab never diverge.
+                    if survey_key == "b4ai_sccces_survey":
+                        try:
+                            r = run_repeated_measures(
+                                _survey_active_df, survey_key,
+                                construct=DEFAULT_SCCCES_COMPOSITE_MAP["Message_appraisal"],
+                            )
+                            if not r.get("error"):
+                                summary_rows.append({
+                                    "Construct":    "Message_appraisal (composite)",
+                                    "Friedman χ²":  f"{r['friedman_stat']:.3f}",
+                                    "p-value":      f"{r['p_value']:.4f}",
+                                    "Kendall's W":  f"{r['kendalls_w']:.4f}",
+                                    "Effect":       r["effect_size_label"],
+                                    "Significant":  "Yes" if r["significant"] else "No",
+                                    "Recommended":  r.get("recommended_test", "—"),
+                                })
+                        except Exception:
+                            pass
+
                     if summary_rows:
+                        _caption = "Friedman test results for all constructs. α = 0.05."
+                        if survey_key == "b4ai_sccces_survey":
+                            _caption += " " + _interpretation_caption("message_appraisal_composite")
                         sections.append({
                             "heading": f"Across Modules — {survey_label}",
                             "body":    "Friedman test per construct across 7 modules.",
                             "table":   pd.DataFrame(summary_rows),
-                            "caption": "Friedman test results for all constructs. α = 0.05.",
+                            "caption": _caption,
                         })
 
             pdf_bytes = _build_pdf(sections, "Inferential Statistics Report")

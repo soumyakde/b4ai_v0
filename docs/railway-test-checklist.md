@@ -464,6 +464,53 @@ No cleanup needed — resuming doesn't create new data, it reuses an existing ru
 
 ---
 
+## P. Message_appraisal composite — Inferential Statistics + Report Generation (local test-data run, 20 min)
+
+**Not yet pushed or deployed anywhere — this is a local-only check first.** Run via `C:\Users\soumy\b4ai_v0_test_data\run_test_streamlit.bat` (opens at `localhost:8502`, uses the refreshed test-data copy, not production). Everything below has been verified at the computation level only (a direct script cross-checked the new code path against the existing, already-trusted Correlations-tab composite for 578 real user/module pairs — zero mismatches), but **none of it has been clicked through in the actual app yet** — that's what this checklist is for.
+
+### P.1 — Live dropdown + composite result (5 min)
+
+1. **Teacher Dashboard → 📈 Inferential Statistics → Across Modules → Repeated Measures.**
+2. Set **Survey** to **"Cognitive Engagement"**.
+3. Open the **Construct** dropdown — confirm it now has **11 options**: the original 10, plus a new one at the bottom reading exactly **"Message_appraisal (composite: coherency + plausibility + credibility + comprehensibility)"**.
+4. Select the composite option.
+5. Confirm a caption appears just below the dropdowns, starting **"ℹ️ Message_appraisal combines Coherency, Plausibility, Credibility, and Comprehensibility of Messaging..."** and ending with the Heddy et al. (2018) citation.
+6. Pick 2+ modules in the module picker, confirm the result card computes cleanly — Friedman χ², p-value, Kendall's W, effect size, and a recommended test all show real numbers, no error.
+7. **Write down** the n subjects, Friedman χ², p-value, and Kendall's W shown — you'll cross-check these against the PDF in P.3.
+8. ✅ Pass if: the dropdown wording matches exactly, the caption appears only for this one option, and the card computes without error.
+
+### P.2 — Regression check: existing individual constructs (5 min)
+
+1. In the same dropdown, select each of the 4 individual message constructs (Coherency, Plausibility, Credibility, Comprehensibility of Messaging) one at a time, plus one construct from a different group (e.g. Attention).
+2. ✅ Pass if: all of them compute exactly as before — no new caption appears for any of them (the caption is composite-only), no errors, nothing looks different from how this section behaved before today.
+
+### P.3 — Report Generation PDF parity (5 min)
+
+1. **Report Generation → Inferential Statistics Report.** Include "Across Modules", generate the PDF.
+2. Open it, find the **"Across Modules — Cognitive Engagement"** table.
+3. Confirm it now lists **all 10** individual sub-constructs — specifically check that **Credibility, Comprehensibility, Attention, Culture, and Personal Relevance** are present (a real bug found while building this: the PDF previously only had 5 of the 10, silently missing the other half).
+4. Confirm a **"Message_appraisal (composite)"** row appears at the bottom of that same table.
+5. Confirm the table's caption includes the Heddy et al. citation text, matching P.1's live caption.
+6. If you used the same module selection as P.1, the composite row's Friedman χ², p-value, and Kendall's W should **match** what you wrote down in P.1 step 7.
+7. ✅ Pass if: all 10 sub-constructs + the composite row are present, the citation is there, and the numbers match the live tab.
+
+### P.4 — Regression check: SIMS, MCQ, and Correlations tab untouched (5 min)
+
+1. Switch **Survey** to **"SIMS (Motivation)"** in the live tab — confirm the Construct dropdown shows only the original 4 SIMS constructs, **no composite option** (this composite is SCCCES-only, on purpose, per Guay et al. 2000's own recommendation against combining SIMS constructs).
+2. Check **"Across Modules — MCQ Content Knowledge"** (both live and PDF) — confirm it's unaffected.
+3. Go to the **Correlations tab → Composite Builder** — confirm Message_appraisal still shows its original 4 sub-constructs, unchanged, and still computes normally in the Mixed-Effects Model / Repeated-Measures Correlations sections.
+4. ✅ Pass if: SIMS shows no composite option, MCQ is unaffected, and the pre-existing Correlations-tab composite feature works exactly as it did before.
+
+### If P.1-P.4 all pass
+
+Let Claude know — next step is pushing to the `test` branch and re-running this same checklist against Railway `test`, then production, following the same sequence as every prior batch.
+
+### If anything fails
+
+Note exactly which step and what you saw — don't try to fix it yourself, this is all local/disposable test data.
+
+---
+
 ## If anything fails
 
 Note which item failed and what you saw, then let Claude know — don't try to fix anything yourself. This is all on the disposable `test` environment; nothing here touches the real pilot data on `production`.
