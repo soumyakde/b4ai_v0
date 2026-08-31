@@ -8281,6 +8281,39 @@ published instrument for full item listings.
                 "counterpart at once."
             ),
         },
+        {
+            "section": "Qualitative / LLM Analysis",
+            "tag": "Embedding robustness", "color": "#FFF3E6", "border": "#EE7733",
+            "citation": (
+                "Muennighoff, N., Tazi, N., Magne, L., & Reimers, N. (2023). "
+                "MTEB: Massive Text Embedding Benchmark. *Proceedings of the "
+                "17th Conference of the European Chapter of the Association "
+                "for Computational Linguistics*, 2014–2037."
+            ),
+            "note": (
+                "Basis for offering a second, architecturally distinct "
+                "embedding backend (text-embedding-3-small) as a robustness "
+                "check on theme-comparison agreement scores -- no single "
+                "embedding model dominates across tasks, so a result "
+                "shouldn't rest on one encoder's specific geometry."
+            ),
+        },
+        {
+            "section": "Qualitative / LLM Analysis",
+            "tag": "Factorial design", "color": "#FFF3E6", "border": "#EE7733",
+            "citation": (
+                "Mizrahi, M., Kaplan, G., Malkin, D., Dror, R., Shahaf, D., "
+                "& Stanovsky, G. (2024). State of what art? A call for "
+                "multi-prompt LLM evaluation. *Transactions of the "
+                "Association for Computational Linguistics, 12*, 933–949."
+            ),
+            "note": (
+                "Basis for decompose_factorial_agreement()'s same-model/"
+                "different-temperature vs. different-model/same-temperature "
+                "grouping -- a single condition comparison confounds a "
+                "model effect with a temperature effect."
+            ),
+        },
     ]
 
     _section_seen = None

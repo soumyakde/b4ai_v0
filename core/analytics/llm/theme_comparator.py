@@ -74,6 +74,7 @@ from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 import pandas as pd
 from scipy.optimize import linear_sum_assignment
+from scipy import stats as _scipy_stats
 
 # Similarity floor below which an assigned pair is flagged "matched: False"
 # in compare_runs' output. A provisional default, not yet empirically
@@ -567,6 +568,132 @@ def align_themes(
         })
 
     return pd.DataFrame(rows)
+
+
+# -----------------------------------------------------------------------
+# Public function 5: decompose_factorial_agreement
+# -----------------------------------------------------------------------
+
+def _mean_ci_95(scores: List[float]) -> Optional[Tuple[float, float]]:
+    """95% CI for the mean via the t-distribution. None if n<2 (undefined)."""
+    n = len(scores)
+    if n < 2:
+        return None
+    arr = np.asarray(scores, dtype=float)
+    mean = arr.mean()
+    sem  = arr.std(ddof=1) / np.sqrt(n)
+    if sem == 0:
+        return (round(float(mean), 4), round(float(mean), 4))
+    t_crit = _scipy_stats.t.ppf(0.975, df=n - 1)
+    return (round(float(mean - t_crit * sem), 4), round(float(mean + t_crit * sem), 4))
+
+
+def decompose_factorial_agreement(
+    compare_all_runs_result: Dict[str, Any],
+    run_metadata: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Decompose a compare_all_runs() result into a proper model x temperature
+    factorial breakdown, instead of one ad hoc convenience matrix that
+    confounds model identity and temperature (the critique in Mizrahi et
+    al., 2024 -- single-condition LLM comparisons are brittle when
+    conditions vary on more than one dimension at once).
+
+    Groups every unordered pair of runs into exactly one of:
+        same_model_same_temp  -- repeated runs, identical settings. This
+            is the self-consistency ceiling every cross-model or
+            cross-temperature score should be benchmarked against (De
+            Paoli, 2024's own suggested future-research direction; also
+            motivated by LLM temperature-0 nondeterminism literature --
+            even "identical settings" runs aren't guaranteed identical).
+        same_model_diff_temp  -- isolates a temperature effect.
+        diff_model_same_temp  -- isolates a model effect.
+        diff_model_diff_temp  -- both vary at once; least interpretable
+            group, kept for completeness rather than silently dropped.
+
+    Parameters
+    ----------
+    compare_all_runs_result : dict
+        Output of compare_all_runs(). Must contain "labels" and
+        "summary_matrix" (each unordered pair's score is read from the
+        summary matrix -- already the average of both directions per the
+        compare_all_runs() symmetry fix -- not recomputed here).
+    run_metadata : dict
+        {label: {"model": str, "temperature": float}} -- every label in
+        compare_all_runs_result["labels"] must have an entry.
+
+    Returns
+    -------
+    dict:
+        error   str | None
+        For each group name above (present even if empty, with
+        n_pairs=0 and mean_agreement=None):
+            n_pairs         int
+            mean_agreement  float | None
+            ci_95           (float, float) | None  -- None if n_pairs < 2
+            pairs           list of (label_a, label_b, score) tuples
+    """
+    result: Dict[str, Any] = {"error": None}
+    group_names = [
+        "same_model_same_temp", "same_model_diff_temp",
+        "diff_model_same_temp", "diff_model_diff_temp",
+    ]
+    for g in group_names:
+        result[g] = {"n_pairs": 0, "mean_agreement": None, "ci_95": None, "pairs": []}
+
+    if compare_all_runs_result.get("error"):
+        result["error"] = compare_all_runs_result["error"]
+        return result
+
+    labels = compare_all_runs_result.get("labels", [])
+    summary = compare_all_runs_result.get("summary_matrix")
+    if summary is None or not isinstance(summary, pd.DataFrame) or summary.empty:
+        result["error"] = "compare_all_runs_result has no summary_matrix to decompose."
+        return result
+
+    missing_meta = [l for l in labels if l not in run_metadata]
+    if missing_meta:
+        result["error"] = (
+            f"run_metadata is missing entries for: {', '.join(missing_meta)}. "
+            f"Every label in compare_all_runs_result['labels'] needs a "
+            f"{{'model':..., 'temperature':...}} entry."
+        )
+        return result
+
+    grouped_scores: Dict[str, List[float]] = {g: [] for g in group_names}
+    grouped_pairs:  Dict[str, List[Tuple[str, str, float]]] = {g: [] for g in group_names}
+
+    n = len(labels)
+    for i in range(n):
+        for j in range(i + 1, n):
+            la, lb = labels[i], labels[j]
+            meta_a, meta_b = run_metadata[la], run_metadata[lb]
+            same_model = meta_a.get("model") == meta_b.get("model")
+            same_temp  = meta_a.get("temperature") == meta_b.get("temperature")
+
+            if same_model and same_temp:
+                g = "same_model_same_temp"
+            elif same_model and not same_temp:
+                g = "same_model_diff_temp"
+            elif not same_model and same_temp:
+                g = "diff_model_same_temp"
+            else:
+                g = "diff_model_diff_temp"
+
+            score = float(summary.loc[la, lb])
+            grouped_scores[g].append(score)
+            grouped_pairs[g].append((la, lb, round(score, 4)))
+
+    for g in group_names:
+        scores = grouped_scores[g]
+        result[g] = {
+            "n_pairs":        len(scores),
+            "mean_agreement": round(float(np.mean(scores)), 4) if scores else None,
+            "ci_95":          _mean_ci_95(scores),
+            "pairs":          grouped_pairs[g],
+        }
+
+    return result
 
 
 # -----------------------------------------------------------------------
