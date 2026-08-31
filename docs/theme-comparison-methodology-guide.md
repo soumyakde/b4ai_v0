@@ -64,12 +64,12 @@ This is the part worth reading carefully before citing a "Compare Runs" result a
 
 ## 6. What's still planned
 
-These limitations aren't being ignored — they're sequenced work, not this update's scope:
+These limitations aren't being ignored. Some now have built, tested infrastructure sitting ready for real data; others are still sequenced work.
 
-- **Human-coded ground truth comparison** — comparing model output against an actual human-coded reference, which turns "agreement" evidence into something closer to validity evidence.
-- **ROC/Youden's J calibration** of the 0.30 floor against that human-coded data, once it exists, replacing the current guess with an empirically justified cutoff.
-- **Same-model repeated-run baseline** — running one model repeatedly at fixed settings to establish the self-consistency ceiling cross-model scores should be judged against.
-- **Krippendorff's alpha**, applied where it actually fits (the DTA deductive pipeline's fixed-codebook coding, not this free-form inductive theme comparison, where alpha's shared-category-scheme assumption doesn't hold without first reconciling both runs onto one common theme list).
+- **Ground-truth upload + reliability infrastructure — built (`core/analytics/validation/ground_truth_validation.py`), synthetic-tested, not yet run on real data.** A documented CSV/XLSX template, a validator/normalizer for uploaded ground-truth files, a Krippendorff's alpha function, and a ROC/Youden's J calibration function all exist and pass a battery of synthetic checks (perfect agreement, near-random agreement, partial rater overlap, perfectly-separable and noisy ROC cases, and the relevant error conditions). None of them has been run against real ITA/DTA output yet — no matching completed run exists to validate against. The Teacher Dashboard's LLM Analysis tab has a "🧪 Validation (Research)" section (visible to any teacher-role user, no role gate, clearly labeled) where the ground-truth upload and preview already work; the actual alpha/ROC computations are explicitly labeled "To Be Developed" there rather than faked against placeholder numbers.
+- **Krippendorff's alpha** is built generically (any two-rater, shared-unit-set comparison) and applies cleanly to the DTA deductive pipeline's fixed-codebook coding — but not to this document's free-form ITA theme comparison, where alpha's shared-category-scheme assumption doesn't hold without first reconciling both runs onto one common theme list. It also doesn't yet have matching data: the existing human-coded interview document (see `scripts/convert_interview_codes_docx.py`) uses its own inductive categories, not DTA's actual construct taxonomy (coherency_of_messaging, engagement_with_task, etc.) — a real DTA-taxonomy-coded human dataset doesn't exist yet.
+- **ROC/Youden's J calibration** of the 0.30 floor is built and ready, but needs two things that don't exist yet: a completed ITA run on the same transcripts as the human-coded document, and human match/no-match judgments on candidate LLM-theme-vs-human-code pairs (a labeling task, not just a file upload).
+- **Same-model repeated-run baseline** — running one model repeatedly at fixed settings to establish the self-consistency ceiling cross-model scores should be judged against. Not yet started.
 
 ## References
 

@@ -17,6 +17,7 @@ numpy==1.26.4
 matplotlib
 plotly
 scikit-learn
+krippendorff
 seaborn
 sentence-transformers
 reportlab

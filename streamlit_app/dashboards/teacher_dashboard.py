@@ -114,6 +114,13 @@ try:
         DTA_SYSTEM_PROMPT,
         _parse_dta_json, _detect_matched_indicators,
     )
+    from core.analytics.validation.ground_truth_validation import (
+        validate_ground_truth_df    as _validate_ground_truth_df,
+        compute_krippendorffs_alpha as _compute_krippendorffs_alpha,
+        calibrate_threshold_youden  as _calibrate_threshold_youden,
+        GROUND_TRUTH_REQUIRED_COLUMNS as _GT_REQUIRED_COLUMNS,
+        GROUND_TRUTH_OPTIONAL_COLUMNS as _GT_OPTIONAL_COLUMNS,
+    )
     _LLM_AVAILABLE = True
     _LLM_ERR = ""
 except Exception as _llm_e:
@@ -5276,7 +5283,8 @@ def _render_llm_tab(username: str, canonical_df: pd.DataFrame) -> None:
     section = st.radio(
         "**Analysis type:**",
         options=["📖 Inductive Thematic Analysis (ITA)",
-                 "🔍 Deductive Thematic Analysis (DTA)"],
+                 "🔍 Deductive Thematic Analysis (DTA)",
+                 "🧪 Validation (Research)"],
         horizontal=True,
         key="llm_section_radio",
     )
@@ -5291,7 +5299,7 @@ def _render_llm_tab(username: str, canonical_df: pd.DataFrame) -> None:
         )
         st.divider()
         _render_ita_guided(username, canonical_df)
-    else:
+    elif section == "🔍 Deductive Thematic Analysis (DTA)":
         st.markdown(
             "<div style='background:#FFF3E6;border-left:5px solid #EE7733;"
             "border-radius:6px;padding:0.5rem 1rem;margin:0.3rem 0;'>"
@@ -5301,6 +5309,131 @@ def _render_llm_tab(username: str, canonical_df: pd.DataFrame) -> None:
         )
         st.divider()
         _render_dta_section(username, canonical_df)
+    else:
+        st.markdown(
+            "<div style='background:#F0F0F0;border-left:5px solid #888888;"
+            "border-radius:6px;padding:0.5rem 1rem;margin:0.3rem 0;'>"
+            "🧪 <strong style='color:#555555;'>Validation (Research)</strong>"
+            " — for research validation, not everyday use</div>",
+            unsafe_allow_html=True,
+        )
+        st.divider()
+        _render_llm_validation_section(canonical_df)
+
+
+# -----------------------------------------------------------------------
+# Validation (Research) section -- ground-truth upload + reliability
+# calibration infrastructure. See docs/theme-comparison-methodology-guide.md
+# and PROJECT_STATUS.md for full context: this section is deliberately
+# labeled "To Be Developed" because the statistical engines behind it
+# (Krippendorff's alpha, ROC/Youden's J) are built and synthetic-tested,
+# but have not yet been run against real ITA/DTA output -- no completed
+# run currently exists to validate against, and building a convincing
+# demo against fabricated numbers would be actively misleading.
+# -----------------------------------------------------------------------
+
+_GROUND_TRUTH_TEMPLATE_CSV = (
+    "category,code_name,quote,participant_id,page_ref,researcher_initials,notes\n"
+    "AI as human-created and controlled,ai_equals_robot,"
+    "\"companies make, like, very, very, expensive robots... it's AI\","
+    ",2,,physicality remains a dominant early cognitive entry point\n"
+    "AI learns from data,ai_learns_from_data,"
+    "it gets smarter with data over time,,7,,"
+    "recognizes personalization/training as a mechanism\n"
+)
+
+
+def _render_llm_validation_section(canonical_df: pd.DataFrame) -> None:
+    """Tab 3, sub-section: Validation (Research) -- ground-truth upload +
+    reliability calibration. Visible to any teacher-role user (no role
+    gate, per the user's explicit design choice), clearly labeled for
+    research use rather than everyday dashboard use."""
+
+    st.info(
+        "🚧 **To Be Developed.** The statistics below (Krippendorff's alpha, "
+        "ROC/Youden's J threshold calibration) are built and tested against "
+        "synthetic data, but have not yet been run against a real completed "
+        "ITA/DTA run -- none currently exists to validate against. The "
+        "ground-truth upload and preview below is fully functional today; "
+        "the actual reliability computations will activate once a matching "
+        "run exists. See `docs/theme-comparison-methodology-guide.md` for "
+        "the full methodology."
+    )
+
+    st.markdown(
+        "This section compares LLM-assisted analysis (ITA/DTA) against "
+        "human-coded reference data -- turning \"the models agree with "
+        "each other\" into \"the models agree with a human,\" which is a "
+        "meaningfully stronger claim (see the disclaimer at the top of "
+        "this tab)."
+    )
+
+    with st.expander("📤 Upload human-coded ground truth (CSV or XLSX)", expanded=True):
+        st.caption(
+            "Template columns: " + ", ".join(_GT_REQUIRED_COLUMNS) +
+            " (required), " + ", ".join(_GT_OPTIONAL_COLUMNS) + " (optional). "
+            "participant_id is never required -- a deliberate privacy-by-design "
+            "choice, not a gap to fill in."
+        )
+        st.download_button(
+            "⬇️ Download template (CSV)",
+            data=_GROUND_TRUTH_TEMPLATE_CSV,
+            file_name="ground_truth_template.csv",
+            mime="text/csv",
+            key="gt_template_dl",
+        )
+
+        uploaded = st.file_uploader(
+            "Upload ground-truth file", type=["csv", "xlsx"], key="gt_upload",
+        )
+        if uploaded is not None:
+            try:
+                if uploaded.name.lower().endswith(".xlsx"):
+                    raw_df = pd.read_excel(uploaded)
+                else:
+                    raw_df = pd.read_csv(uploaded)
+            except Exception as e:
+                st.error(f"Could not read file: {e}")
+                raw_df = None
+
+            if raw_df is not None:
+                result = _validate_ground_truth_df(raw_df)
+                if not result["valid"]:
+                    for err in result["errors"]:
+                        st.error(err)
+                else:
+                    st.success(f"✅ {result['n_rows']} coded unit(s) validated.")
+                    for w in result["warnings"]:
+                        st.warning(w)
+                    st.session_state["gt_validated_df"] = result["df"]
+                    st.dataframe(result["df"], hide_index=True, width="stretch")
+
+    gt_df = st.session_state.get("gt_validated_df")
+
+    st.markdown("#### Krippendorff's alpha (DTA construct-coding agreement)")
+    st.caption(
+        "Requires human-coded data expressed in DTA's own construct "
+        "taxonomy (coherency_of_messaging, engagement_with_task, etc.) "
+        "and a completed DTA run on the same transcripts -- not simply "
+        "any uploaded ground-truth file. See the methodology guide for "
+        "why this doesn't apply directly to free-form inductive codes."
+    )
+    st.info("🚧 To Be Developed -- no completed DTA run available yet to compare against.")
+
+    st.markdown("#### ROC / Youden's J threshold calibration (ITA embedding metric)")
+    st.caption(
+        "Requires a completed ITA run on the same transcripts as the "
+        "uploaded ground truth, plus human match/no-match judgments on "
+        "candidate LLM-theme-vs-human-code pairs -- a labeling step, not "
+        "just an upload. See the methodology guide for detail."
+    )
+    st.info("🚧 To Be Developed -- no completed ITA run or match/no-match labels available yet.")
+
+    if gt_df is not None:
+        st.caption(
+            f"({len(gt_df)} ground-truth units are currently loaded in this "
+            "session and ready to use once a matching run exists.)"
+        )
 
 
 # -----------------------------------------------------------------------
