@@ -511,6 +511,55 @@ Note exactly which step and what you saw — don't try to fix it yourself, this 
 
 ---
 
+## Q. Situational Cognitive Engagement + Attention_Culture composites — Basic Stats, Inferential Stats, Correlations tab (2026-09-01, 20 min)
+
+**Context:** the SCCCES composite map used to define `Engagement = task + effort + flow + attention`, which conflated Rotgans & Schmidt's (2011) validated 3-facet Situational Cognitive Engagement Scale with an item Heddy et al.'s (2018) own EFA actually places in a different factor (with Culture, not with the engagement facets). Fixed by renaming/redefining the composite as `Situational Cognitive Engagement = task + effort + flow` (Attention removed) and adding a new `Attention_Culture = attention + culture` composite matching Heddy et al.'s second empirical factor exactly. Both composites are now available everywhere `Message_appraisal` already was — Correlations tab, Inferential Statistics, and (new) a Basic Statistics trend chart. Verified locally via direct-Python computation checks and `streamlit.testing.v1.AppTest` against all three sections (no exceptions, correct labels/citations) before this push.
+
+### Q.1 — Correlations tab → Composite Builder (3 min)
+
+1. **Teacher Dashboard → 🔗 Correlations → Composite Builder.**
+2. Confirm the composite list now reads: **Situational Cognitive Engagement**, **Message appraisal**, **Attention Culture**, **Personal relevance** — the old standalone **"Engagement"** and **"Culture"** entries should be gone.
+3. Confirm **Situational Cognitive Engagement**'s multiselect defaults to *Engagement with task, Effort and persistence, Experience of flow* only — **Attention should not be pre-selected here**.
+4. Confirm **Attention Culture**'s multiselect defaults to *Attention, Culture*.
+5. ✅ Pass if: all 4 composites appear with the correct default sub-constructs, and the Mixed-Effects Model / Repeated-Measures Correlations sections below still run cleanly using them.
+
+### Q.2 — Inferential Statistics → Across Modules (5 min)
+
+1. **Inferential Statistics → Across Modules → Data type: Survey construct → Survey: Cognitive Engagement.**
+2. Open the **Construct** dropdown — confirm it now has **13 options**: the original 10 raw sub-constructs, plus **3** composite options at the bottom: *Situational Cognitive Engagement (composite: task engagement + effort/persistence + flow)*, *Message_appraisal (composite: …)*, *Attention_Culture (composite: attention + culture)*.
+3. Select **Situational Cognitive Engagement** — confirm a caption appears citing Rotgans & Schmidt (2011) and coefficient H, and the result card computes cleanly (Friedman χ², p-value, Kendall's W, recommended test).
+4. Select **Attention_Culture** — confirm a caption citing Heddy et al. (2018)'s second factor, and a clean result card.
+5. **Regression check:** select the raw **Attention** construct and the raw **Culture** construct individually — confirm both still work exactly as before, no caption, no errors.
+6. ✅ Pass if: 13 options total, both new composites compute cleanly with the correct citation captions, and the raw Attention/Culture options are untouched.
+
+### Q.3 — Basic Statistics → Survey Construct Means (5 min)
+
+1. **Basic Statistics → Survey Construct Means → Select Survey: Cognitive Engagement → View: Per module.**
+2. Confirm a **new chart** appears, titled **"🔗 Composite trajectory: Message Appraisal vs. Engagement"**, above the existing 10-line "Construct means across modules" chart.
+3. Confirm it shows **3 lines** — Situational Cognitive Engagement, Message_appraisal, Attention_Culture — each trending across all 7 modules.
+4. Confirm three citation captions appear below the chart (Rotgans & Schmidt 2011, Heddy et al. 2018 ×2).
+5. Switch **Select Survey** to **SIMS (Motivation)** — confirm this new composite chart does **not** appear (SCCCES-only, by design).
+6. Switch back to Cognitive Engagement and confirm the original 10-construct detail chart below still shows all 10 individual sub-constructs unchanged, including Attention and Culture as their own separate lines.
+7. ✅ Pass if: the new 3-line composite chart appears only for Cognitive Engagement in Per-module view, with correct citations, and the existing 10-line detail chart is unaffected.
+
+### Q.4 — Report Generation PDF parity (4 min)
+
+1. **Report Generation → Inferential Statistics Report**, include "Across Modules", generate the PDF.
+2. Open it, find the **"Across Modules — Cognitive Engagement"** table.
+3. Confirm it now has **3** composite rows at the bottom: *Situational Cognitive Engagement (composite)*, *Message_appraisal (composite)*, *Attention_Culture (composite)* — alongside the same 10 individual sub-construct rows as before.
+4. Confirm the caption includes all three citations.
+5. ✅ Pass if: all 3 composite rows are present with correct numbers and citations, and nothing else in the report changed.
+
+### If Q.1–Q.4 all pass
+
+Let Claude know — next step is your explicit sign-off before this merges from `test` to `main`/production, following the same sequence as every prior batch.
+
+### If anything fails
+
+Note exactly which step and what you saw, then let Claude know — don't try to fix it yourself. This is on the `test` environment; nothing here touches `production`'s real pilot data.
+
+---
+
 ## If anything fails
 
 Note which item failed and what you saw, then let Claude know — don't try to fix anything yourself. This is all on the disposable `test` environment; nothing here touches the real pilot data on `production`.

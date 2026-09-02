@@ -165,6 +165,27 @@ _INTERPRETATION_NOTES: Dict[str, str] = {
         "combining them here rather than treating them as four separate "
         "scales."
     ),
+    "situational_cognitive_engagement_composite": (
+        "Situational Cognitive Engagement combines Engagement with Task, "
+        "Effort & Persistence, and Experience of Flow into one composite "
+        "score. Rotgans & Schmidt (2011) validated this exact 3-facet "
+        "structure as a single latent construct (the Situational "
+        "Cognitive Engagement Scale, SCES) via confirmatory factor "
+        "analysis, coefficient H = .93 in the exploration sample and "
+        ".78 on cross-validation -- the basis for combining these three "
+        "sub-constructs here. Attention is deliberately excluded from "
+        "this composite; see Attention_Culture below."
+    ),
+    "attention_culture_composite": (
+        "Attention_Culture combines the Attention and Culture "
+        "sub-constructs into one composite score. Heddy, Taasoobshirazi, "
+        "Chancey & Danielson (2018) -- the CCCES source instrument's own "
+        "validation study (N=513) -- found these two sub-constructs load "
+        "together as a second empirical factor, distinct from the four "
+        "Message_appraisal items and from Personal_relevance, the basis "
+        "for combining them here rather than treating them as unrelated "
+        "scales."
+    ),
     "theme_comparator_matching": (
         "Themes are paired using the Hungarian algorithm (Kuhn, 1955) -- "
         "the best possible one-to-one matching between the two runs' "
@@ -201,12 +222,29 @@ def _interpretation_caption(key: str) -> str:
     return _INTERPRETATION_NOTES.get(key, "")
 
 
-# Display label for the Message_appraisal composite option in construct
-# pickers -- distinguishes it from the raw individual sub-constructs.
-_MESSAGE_APPRAISAL_LABEL = (
+# Display labels for the multi-item SCCCES composite options in construct
+# pickers -- distinguishes each from its raw individual sub-constructs.
+# Maps display label -> DEFAULT_SCCCES_COMPOSITE_MAP key -> _interpretation_
+# caption() key. Personal_relevance is deliberately excluded: it is
+# already a single-item "composite" (Heddy et al.'s 3rd factor), so its
+# composite score is identical to the raw personal_relevance construct
+# already offered -- listing both would just be a confusing duplicate.
+_SCCCES_COMPOSITE_OPTIONS: Dict[str, Dict[str, str]] = {
+    "Situational Cognitive Engagement (composite: task engagement + "
+    "effort/persistence + flow)": {
+        "map_key": "Situational Cognitive Engagement",
+        "note_key": "situational_cognitive_engagement_composite",
+    },
     "Message_appraisal (composite: coherency + plausibility + "
-    "credibility + comprehensibility)"
-)
+    "credibility + comprehensibility)": {
+        "map_key": "Message_appraisal",
+        "note_key": "message_appraisal_composite",
+    },
+    "Attention_Culture (composite: attention + culture)": {
+        "map_key": "Attention_Culture",
+        "note_key": "attention_culture_composite",
+    },
+}
 
 # Maps module_id (canonical) → display label
 _MODULE_LABELS: Dict[str, str] = {
@@ -1281,6 +1319,97 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
             selected_mod_id = available_mods[mod_labels.index(selected_mod_label)]
             cm_display = cm_survey[cm_survey["module_id"] == selected_mod_id]
         module_col = "module_id"
+
+        # ── Composite comparison chart (Per module mode, SCCCES only) ──────────
+        # Message_appraisal, Situational Cognitive Engagement, and
+        # Attention_Culture plotted together so the antecedent
+        # (message appraisal) vs. outcome (engagement) relationship
+        # central to Dole & Sinatra's (1998) Cognitive Reconstruction
+        # of Knowledge Model -- the theory underlying CCCES -- is
+        # visible at a glance, before the 10-construct detail chart
+        # below. Personal_relevance is excluded here (single-item
+        # composite, identical to its own raw construct line below).
+        if (
+            not cm_survey.empty
+            and "module_id" in cm_survey.columns
+            and selected_survey_base == "b4ai_sccces_survey"
+        ):
+            st.markdown("#### 🔗 Composite trajectory: Message Appraisal vs. Engagement")
+            st.caption(
+                "Message_appraisal and Attention_Culture (Heddy et al., 2018) are "
+                "learners' appraisal of the instructional content itself; "
+                "Situational Cognitive Engagement (Rotgans & Schmidt, 2011) is "
+                "learners' own engaged state. The CRKM (Dole & Sinatra, 1998) "
+                "models message appraisal as an antecedent that shapes engagement, "
+                "not a component of it -- shown as separate composites, not "
+                "averaged into one score, for that reason."
+            )
+            _composite_rows = []
+            for _label, _info in _SCCCES_COMPOSITE_OPTIONS.items():
+                _comp_df = compute_composite_scores(
+                    canonical_df, selected_survey_base,
+                    {_info["map_key"]: DEFAULT_SCCCES_COMPOSITE_MAP[_info["map_key"]]},
+                )
+                if not _comp_df.empty:
+                    _composite_rows.append(_comp_df)
+
+            if _composite_rows:
+                _comp_all = pd.concat(_composite_rows, ignore_index=True)
+                _comp_traj = (
+                    _comp_all.groupby(["module_id", "composite"])["mean_score"]
+                    .mean()
+                    .reset_index()
+                )
+                _comp_traj["module_id"] = _comp_traj["module_id"].apply(
+                    lambda m: _MODULE_LABELS.get(m, m)
+                )
+                _comp_traj["mean_score"] = _comp_traj["mean_score"].round(3)
+
+                import re as _re_comp
+                def _comp_mod_sort(m):
+                    _mn = _re_comp.search(r"(\d+)", str(m))
+                    return int(_mn.group(1)) if _mn else 0
+                _comp_traj = _comp_traj.sort_values(
+                    "module_id", key=lambda s: s.map(_comp_mod_sort)
+                )
+
+                if _HAS_PLOTLY:
+                    import plotly.express as px
+                    _fig_comp = px.line(
+                        _comp_traj,
+                        x="module_id",
+                        y="mean_score",
+                        color="composite",
+                        markers=True,
+                        title="Composite Trajectory Across Modules — Cognitive Engagement Survey",
+                        labels={
+                            "module_id":  "Module",
+                            "mean_score": "Mean Score (1–4)",
+                            "composite":  "Composite",
+                        },
+                        range_y=[1, 4],
+                        color_discrete_sequence=px.colors.qualitative.Safe,
+                    )
+                    _fig_comp.update_layout(
+                        height=420,
+                        margin=dict(t=50, b=10, l=10, r=120),
+                        xaxis_title="Module",
+                        yaxis_title="Mean Score (1–4 Likert)",
+                        legend_title="Composite",
+                    )
+                    st.plotly_chart(_fig_comp, width="stretch")
+                else:
+                    _comp_pivot = _comp_traj.pivot(
+                        index="module_id", columns="composite", values="mean_score"
+                    )
+                    st.line_chart(_comp_pivot)
+
+                st.caption(
+                    "ℹ️ " + _interpretation_caption("situational_cognitive_engagement_composite")
+                )
+                st.caption("ℹ️ " + _interpretation_caption("attention_culture_composite"))
+                st.caption("ℹ️ " + _interpretation_caption("message_appraisal_composite"))
+            st.divider()
 
         # ── Cross-module trajectory chart (Per module mode only) ──────────────
         # Show how each construct's mean score varies across all 7 modules
@@ -3023,7 +3152,7 @@ def _render_inferential_tab(
                 "plausibility_of_messaging","credibility_of_messaging",
                 "comprehensibility_of_messaging","attention",
                 "culture","personal_relevance",
-                _MESSAGE_APPRAISAL_LABEL,
+                *_SCCCES_COMPOSITE_OPTIONS.keys(),
             ]
             sims_constructs = [
                 "intrinsic_motivation","identified_regulation",
@@ -3039,13 +3168,14 @@ def _render_inferential_tab(
                     options=constructs,
                     key="inf_rm_construct",
                 )
-            _rm_is_composite = rm_construct == _MESSAGE_APPRAISAL_LABEL
+            _rm_composite_info = _SCCCES_COMPOSITE_OPTIONS.get(rm_construct)
+            _rm_is_composite = _rm_composite_info is not None
             _rm_construct_arg = (
-                DEFAULT_SCCCES_COMPOSITE_MAP["Message_appraisal"]
+                DEFAULT_SCCCES_COMPOSITE_MAP[_rm_composite_info["map_key"]]
                 if _rm_is_composite else rm_construct
             )
             if _rm_is_composite:
-                st.caption("ℹ️ " + _interpretation_caption("message_appraisal_composite"))
+                st.caption("ℹ️ " + _interpretation_caption(_rm_composite_info["note_key"]))
 
             import re as _re_rm2
 
@@ -8987,32 +9117,37 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                         except Exception:
                             pass
 
-                    # Message_appraisal composite -- mirrors the live tab's
-                    # composite option (Heddy et al., 2018), added here so
-                    # the PDF report and the live tab never diverge.
+                    # Composite constructs (Situational Cognitive Engagement,
+                    # Message_appraisal, Attention_Culture) -- mirror the
+                    # live tab's composite options exactly (Rotgans &
+                    # Schmidt, 2011; Heddy et al., 2018), added here so the
+                    # PDF report and the live tab never diverge.
+                    _composite_notes_used = []
                     if survey_key == "b4ai_sccces_survey":
-                        try:
-                            r = run_repeated_measures(
-                                _survey_active_df, survey_key,
-                                construct=DEFAULT_SCCCES_COMPOSITE_MAP["Message_appraisal"],
-                            )
-                            if not r.get("error"):
-                                summary_rows.append({
-                                    "Construct":    "Message_appraisal (composite)",
-                                    "Friedman χ²":  f"{r['friedman_stat']:.3f}",
-                                    "p-value":      f"{r['p_value']:.4f}",
-                                    "Kendall's W":  f"{r['kendalls_w']:.4f}",
-                                    "Effect":       r["effect_size_label"],
-                                    "Significant":  "Yes" if r["significant"] else "No",
-                                    "Recommended":  r.get("recommended_test", "—"),
-                                })
-                        except Exception:
-                            pass
+                        for _label, _info in _SCCCES_COMPOSITE_OPTIONS.items():
+                            try:
+                                r = run_repeated_measures(
+                                    _survey_active_df, survey_key,
+                                    construct=DEFAULT_SCCCES_COMPOSITE_MAP[_info["map_key"]],
+                                )
+                                if not r.get("error"):
+                                    summary_rows.append({
+                                        "Construct":    f"{_info['map_key']} (composite)",
+                                        "Friedman χ²":  f"{r['friedman_stat']:.3f}",
+                                        "p-value":      f"{r['p_value']:.4f}",
+                                        "Kendall's W":  f"{r['kendalls_w']:.4f}",
+                                        "Effect":       r["effect_size_label"],
+                                        "Significant":  "Yes" if r["significant"] else "No",
+                                        "Recommended":  r.get("recommended_test", "—"),
+                                    })
+                                    _composite_notes_used.append(_info["note_key"])
+                            except Exception:
+                                pass
 
                     if summary_rows:
                         _caption = "Friedman test results for all constructs. α = 0.05."
-                        if survey_key == "b4ai_sccces_survey":
-                            _caption += " " + _interpretation_caption("message_appraisal_composite")
+                        for _note_key in _composite_notes_used:
+                            _caption += " " + _interpretation_caption(_note_key)
                         sections.append({
                             "heading": f"Across Modules — {survey_label}",
                             "body":    "Friedman test per construct across 7 modules.",

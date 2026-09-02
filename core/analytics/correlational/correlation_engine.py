@@ -94,24 +94,31 @@ DEFAULT_ALPHA = 0.05
 # directly verified against real pilot data -- the YAML section names
 # are TitleCase, e.g. "Engagement_with_task", but DatasetBuilder lowers
 # them before they reach canonical_df).
-# - Engagement: Rotgans & Schmidt (2011) task/effort/flow items + the
-#   negatively-worded Attention items (already reverse-scored upstream
-#   by DatasetBuilder -- included here at face value, no re-reversal).
+# - Situational Cognitive Engagement: Rotgans & Schmidt (2011)'s own
+#   validated 3-facet structure (task engagement, effort/persistence,
+#   flow), fit as a single latent construct via CFA (coefficient H =
+#   .93 exploration / .78 cross-validation). Attention is deliberately
+#   NOT included here -- see Attention_Culture below.
 # - Message_appraisal: Heddy et al. (2018)'s own EFA collapses these 4
 #   sub-constructs into one empirical factor.
-# - Personal_relevance / Culture: kept standalone, matching Heddy et
-#   al.'s 2nd/3rd factors and the confirmed plan.
+# - Attention_Culture: Heddy et al. (2018)'s own EFA found Attention
+#   and Culture load together as a second, distinct empirical factor --
+#   this composite mirrors that factor exactly, rather than grouping
+#   Attention with the SCES facets (an earlier version of this map did
+#   so; corrected 2026-09-01 to match Heddy et al.'s reported structure).
+# - Personal_relevance: kept standalone, matching Heddy et al.'s 3rd
+#   factor and the confirmed plan.
 DEFAULT_SCCCES_COMPOSITE_MAP: Dict[str, List[str]] = {
-    "Engagement": [
+    "Situational Cognitive Engagement": [
         "engagement_with_task", "effort_and_persistence",
-        "experience_of_flow", "attention",
+        "experience_of_flow",
     ],
     "Message_appraisal": [
         "coherency_of_messaging", "plausibility_of_messaging",
         "credibility_of_messaging", "comprehensibility_of_messaging",
     ],
+    "Attention_Culture": ["attention", "culture"],
     "Personal_relevance": ["personal_relevance"],
-    "Culture": ["culture"],
 }
 
 # SIMS constructs feed compute_rai() directly, or stand alone
