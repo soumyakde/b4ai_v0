@@ -1,4 +1,19 @@
 ---
+# KNOWN ITEM-WORDING ISSUE (flagged 2026-09-01, not yet corrected in live data):
+# Q10_2 ("I thought about whether I agreed with the topic conflicts based on
+# my culture") is a convoluted, double-embedded construction that may be hard
+# for 10-14-year-old respondents to parse correctly, independent of its
+# reverse-scoring polarity (which is internally consistent with Q10_1/Q9_1/
+# Q9_2 -- see b4ai_sccces_scoring.yaml). Existing pilot responses predate this
+# note and cannot be re-collected; before treating Q10_2 as equivalent in
+# quality to Q10_1, run the retrospective comprehension checks described in
+# the project's SCCCES composite-scoring analysis (item-total correlation of
+# Q10_2 vs. Q10_1 within Culture; Q10_1-Q10_2 inter-item correlation as a
+# comprehension proxy; missing/inconsistent-response rate on Q10_2 vs. other
+# 2-item sub-constructs; age-stratified comparison). If a future revision of
+# this instrument is fielded, simplify Q10_2's wording (e.g., a single direct
+# question such as "This topic made me think about my own beliefs or values")
+# before reusing it.
 instrument_key: b4ai_sccces_survey
 instrument_type: survey
 version: 1.0
