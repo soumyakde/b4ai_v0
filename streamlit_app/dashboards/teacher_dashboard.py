@@ -1209,6 +1209,91 @@ _CONSTRUCT_DEFINITIONS = {
         "scale_high": "Learners lost track of time and felt completely immersed in the activity.",
         "reverse_coded": False,
     },
+    # Composite constructs (derived from the raw CCCES/SCES sub-constructs
+    # above via DEFAULT_SCCCES_COMPOSITE_MAP, correlation_engine.py) --
+    # each entry's grouping is empirically/theoretically justified per its
+    # citation below, not an arbitrary averaging choice.
+    "Situational Cognitive Engagement": {
+        "label": "Situational Cognitive Engagement (SCES composite)",
+        "definition": (
+            "Learners' own engaged state during the activity -- how "
+            "involved, effortful, and absorbed they were -- combining "
+            "Engagement with Task, Effort & Persistence, and Experience "
+            "of Flow into one score."
+        ),
+        "citation": (
+            "Rotgans & Schmidt (2011) validated this exact 3-facet "
+            "structure as a single latent construct via confirmatory "
+            "factor analysis (coefficient H = .93 exploration / .78 "
+            "cross-validation), and found it correlates with academic "
+            "achievement (r = .15-.28 across 5 measurement occasions, "
+            "all p < .05)."
+        ),
+        "analytic_focus": ["active involvement", "effort under difficulty", "absorption/flow"],
+        "scale_low":  "Learners were disengaged -- low involvement, gave up easily, stayed aware of time passing rather than absorbed.",
+        "scale_mid":  "Learners were engaged at times but not consistently across involvement, effort, and absorption.",
+        "scale_high": "Learners were highly involved, persisted through difficulty, and lost track of time in the activity.",
+        "reverse_coded": False,
+    },
+    "Message_appraisal": {
+        "label": "Message Appraisal (composite)",
+        "definition": (
+            "Learners' appraisal of the instructional content itself -- "
+            "how organized, believable, trustworthy, and clear they found "
+            "it -- combining Coherency, Plausibility, Credibility, and "
+            "Comprehensibility of Messaging into one score. This is a "
+            "judgment about the materials, not about the learner's own "
+            "engagement -- see the note below."
+        ),
+        "citation": (
+            "Heddy, Taasoobshirazi, Chancey & Danielson (2018) -- the "
+            "CCCES source instrument's own validation study (N=513) -- "
+            "found these four sub-constructs collapse into a single "
+            "dominant empirical factor accounting for 70.96% of item "
+            "variance."
+        ),
+        "theory_note": (
+            "Per Dole & Sinatra's (1998) Cognitive Reconstruction of "
+            "Knowledge Model -- the theory underlying CCCES -- message "
+            "characteristics are an antecedent that shapes engagement, "
+            "not a component of it: \"interactions between message and "
+            "learner characteristics determine the level of engagement "
+            "... [which] influences the likelihood of conceptual "
+            "change.\" This is why Message_appraisal is reported "
+            "alongside, never averaged into, Situational Cognitive "
+            "Engagement."
+        ),
+        "analytic_focus": ["organization/clarity", "believability", "trust in the source", "ease of understanding"],
+        "scale_low":  "Learners found the materials disorganized, unbelievable, untrustworthy, or hard to follow.",
+        "scale_mid":  "Learners found the materials adequate on some of these dimensions but not others.",
+        "scale_high": "Learners found the materials well organized, believable, trustworthy, and clear.",
+        "reverse_coded": False,
+    },
+    "Attention_Culture": {
+        "label": "Attention & Culture (composite)",
+        "definition": (
+            "Combines Attention (sustained focus during the activity) "
+            "and Culture (how well the content aligned with learners' "
+            "cultural background) into one score. These are conceptually "
+            "different constructs that happen to move together "
+            "empirically in this instrument -- if the two move in "
+            "opposite directions for a given group, check the raw "
+            "Attention and Culture sub-constructs separately rather than "
+            "relying on this composite alone."
+        ),
+        "citation": (
+            "Heddy, Taasoobshirazi, Chancey & Danielson (2018) -- the "
+            "CCCES source instrument's own validation study (N=513) -- "
+            "found Attention and Culture load together as a second "
+            "empirical factor, distinct from the four Message_appraisal "
+            "items and from Personal_relevance."
+        ),
+        "analytic_focus": ["sustained focus", "cultural congruence of examples"],
+        "scale_low":  "Learners were frequently distracted, and/or felt the content conflicted with their cultural background.",
+        "scale_mid":  "Learners maintained attention some of the time, with partial cultural alignment.",
+        "scale_high": "Learners were fully attentive, and found the content culturally accessible and consistent with their background.",
+        "reverse_coded": False,
+    },
     # Motivation (SIMS)
     "intrinsic_motivation": {
         "label": "Intrinsic Motivation",
@@ -1307,7 +1392,18 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
     )
 
     if view_mode == "Aggregate (all modules)":
-        cm_display = aggregate_construct_means(cm_survey)
+        # aggregate_construct_means() groups by (user_id, instrument_key,
+        # construct) -- cm_survey's instrument_key is still module-prefixed
+        # (e.g. "module1_b4ai_sccces_survey"), so without normalizing it
+        # first, each module's rows form their own group and nothing
+        # actually collapses across modules (a real, pre-existing bug:
+        # "Aggregate (all modules)" was silently returning one row per
+        # user/module/construct, not one per user/construct, since before
+        # this fix -- caught 2026-09-02 while adding the composite rows
+        # below, which already normalized instrument_key correctly).
+        _cm_survey_norm = cm_survey.copy()
+        _cm_survey_norm["instrument_key"] = selected_survey_base
+        cm_display = aggregate_construct_means(_cm_survey_norm)
         module_col = None
     else:
         cm_display = cm_survey.copy()
@@ -1404,11 +1500,39 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
                     )
                     st.line_chart(_comp_pivot)
 
-                st.caption(
-                    "ℹ️ " + _interpretation_caption("situational_cognitive_engagement_composite")
-                )
-                st.caption("ℹ️ " + _interpretation_caption("attention_culture_composite"))
-                st.caption("ℹ️ " + _interpretation_caption("message_appraisal_composite"))
+                # Per-composite interpretation guide -- same rich format
+                # (definition, analytic focus, banded mean, citation) as
+                # the raw-construct "How to interpret these scores" guide
+                # below, so composites get equal documentation support.
+                with st.expander("📖 How to interpret these composites", expanded=False):
+                    st.markdown(
+                        "**Scale: 1 = Strongly disagree → 4 = Strongly agree**\n\n"
+                        "Scores above **3.0** are generally positive. "
+                        "Scores below **2.5** may warrant attention."
+                    )
+                    st.divider()
+                    _comp_means = _comp_all.groupby("composite")["mean_score"].mean()
+                    for _label, _info in _SCCCES_COMPOSITE_OPTIONS.items():
+                        _mk = _info["map_key"]
+                        _cdef = _CONSTRUCT_DEFINITIONS.get(_mk)
+                        if not _cdef:
+                            continue
+                        st.markdown(f"**{_cdef['label']}**")
+                        st.caption(_cdef["definition"])
+                        if _mk in _comp_means.index:
+                            _mv = _comp_means[_mk]
+                            if _mv >= 3.0:
+                                _interp = f"🟢 High ({_mv:.2f}) — {_cdef['scale_high']}"
+                            elif _mv >= 2.0:
+                                _interp = f"🟡 Moderate ({_mv:.2f}) — {_cdef['scale_mid']}"
+                            else:
+                                _interp = f"🔴 Low ({_mv:.2f}) — {_cdef['scale_low']}"
+                            st.markdown(f"**Group mean: {_interp}**")
+                        st.markdown("*Analytic focus:* " + ", ".join(_cdef["analytic_focus"]))
+                        if _cdef.get("theory_note"):
+                            st.info(_cdef["theory_note"])
+                        st.caption("📚 " + _cdef["citation"])
+                        st.divider()
             st.divider()
 
         # ── Cross-module trajectory chart (Per module mode only) ──────────────
@@ -8750,18 +8874,53 @@ def _report_basic_stats(
                         )]
                         if cm_s.empty:
                             continue
-                        agg = aggregate_construct_means(cm_s)
+                        # Normalize instrument_key before aggregating --
+                        # see the matching fix + explanation in
+                        # _render_survey_construct_means() (live tab).
+                        _cm_s_norm = cm_s.copy()
+                        _cm_s_norm["instrument_key"] = base_key
+                        agg = aggregate_construct_means(_cm_s_norm)
                         summ_cm = summarize_scores(agg)
+
+                        # Composite rows (SCCCES only) -- mirror the live
+                        # Basic Statistics composite trajectory chart and
+                        # Inferential Statistics' composite options, so
+                        # the PDF report never diverges from either.
+                        _composite_notes_bs = []
+                        if base_key == "b4ai_sccces_survey":
+                            _comp_summ_rows = []
+                            for _label, _info in _SCCCES_COMPOSITE_OPTIONS.items():
+                                _comp_pm = compute_composite_scores(
+                                    canonical_df, base_key,
+                                    {_info["map_key"]: DEFAULT_SCCCES_COMPOSITE_MAP[_info["map_key"]]},
+                                )
+                                if _comp_pm.empty:
+                                    continue
+                                _comp_pm = _comp_pm.rename(columns={
+                                    "composite": "construct", "n_items_total": "n_items",
+                                })
+                                _comp_pm["instrument_key"] = base_key
+                                _comp_agg = aggregate_construct_means(_comp_pm)
+                                _comp_summ = summarize_scores(_comp_agg)
+                                if not _comp_summ.empty:
+                                    _comp_summ_rows.append(_comp_summ)
+                                    _composite_notes_bs.append(_info["note_key"])
+                            if _comp_summ_rows:
+                                summ_cm = pd.concat([summ_cm, *_comp_summ_rows], ignore_index=True)
+
                         if not summ_cm.empty:
                             disp = summ_cm[["construct","n_users","mean_score","median_score"]].copy()
                             disp.columns = ["Construct","N","Mean","Median"]
                             for c in ["Mean","Median"]:
                                 disp[c] = disp[c].apply(lambda x: f"{x:.2f}" if x is not None else "—")
+                            _caption = f"Table: Construct means for {label}. Scale: 1=Strongly disagree, 4=Strongly agree."
+                            for _note_key in _composite_notes_bs:
+                                _caption += " " + _interpretation_caption(_note_key)
                             sections.append({
                                 "heading": f"3. Survey — {label}",
-                                "body":    "Aggregate means across all modules (Likert 1–4 scale).",
+                                "body":    "Aggregate means across all modules (Likert 1–4 scale). Composite rows (bottom) combine several sub-constructs -- see caption for citations.",
                                 "table":   disp,
-                                "caption": f"Table: Construct means for {label}. Scale: 1=Strongly disagree, 4=Strongly agree.",
+                                "caption": _caption,
                             })
 
             # Data quality & normality checks

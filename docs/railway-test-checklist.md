@@ -532,17 +532,17 @@ Note exactly which step and what you saw — don't try to fix it yourself, this 
 5. **Regression check:** select the raw **Attention** construct and the raw **Culture** construct individually — confirm both still work exactly as before, no caption, no errors.
 6. ✅ Pass if: 13 options total, both new composites compute cleanly with the correct citation captions, and the raw Attention/Culture options are untouched.
 
-### Q.3 — Basic Statistics → Survey Construct Means (5 min)
+### Q.3 — Basic Statistics → Survey Construct Means (7 min)
 
 1. **Basic Statistics → Survey Construct Means → Select Survey: Cognitive Engagement → View: Per module.**
 2. Confirm a **new chart** appears, titled **"🔗 Composite trajectory: Message Appraisal vs. Engagement"**, above the existing 10-line "Construct means across modules" chart.
 3. Confirm it shows **3 lines** — Situational Cognitive Engagement, Message_appraisal, Attention_Culture — each trending across all 7 modules.
-4. Confirm three citation captions appear below the chart (Rotgans & Schmidt 2011, Heddy et al. 2018 ×2).
-5. Switch **Select Survey** to **SIMS (Motivation)** — confirm this new composite chart does **not** appear (SCCCES-only, by design).
-6. Switch back to Cognitive Engagement and confirm the original 10-construct detail chart below still shows all 10 individual sub-constructs unchanged, including Attention and Culture as their own separate lines.
-7. ✅ Pass if: the new 3-line composite chart appears only for Cognitive Engagement in Per-module view, with correct citations, and the existing 10-line detail chart is unaffected.
+4. Below the chart, open the new **"📖 How to interpret these composites"** expander. Confirm all 3 composites are listed, each with: a plain-language definition, a 🟢/🟡/🔴-banded group mean, an "Analytic focus" line, and a "📚" citation line (Rotgans & Schmidt 2011 for Situational Cognitive Engagement; Heddy et al. 2018 for the other two). Confirm **Message_appraisal**'s entry additionally shows a blue info box quoting the CRKM (Dole & Sinatra, 1998) explaining why it's reported separately from engagement, not averaged into it.
+5. Switch **Select Survey** to **SIMS (Motivation)** — confirm this new composite chart and expander do **not** appear (SCCCES-only, by design).
+6. Switch back to Cognitive Engagement and confirm the original 10-construct detail chart below still shows all 10 individual sub-constructs unchanged, including Attention and Culture as their own separate lines, and its own **separate** "📖 How to interpret these scores" expander still works as before.
+7. ✅ Pass if: the new 3-line composite chart + interpretation expander appear only for Cognitive Engagement in Per-module view, with correct citations and the CRKM note, and the existing 10-line detail chart/expander are unaffected.
 
-### Q.4 — Report Generation PDF parity (4 min)
+### Q.4 — Report Generation: Inferential Statistics PDF parity (4 min)
 
 1. **Report Generation → Inferential Statistics Report**, include "Across Modules", generate the PDF.
 2. Open it, find the **"Across Modules — Cognitive Engagement"** table.
@@ -550,7 +550,25 @@ Note exactly which step and what you saw — don't try to fix it yourself, this 
 4. Confirm the caption includes all three citations.
 5. ✅ Pass if: all 3 composite rows are present with correct numbers and citations, and nothing else in the report changed.
 
-### If Q.1–Q.4 all pass
+### Q.5 — Report Generation: Basic Statistics PDF, composite rows + a real bug fix (5 min)
+
+**Context:** while wiring citations into this report, found that `aggregate_construct_means()` was being called without normalizing the module-prefixed `instrument_key` first, so the "Survey construct means" section's table (and the live "Aggregate (all modules)" view — see Q.6) was silently returning one row per *user × module × construct* instead of one row per *user × construct* as its own "Aggregate means across all modules" label claims. Fixed at both call sites; this step re-verifies the PDF is now correct.
+
+1. **Report Generation → Basic Statistics Report**, include "Survey construct means", generate the PDF.
+2. Open it, find the **"3. Survey — Cognitive Engagement"** table.
+3. Confirm it has **exactly 13 rows**: the 10 individual sub-constructs (one row each — not 7 near-duplicate rows per construct) plus **3** composite rows at the bottom (*Situational Cognitive Engagement*, *Message_appraisal*, *Attention_Culture*).
+4. Confirm the caption includes the Rotgans & Schmidt / Heddy et al. citations.
+5. Check the **"3. Survey — SIMS (Motivation)"** table too — confirm it has exactly **4** rows (one per SIMS construct, still no composites), also not module-duplicated.
+6. ✅ Pass if: both survey tables show one row per construct (not per module), and the 3 composite rows appear correctly for Cognitive Engagement only.
+
+### Q.6 — Regression: live "Aggregate (all modules)" view, same bug fix (3 min)
+
+1. **Basic Statistics → Survey Construct Means → Select Survey: Cognitive Engagement → View: Aggregate (all modules).**
+2. Open **"📖 How to interpret these scores"** — confirm each construct shows **one** group mean (not visibly duplicated/conflicting numbers), and the "Summary Statistics per Construct" table above shows one N/Mean per construct across the whole dataset.
+3. Repeat for **SIMS (Motivation)**.
+4. ✅ Pass if: aggregate view genuinely reflects one pooled number per construct across all modules — this was silently broken before today's fix.
+
+### If Q.1–Q.6 all pass
 
 Let Claude know — next step is your explicit sign-off before this merges from `test` to `main`/production, following the same sequence as every prior batch.
 
