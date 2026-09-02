@@ -616,6 +616,42 @@ def run_mixed_model(
     n_groups = df[id_col].nunique()
     result["low_n_warning"] = n_groups < LOW_N_THRESHOLD
 
+    # Patsy/formulaic formula strings require valid identifiers, but
+    # predictor names come from user-editable composite labels that can
+    # contain spaces (e.g. "Situational Cognitive Engagement" -> person_
+    # mean_center() creates a df column literally named "Situational
+    # Cognitive Engagement_within") -- interpolating that into an
+    # f-string formula raises a bare SyntaxError from the formula
+    # parser ("invalid syntax (<unknown>, line 1)"), caught only by the
+    # generic try/except in _fit_block below, which reports it as a
+    # failed model rather than what it actually is. Fixed by working
+    # with sanitized column aliases for every formula/design-matrix
+    # reference in this function, and mapping term names back to their
+    # original readable form before anything is returned -- so the UI/
+    # report layer sees no difference, only the internal fit succeeds.
+    def _safe_ident(name: str) -> str:
+        s = re.sub(r"\W", "_", str(name))
+        return s if s and not s[0].isdigit() else f"v_{s}"
+
+    _rename_map: Dict[str, str] = {}
+    for c in set(within_cols) | set(between_cols):
+        for orig_col in (f"{c}_within", f"{c}_between"):
+            if orig_col in df.columns:
+                safe_col = _safe_ident(orig_col)
+                if safe_col != orig_col:
+                    _rename_map[orig_col] = safe_col
+    _reverse_map = {v: k for k, v in _rename_map.items()}
+    if _rename_map:
+        df = df.rename(columns=_rename_map)
+
+    def _safe_within_col(c: str) -> str:
+        orig = f"{c}_within"
+        return _rename_map.get(orig, orig)
+
+    def _safe_between_col(c: str) -> str:
+        orig = f"{c}_between"
+        return _rename_map.get(orig, orig)
+
     def _fit_block(name, formula, reml=False, re_formula=None, display_formula=None):
         try:
             kwargs = {"re_formula": re_formula} if re_formula else {}
@@ -629,7 +665,7 @@ def run_mixed_model(
                     "error": f"{name} did not converge.",
                 }
             params = {
-                term: {
+                _reverse_map.get(term, term): {
                     "estimate": round(float(fit.params[term]), 4),
                     "se": round(float(fit.bse[term]), 4),
                     "z": round(float(fit.tvalues[term]), 4) if term in fit.tvalues else None,
@@ -651,8 +687,13 @@ def run_mixed_model(
                 "params": {}, "error": str(e),
             }
 
-    within_terms = " + ".join(f"{c}_within" for c in within_cols) if within_cols else None
-    between_terms = " + ".join(f"{c}_between" for c in between_cols) if between_cols else None
+    within_terms = " + ".join(_safe_within_col(c) for c in within_cols) if within_cols else None
+    between_terms = " + ".join(_safe_between_col(c) for c in between_cols) if between_cols else None
+
+    def _prettify(formula: str) -> str:
+        for safe, orig in _reverse_map.items():
+            formula = formula.replace(safe, orig)
+        return formula
 
     formulas = {
         "M0_null":      f"{outcome_col} ~ 1",
@@ -674,12 +715,12 @@ def run_mixed_model(
     block_specs: Dict[str, tuple] = {}
 
     for name, formula in formulas.items():
-        result["blocks"][name] = _fit_block(name, formula, reml=False)
+        result["blocks"][name] = _fit_block(name, formula, reml=False, display_formula=_prettify(formula))
         block_specs[name] = (formula, None)
 
     if try_random_slope and "M3_full" in formulas:
         rs_formula = formulas["M3_full"]
-        rs_display = rs_formula + " + (module_num | user_id)"
+        rs_display = _prettify(rs_formula) + " + (module_num | user_id)"
         result["blocks"]["M3b_random_slope"] = _fit_block(
             "M3b_random_slope", rs_formula, reml=False,
             re_formula="~module_num", display_formula=rs_display,
@@ -734,12 +775,12 @@ def run_mixed_model(
     # whichever full-predictor block converged), intercept excluded.
     try:
         from statsmodels.stats.outliers_influence import variance_inflation_factor
-        vif_cols = [f"{c}_within" for c in within_cols] + [f"{c}_between" for c in between_cols] + ["module_num"]
+        vif_cols = [_safe_within_col(c) for c in within_cols] + [_safe_between_col(c) for c in between_cols] + ["module_num"]
         vif_cols = [c for c in vif_cols if c in df.columns]
         if len(vif_cols) >= 2:
             X = df[vif_cols].assign(const=1.0)
             result["vif"] = {
-                c: round(float(variance_inflation_factor(X.values, i)), 3)
+                _reverse_map.get(c, c): round(float(variance_inflation_factor(X.values, i)), 3)
                 for i, c in enumerate(X.columns) if c != "const"
             }
     except Exception:
