@@ -523,6 +523,17 @@ Note exactly which step and what you saw — don't try to fix it yourself, this 
 4. Confirm **Attention Culture**'s multiselect defaults to *Attention, Culture*.
 5. ✅ Pass if: all 4 composites appear with the correct default sub-constructs, and the Mixed-Effects Model / Repeated-Measures Correlations sections below still run cleanly using them.
 
+### Q.1b — Mixed-Effects Model with all 4 composites (real bug found + fixed 2026-09-02, 3 min)
+
+**Context:** your Q.1 pass caught a real bug here — with all 4 composites selected as predictors, `M2_within`, `M3_full`, `M3b_random_slope`, and `M0_null_reml` all showed blank AIC/BIC and `"invalid syntax (<unknown>, line 1)"`. Root cause: the renamed "Situational Cognitive Engagement" composite has a space in it, and the model-fitting code was building a formula string directly from predictor names — a space isn't valid there. Fixed (formula construction now uses sanitized internal aliases, remapped back to readable names for display) and re-deployed.
+
+1. **Correlations → Mixed-Effects Model.** Select all 4 predictors: Situational Cognitive Engagement, Message_appraisal, Attention_Culture, Personal_relevance.
+2. Click **▶ Run Mixed-Effects Model**.
+3. Confirm the Block Comparison table now shows real AIC/BIC/N for **every** row — `M0_null`, `M1_module`, `M2_within`, `M3_full`, `M3b_random_slope` — no `"invalid syntax"` text anywhere.
+4. Confirm the parameter table for whichever block you inspect shows readable term names — e.g. **"Situational Cognitive Engagement_within"**, not a mangled/underscored version.
+5. Note: the REML-refit row for whichever block is "best" (e.g. `M0_null_reml`) may show **"—"** for AIC/BIC — that's expected (REML likelihoods aren't meaningfully AIC/BIC-comparable in general), not a bug.
+6. ✅ Pass if: all 5 main blocks compute with real numbers, no "invalid syntax" anywhere, and term/VIF names are readable.
+
 ### Q.2 — Inferential Statistics → Across Modules (5 min)
 
 1. **Inferential Statistics → Across Modules → Data type: Survey construct → Survey: Cognitive Engagement.**
@@ -563,10 +574,15 @@ Note exactly which step and what you saw — don't try to fix it yourself, this 
 
 ### Q.6 — Regression: live "Aggregate (all modules)" view, same bug fix (3 min)
 
+**Note on which table this is about:** the dashboard has *two different* per-construct tables in this section, and it's easy to mix them up:
+- **"Summary Statistics per Construct"** (Module | Construct | N | Mean) — this one is *intentionally* always broken out by module (Module 1, Module 2, …, Module 7, each with its own N and mean, plus a "Module X — Summary" row), regardless of the View toggle. That's by design, not something today's fix touches, and not what this step checks.
+- **"📖 How to interpret these scores"** (the expander below it) — *this* is the one the fix applies to. Each construct's **"Group mean: 🟢/🟡/🔴 High/Moderate/Low (X.XX)"** line is computed from whichever View mode is selected. In **Aggregate (all modules)**, before the fix this was silently built from a still-per-module-duplicated table, so the number shown, while not obviously wrong-looking, was mathematically a naive/incorrect pooling rather than a properly weighted one.
+
 1. **Basic Statistics → Survey Construct Means → Select Survey: Cognitive Engagement → View: Aggregate (all modules).**
-2. Open **"📖 How to interpret these scores"** — confirm each construct shows **one** group mean (not visibly duplicated/conflicting numbers), and the "Summary Statistics per Construct" table above shows one N/Mean per construct across the whole dataset.
-3. Repeat for **SIMS (Motivation)**.
-4. ✅ Pass if: aggregate view genuinely reflects one pooled number per construct across all modules — this was silently broken before today's fix.
+2. Open **"📖 How to interpret these scores"**, find **Attention**'s line.
+3. **Worked check:** your own Q.3 pass already gave the 7 per-module Attention means: 2.79, 2.62, 2.70, 2.68, 2.74, 2.69, 3.00 (N=100, 100, 96, 92, 91, 89, 8). A naive straight average of those 7 numbers is **2.75** — but Module 7 only has 8 students, so it should count for much less than 1/7th of the pooled number, not count equally with modules that have ~90-100 students. The correctly weighted aggregate (computed directly from the same disposable copy of your data) is **2.69** — noticeably lower, because Module 7's high mean (3.00) is now properly down-weighted by its tiny N instead of pulling the average up as much as an equal-weighted mean would. ✅ Pass if Attention's live "Group mean" here reads **~2.69**, not ~2.75 (exact value may differ slightly from live production data vs. this test copy, but it should be clearly closer to 2.69 than 2.75).
+4. Repeat for **SIMS (Motivation)**.
+5. ✅ Pass if: the "How to interpret these scores" group means reflect a properly N-weighted pool across all modules, not a naive average — this was silently wrong before today's fix. The "Summary Statistics per Construct" table above staying per-module is correct and expected, not a failure.
 
 ### If Q.1–Q.6 all pass
 
