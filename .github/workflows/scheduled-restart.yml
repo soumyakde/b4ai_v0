@@ -1,7 +1,7 @@
-name: Scheduled Railway Restart
+#name: Scheduled Railway Restart
 
-on:
-  schedule:
+#on:
+  #schedule:
     # UTC times below correspond to 2:00 AM / 3:00 PM / 8:00 PM US Eastern
     # (EDT, UTC-4).
     #
@@ -21,18 +21,18 @@ on:
     #
     # Do not move the pre-pilot slot later than ~08:00-09:00 UTC without
     # re-deriving the margin against the then-current observed delay range.
-    - cron: '0 0,6,19 * * *'
-  workflow_dispatch: {}
+ #   - cron: '0 0,6,19 * * *'
+  #workflow_dispatch: {}
 
-jobs:
-  restart:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli
+#jobs:
+  #restart:
+    #runs-on: ubuntu-latest
+    #timeout-minutes: 5
+    #steps:
+      #- name: Install Railway CLI
+      #  run: npm install -g @railway/cli
 
-      - name: Redeploy Railway service
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: railway redeploy --service a672cdd0-2808-4c44-bbc7-f59abf49662c --yes
+      #- name: Redeploy Railway service
+      #  env:
+      #    RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      #  run: railway redeploy --service a672cdd0-2808-4c44-bbc7-f59abf49662c --yes
