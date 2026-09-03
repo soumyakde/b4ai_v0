@@ -39,11 +39,34 @@ Heddy, B. C., Taasoobshirazi, G., Chancey, J. B., & Danielson, R. W.
 Guay, F., Vallerand, R. J., & Blanchard, C. (2000). On the assessment of
     situational intrinsic and extrinsic motivation: The Situational
     Motivation Scale (SIMS). Motivation and Emotion, 24(3), 175-213.
+Grolnick, W. S., & Ryan, R. M. (1989). Parent styles associated with
+    children's self-regulation and competence in school. Journal of
+    Educational Psychology, 81(2), 143-154.
 Ryan, R. M., & Connell, J. P. (1989). Perceived locus of causality and
     internalization: Examining reasons for acting in two domains.
     Journal of Personality and Social Psychology, 57(5), 749-761.
-    (Source of the Relative Autonomy Index formula -- NOT Guay et al.
-    2000, which is the SIMS source paper but never presents RAI.)
+Vallerand, R. J. (2007). A hierarchical model of intrinsic and extrinsic
+    motivation for sport and physical activity. In M. S. Hagger & N. L.
+    D. Chatzisarantis (Eds.), Intrinsic Motivation and Self-Determination
+    in Exercise and Sport (pp. 255-280). Human Kinetics.
+Unlu, A. (2016). Adjusting potentially confounded scoring protocols for
+    motivation aggregation in organismic integration theory: An
+    exemplification with the relative autonomy or self-determination
+    index. Frontiers in Psychology, 7:272.
+    (These four sources together are the basis for the RAI formula below
+    -- Grolnick & Ryan and Ryan & Connell for the underlying continuum
+    model, Vallerand for the hierarchical-model formulation, Unlu for
+    the explicit canonical formula: RAI = (2*Intrinsic + Identified) -
+    (2*External + Introjected). Verified 2026-09-03 by reading all of
+    Guay et al. 2000, Ryan & Connell 1989, and Unlu 2016 in full: NEITHER
+    Guay et al. NOR Ryan & Connell presents the Amotivation-substituted
+    variant this module actually computes -- Ryan & Connell's own model
+    has no Amotivation category at all. SIMS has no Introjected
+    Regulation subscale (Guay et al. 2000, p. 210, their own stated
+    limitation), so Amotivation substitutes as the opposite pole from
+    Intrinsic Motivation below, following common adaptation practice --
+    this substitution itself is not literally stated in any of the four
+    sources above, and is described as such, not over-attributed.)
 Eisinga, R., Te Grotenhuis, M., & Pelzer, B. (2013). The reliability of
     a two-item scale: Pearson, Cronbach, or Spearman-Brown? International
     Journal of Public Health, 58(4), 637-642.
@@ -559,9 +582,18 @@ def compute_rai(canonical_df: pd.DataFrame, sims_instrument_key: str = "b4ai_sim
     """
     Relative Autonomy Index from the SIMS sub-constructs:
         RAI = 2*Intrinsic + 1*Identified - 1*External - 2*Amotivation
-    Ryan & Connell (1989) -- NOT Guay et al. (2000), which is the SIMS
-    source paper but never presents the RAI formula itself (verified by
-    reading it in full, including references and appendix).
+    Adapts the standard SDT scoring protocol -- RAI = (2*Intrinsic +
+    Identified) - (2*External + Introjected); Grolnick & Ryan (1989),
+    Ryan & Connell (1989), Vallerand (2007), canonical formula given
+    explicitly in Unlu (2016) -- to SIMS's 4-subscale structure, which
+    has no Introjected Regulation subscale (Guay et al., 2000, p. 210,
+    their own stated limitation): Amotivation substitutes as the
+    opposite pole from Intrinsic Motivation. Verified by reading Guay et
+    al. (2000), Ryan & Connell (1989), and Unlu (2016) each in full:
+    none of them presents this exact Amotivation-substituted variant --
+    it is described here as an adaptation, not over-attributed to a
+    single source that doesn't actually contain it (see module
+    docstring References for the full correction history).
 
     NaN (not a partial score) when any of the 4 SIMS sub-constructs is
     missing for that user x module.

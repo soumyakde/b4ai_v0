@@ -2317,9 +2317,14 @@ _STAT_HELP = {
         "A single score placing a student's motivation on the "
         "self-determination continuum, from autonomous (intrinsic) to "
         "controlled (external): RAI = 2×Intrinsic + 1×Identified − "
-        "1×External − 2×Amotivation. Ryan, R. M., & Connell, J. P. "
-        "(1989). Perceived locus of causality and internalization. "
-        "*Journal of Personality and Social Psychology, 57*(5), 749-761. "
+        "1×External − 2×Amotivation. This adapts the standard SDT scoring "
+        "protocol (RAI = 2×Intrinsic + Identified − 2×External − "
+        "Introjected; Grolnick & Ryan, 1989; Ryan & Connell, 1989; "
+        "Vallerand, 2007; see Ünlü, 2016, *Frontiers in Psychology, 7*:272 "
+        "for a review) to SIMS's 4-subscale structure, which has no "
+        "Introjected Regulation subscale (Guay et al., 2000, p. 210) — "
+        "Amotivation substitutes as the opposite pole from Intrinsic "
+        "Motivation, following common adaptation practice. "
         "Amotivation is also kept available separately — it reflects "
         "active disengagement, not just \"low autonomous motivation.\""
     ),
@@ -3604,14 +3609,17 @@ def _render_correlations_tab(
         st.markdown("**SIMS Relative Autonomy Index (RAI)**")
         st.caption(
             "RAI = 2×Intrinsic + 1×Identified − 1×External − 2×Amotivation. "
-            "Ryan, R. M., & Connell, J. P. (1989). Perceived locus of "
-            "causality and internalization: Examining reasons for acting "
-            "in two domains. *Journal of Personality and Social "
-            "Psychology, 57*(5), 749-761. (Not Guay, Vallerand & "
-            "Blanchard 2000 -- that is the SIMS source paper but does not "
-            "itself present the RAI formula.) Amotivation is also kept "
-            "available on its own below -- it is a distinct disengagement "
-            "signal, not just \"low RAI.\""
+            "This adapts the standard SDT scoring protocol -- "
+            "RAI = 2×Intrinsic + Identified − 2×External − Introjected "
+            "(Grolnick & Ryan, 1989; Ryan & Connell, 1989; Vallerand, 2007; "
+            "see Ünlü, 2016, *Frontiers in Psychology, 7*:272 for a review) "
+            "-- to SIMS's 4-subscale structure, which has no Introjected "
+            "Regulation subscale (Guay, Vallerand & Blanchard, 2000, p. "
+            "210, their own stated limitation): Amotivation substitutes as "
+            "the opposite pole from Intrinsic Motivation, following common "
+            "adaptation practice. Amotivation is also kept available on "
+            "its own below -- it is a distinct disengagement signal, not "
+            "just \"low RAI.\""
         )
         rai_preview = compute_rai(canonical_df)
         if not rai_preview.empty:
@@ -8147,8 +8155,12 @@ Regulation, and Amotivation. The original instrument has 16 items on a
 Q4_1–Q4_4 (External Regulation) and Q5_1–Q5_3 (Amotivation) are
 reverse-scored so that all four constructs read in the same direction:
 **higher mean = better self-determined motivation**. The Relative Autonomy
-Index (RAI), computed from these four constructs, is *not* from this SIMS
-source paper — see **Ryan & Connell (1989)** below.
+Index (RAI), computed from these four constructs, adapts the standard SDT
+scoring protocol -- see **Grolnick & Ryan (1989)**, **Ryan & Connell
+(1989)**, **Vallerand (2007)**, and **Ünlü (2016)** below -- to this
+instrument's 4-subscale structure, which has no Introjected Regulation
+subscale (a limitation the SIMS source paper itself states, p. 210):
+Amotivation substitutes as the opposite pole from Intrinsic Motivation.
 
 ---
 
@@ -8236,11 +8248,53 @@ published instrument for full item listings.
             "section": "Instruments",
             "tag": "RAI", "color": "#E6F3FB", "border": "#0077BB",
             "citation": (
+                "Grolnick, W. S., & Ryan, R. M. (1989). Parent styles associated "
+                "with children's self-regulation and competence in school. "
+                "*Journal of Educational Psychology, 81*(2), 143–154. "
+                "https://doi.org/10.1037/0022-0663.81.2.143 · "
                 "Ryan, R. M., & Connell, J. P. (1989). Perceived locus of causality "
                 "and internalization: Examining reasons for acting in two domains. "
-                "*Journal of Personality and Social Psychology, 57*(5), 749–761."
+                "*Journal of Personality and Social Psychology, 57*(5), 749–761. "
+                "https://doi.org/10.1037/0022-3514.57.5.749 · "
+                "Vallerand, R. J. (2007). A hierarchical model of intrinsic and "
+                "extrinsic motivation for sport and physical activity. In M. S. "
+                "Hagger & N. L. D. Chatzisarantis (Eds.), *Intrinsic Motivation "
+                "and Self-Determination in Exercise and Sport* (pp. 255–280). "
+                "Human Kinetics."
             ),
-            "note": "Source of the Relative Autonomy Index (RAI) formula used in the Correlations tab -- not the SIMS paper above, which does not itself present this formula.",
+            "note": (
+                "Sources of the standard SDT scoring protocol this app's RAI "
+                "adapts (RAI = 2×Intrinsic + Identified − 2×External − "
+                "Introjected). SIMS has no Introjected Regulation subscale "
+                "(Guay et al., 2000, p. 210, their own stated limitation), so "
+                "Amotivation substitutes as the opposite pole from Intrinsic "
+                "Motivation -- see Ünlü (2016) below, verified directly, for "
+                "the canonical formula and this adaptation's rationale. Neither "
+                "Ryan & Connell (1989) nor the SIMS source paper above presents "
+                "the Amotivation-substituted variant this app actually computes."
+            ),
+        },
+        {
+            "section": "Instruments",
+            "tag": "RAI", "color": "#E6F3FB", "border": "#0077BB",
+            "citation": (
+                "Ünlü, A. (2016). Adjusting potentially confounded scoring "
+                "protocols for motivation aggregation in organismic integration "
+                "theory: An exemplification with the relative autonomy or "
+                "self-determination index. *Frontiers in Psychology, 7*:272. "
+                "https://doi.org/10.3389/fpsyg.2016.00272"
+            ),
+            "note": (
+                "Read in full and directly verified (2026-09-03) -- gives the "
+                "canonical RAI/SDI formula explicitly (RAI = (2×Intrinsic + "
+                "Identified) − (2×External + Introjected)) and its own source "
+                "list (Grolnick & Ryan, 1989; Ryan & Connell, 1989; Levesque et "
+                "al., 2004; Vallerand, 2007; Kusurkar et al., 2013). Resolved a "
+                "citation error found in this app's own earlier documentation, "
+                "which had attributed this formula directly to Ryan & Connell "
+                "(1989) -- a claim that doesn't survive a full read of that "
+                "paper (their model has no Amotivation category at all)."
+            ),
         },
         {
             "section": "Instruments",
