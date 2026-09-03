@@ -48,6 +48,7 @@ from core.analytics.inferential.inferential_tests import (
 )
 from core.analytics.correlational.correlation_engine import (
     compute_construct_reliability,
+    compute_composite_reliability,
     compute_inter_construct_correlation_matrix,
     compute_composite_scores,
     compute_rai,
@@ -3455,11 +3456,71 @@ def _render_correlations_tab(
         )
         survey_key = _CORR_SURVEY_KEYS[survey_label]
 
+        # Composite-level (pooled) reliability -- SCCCES only, since SIMS
+        # has no composite map (Guay et al., 2000's own EFA found 4
+        # genuinely separate SIMS factors with no dominant single factor,
+        # and their Discussion explicitly recommends assessing them
+        # independently -- a composite would misrepresent that instrument).
+        # Shown FIRST as the primary result: each composite here is drawn
+        # from a source instrument its own authors validated as a single
+        # latent construct (Rotgans & Schmidt, 2011's CFA-validated SCES;
+        # Heddy et al., 2018's EFA-validated CCCES factors), not as
+        # several independently-reliable subscales -- so reliability is
+        # reported at that same level, per Zakariya (2022)'s guidance to
+        # verify unidimensionality via prior EFA/CFA before relying on
+        # alpha, rather than assumed blind.
+        if survey_key == "b4ai_sccces_survey":
+            comp_rel = compute_composite_reliability(
+                canonical_df, survey_key, DEFAULT_SCCCES_COMPOSITE_MAP,
+            )
+            if not comp_rel.empty:
+                st.markdown("**Composite-level reliability (primary)**")
+                _comp_display = comp_rel[[
+                    "composite", "n_subconstructs", "n_items", "n_subjects",
+                    "method", "value", "badge",
+                ]].rename(columns={
+                    "composite": "Composite", "n_subconstructs": "Sub-constructs pooled",
+                    "n_items": "N items", "n_subjects": "N students",
+                    "method": "Method", "value": "Reliability", "badge": "Verdict",
+                })
+                st.dataframe(_comp_display, hide_index=True, width="stretch")
+                st.caption(
+                    "Cronbach's alpha (Cronbach, 1951) computed on all items "
+                    "pooled across each composite's named sub-constructs, "
+                    "not per sub-construct -- matching how each composite's "
+                    "own source instrument was validated by its authors as "
+                    "a single construct. This is a classical-test-theory "
+                    "statistic, not a literal replication of a CFA-based "
+                    "figure like Rotgans & Schmidt's coefficient H (.93/.78)."
+                )
+                with st.expander("⚠️ A decent alpha alone doesn't prove unidimensionality", expanded=False):
+                    st.markdown(
+                        "Cortina (1993, *Journal of Applied Psychology, 78*(1), "
+                        "98-104) showed alpha can look acceptable even when "
+                        "items are meaningfully multidimensional, given enough "
+                        "items. The inter-sub-construct correlation matrix "
+                        "below is the corroborating check this composite-level "
+                        "figure needs, not optional supporting detail -- e.g. "
+                        "Attention and Culture's own sub-constructs correlate "
+                        "at only r ≈ .43 with each other in this dataset, "
+                        "notably weaker than Message_appraisal's four "
+                        "sub-constructs (r = .84-.93), consistent with Heddy "
+                        "et al.'s original EFA where Attention+Culture was "
+                        "their smaller, second factor -- not a new problem "
+                        "introduced by pooling, but worth reading the matrix "
+                        "below before treating all composites as equally strong."
+                    )
+                st.divider()
+
+        st.markdown(
+            "**Per-sub-construct reliability**"
+            + (" (supplementary detail — see composite-level table above for the primary result)"
+               if survey_key == "b4ai_sccces_survey" else "")
+        )
         rel = compute_construct_reliability(canonical_df, survey_key)
         if rel.empty:
             st.info("No data available for this survey with the current filters.")
         else:
-            st.markdown("**Per-sub-construct reliability**")
             _rel_display = rel[[
                 "construct", "n_items", "n_subjects", "method", "value", "badge",
             ]].rename(columns={
@@ -9718,6 +9779,45 @@ def _report_correlations(canonical_df: pd.DataFrame) -> None:
 
             if inc_rel:
                 for survey_label, survey_key in _CORR_SURVEY_KEYS.items():
+                    # Composite-level (pooled) reliability first, SCCCES
+                    # only -- primary result, mirrors the live tab and the
+                    # paper's own Results structure exactly.
+                    if survey_key == "b4ai_sccces_survey":
+                        try:
+                            comp_rel = compute_composite_reliability(
+                                canonical_df, survey_key, DEFAULT_SCCCES_COMPOSITE_MAP,
+                            )
+                            if not comp_rel.empty:
+                                comp_display = comp_rel[[
+                                    "composite", "n_subconstructs", "n_items",
+                                    "n_subjects", "method", "value", "badge",
+                                ]].rename(columns={
+                                    "composite": "Composite",
+                                    "n_subconstructs": "Sub-constructs pooled",
+                                    "n_items": "N items", "n_subjects": "N students",
+                                    "method": "Method", "value": "Reliability",
+                                    "badge": "Verdict",
+                                })
+                                sections.append({
+                                    "heading": f"Composite Reliability (primary) — {survey_label}",
+                                    "body": (
+                                        "Cronbach's alpha (Cronbach, 1951) pooled across "
+                                        "each composite's items, matching how each "
+                                        "composite's own source instrument was validated "
+                                        "by its authors as a single construct (Rotgans & "
+                                        "Schmidt, 2011; Heddy et al., 2018) -- a "
+                                        "classical-test-theory statistic, not a literal "
+                                        "replication of a CFA-based figure like coefficient "
+                                        "H. See Cortina (1993, Journal of Applied "
+                                        "Psychology, 78(1), 98-104) on why the "
+                                        "inter-sub-construct correlation matrix below is a "
+                                        "necessary corroborating check, not optional detail."
+                                    ),
+                                    "table": comp_display,
+                                })
+                        except Exception as e:
+                            sections.append({"heading": f"Composite Reliability — {survey_label}", "body": f"Could not compute: {e}"})
+
                     try:
                         rel = compute_construct_reliability(canonical_df, survey_key)
                         if rel.empty:
@@ -9730,7 +9830,11 @@ def _report_correlations(canonical_df: pd.DataFrame) -> None:
                             "value": "Reliability", "badge": "Verdict",
                         })
                         sections.append({
-                            "heading": f"Reliability — {survey_label}",
+                            "heading": (
+                                f"Sub-construct Reliability (supplementary) — {survey_label}"
+                                if survey_key == "b4ai_sccces_survey"
+                                else f"Reliability — {survey_label}"
+                            ),
                             "body": (
                                 "3+ items: Cronbach's alpha. Exactly 2 items: "
                                 "Spearman-Brown step-up (Eisinga, Te Grotenhuis "
@@ -10103,11 +10207,29 @@ def _report_full_programme(
                     sccces_key = _CORR_SURVEY_KEYS["Cognitive Engagement (SCCCES)"]
                     sims_key = _CORR_SURVEY_KEYS["Interest & Motivation (SIMS)"]
                     for survey_label, survey_key in _CORR_SURVEY_KEYS.items():
+                        if survey_key == "b4ai_sccces_survey":
+                            comp_rel = compute_composite_reliability(
+                                canonical_df, survey_key, DEFAULT_SCCCES_COMPOSITE_MAP,
+                            )
+                            if not comp_rel.empty:
+                                n_comp_ok = (comp_rel["badge"].astype(str).str.contains("Good|Acceptable|Excellent", case=False, na=False)).sum()
+                                secs.append({
+                                    "heading": f"Composite Reliability (primary) — {survey_label}",
+                                    "body": f"{n_comp_ok}/{len(comp_rel)} composites at acceptable reliability or better.",
+                                })
                         rel = compute_construct_reliability(canonical_df, survey_key)
                         if not rel.empty:
-                            n_ok = (rel["badge"].astype(str).str.contains("Good|Acceptable", case=False, na=False)).sum()
+                            # "Excellent" was missing from this match (pre-existing --
+                            # undercounted excellent sub-constructs in this summary
+                            # line); added while touching this code for the
+                            # composite-level addition above.
+                            n_ok = (rel["badge"].astype(str).str.contains("Good|Acceptable|Excellent", case=False, na=False)).sum()
                             secs.append({
-                                "heading": f"Reliability — {survey_label}",
+                                "heading": (
+                                    f"Sub-construct Reliability (supplementary) — {survey_label}"
+                                    if survey_key == "b4ai_sccces_survey"
+                                    else f"Reliability — {survey_label}"
+                                ),
                                 "body": f"{n_ok}/{len(rel)} sub-constructs at acceptable reliability or better.",
                             })
                     composite_map = {k: list(v) for k, v in DEFAULT_SCCCES_COMPOSITE_MAP.items()}
