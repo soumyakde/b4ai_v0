@@ -594,6 +594,39 @@ Note exactly which step and what you saw, then let Claude know — don't try to 
 
 ---
 
+## R. Composite-level reliability — Correlations tab + both PDF reports (2026-09-03, 12 min)
+
+**Context:** the Reliability & Redundancy section previously only showed per-sub-construct reliability (Cronbach's α / Spearman-Brown), which flagged two of Situational Cognitive Engagement's three facets as "not estimable" since they're single-item — technically correct, but understates the construct relative to how Rotgans & Schmidt (2011) themselves validated it as one 3-facet latent construct via CFA. New composite-level (pooled) reliability is now the primary result everywhere; the existing sub-construct table is retained as supplementary detail, not removed.
+
+### R.1 — Live Correlations tab (5 min)
+
+1. **Teacher Dashboard → 🔗 Correlations → Reliability & Redundancy → Survey: Cognitive Engagement.**
+2. Confirm a **"Composite-level reliability (primary)"** table appears first, with 4 rows: Situational Cognitive Engagement (α≈.844), Message_appraisal (α≈.977), Attention_Culture (α≈.811), Personal_relevance (α≈.908).
+3. Open the new **"⚠️ A decent alpha alone doesn't prove unidimensionality"** expander — confirm it cites Cortina (1993) and names the real finding (Attention/Culture correlate at only r≈.43, the weakest of the four composites).
+4. Below that, confirm the **"Per-sub-construct reliability (supplementary detail...)"** table still appears, unchanged, with Engagement with Task and Experience of Flow still shown as "not estimable."
+5. Switch **Survey** to **SIMS (Motivation)** — confirm the composite-level table and the new expander do **not** appear (SIMS has no composite map by design), only the sub-construct table, now just labeled "Per-sub-construct reliability" (no "supplementary" qualifier, since there's no composite counterpart for SIMS).
+6. ✅ Pass if: composite table shows correct numbers and citation, appears SCCCES-only, sub-construct table is unaffected.
+
+### R.2 — Report Generation: Correlations PDF (4 min)
+
+1. **Report Generation → Correlations Report**, include "Reliability & Redundancy," generate the PDF.
+2. Confirm a **"Composite Reliability (primary) — Cognitive Engagement (SCCCES)"** section appears with the same 4-composite table and citations.
+3. Confirm a **"Sub-construct Reliability (supplementary) — Cognitive Engagement (SCCCES)"** section appears below it (renamed from the old plain "Reliability —" heading).
+4. Confirm SIMS's section is still just **"Reliability — Interest & Motivation (SIMS)"** (no "supplementary" relabel, no composite section).
+5. ✅ Pass if: both PDF sections match the live tab's numbers and structure.
+
+### R.3 — Report Generation: Combined Report (3 min)
+
+1. Generate the **Combined/Comprehensive Report** (whichever includes a "Correlations" section).
+2. Confirm the condensed Correlations summary now shows **two** reliability lines for SCCCES — "Composite Reliability (primary)" and "Sub-construct Reliability (supplementary)" — each with an "X/4" or "X/10 at acceptable reliability or better" count.
+3. ✅ Pass if: both counts are present and look sane (composite count should read 4/4, given all four came back Good-to-Excellent).
+
+### If anything fails
+
+Note exactly which step and what you saw, then let Claude know — don't try to fix it yourself. This is on the `test` environment; nothing here touches `production`'s real pilot data.
+
+---
+
 ## If anything fails
 
 Note which item failed and what you saw, then let Claude know — don't try to fix anything yourself. This is all on the disposable `test` environment; nothing here touches the real pilot data on `production`.

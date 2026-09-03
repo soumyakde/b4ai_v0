@@ -299,6 +299,139 @@ def compute_construct_reliability(
     return pd.DataFrame(rows)
 
 
+def compute_composite_reliability(
+    canonical_df: pd.DataFrame,
+    instrument_key: str,
+    composite_map: Dict[str, List[str]],
+) -> pd.DataFrame:
+    """
+    Composite-level (pooled) reliability -- all items across a
+    composite's named sub-constructs treated as one scale, one
+    Cronbach's alpha (Cronbach, 1951) per composite, rather than one
+    reliability figure per sub-construct.
+
+    Rationale: each composite here is drawn from a source instrument
+    validated by its own authors as a single latent construct (e.g.
+    Rotgans & Schmidt, 2011's SCES, fit via CFA as one 3-facet
+    construct, coefficient H = .93/.78 -- not as three independently
+    reliable subscales). compute_construct_reliability() above computes
+    reliability strictly per sub-construct, which is the right tool for
+    diagnosing individual sub-constructs but understates a composite
+    like Situational Cognitive Engagement, two of whose three facets
+    (Engagement with Task, Experience of Flow) are single-item and so
+    are individually "not estimable" even though the source authors
+    validated the pooled construct as reliable. Pooling first and
+    computing one alpha matches how each composite's own source
+    literature treated it -- while remaining a classical-test-theory
+    statistic, not a literal replication of a CFA-based figure like
+    coefficient H, which would require fitting an actual CFA (out of
+    scope here; not attempted).
+
+    compute_construct_reliability() is left completely unchanged and
+    remains the right tool for sub-construct-level diagnostics (e.g. an
+    inter-item correlation matrix breakdown for reviewers who want to
+    see whether a composite's parts move together) -- this function is
+    additive, not a replacement.
+
+    Parameters
+    ----------
+    canonical_df : pd.DataFrame
+    instrument_key : str
+        Survey base key (e.g. "b4ai_sccces_survey").
+    composite_map : dict
+        composite_name -> list of sub-construct names to pool. A
+        single-sub-construct entry (e.g. Personal_relevance) is valid
+        and simply reproduces that sub-construct's own reliability.
+
+    Returns
+    -------
+    pd.DataFrame: instrument_key, composite, n_subconstructs, n_items,
+        n_subjects, method, value, ci_low, ci_high, badge,
+        low_n_warning, error
+    """
+    mask = (
+        (canonical_df["instrument_key"] == instrument_key) |
+        canonical_df["instrument_key"].str.endswith("_" + instrument_key)
+    )
+    df = canonical_df[mask].copy()
+    df = df[df["construct"].notna() & (df["construct"] != "")]
+    df = df[df["item_score"].notna()]
+
+    if df.empty:
+        return pd.DataFrame(columns=[
+            "instrument_key", "composite", "n_subconstructs", "n_items",
+            "n_subjects", "method", "value", "ci_low", "ci_high",
+            "badge", "low_n_warning", "error",
+        ])
+
+    rows = []
+    for composite_name, subconstructs in composite_map.items():
+        g = df[df["construct"].isin(subconstructs)]
+        n_subconstructs = g["construct"].nunique()
+        n_items = g["question_id"].nunique()
+        n_subjects = g["user_id"].nunique()
+        row: Dict[str, Any] = {
+            "instrument_key": instrument_key, "composite": composite_name,
+            "n_subconstructs": n_subconstructs, "n_items": n_items,
+            "n_subjects": n_subjects,
+            "method": None, "value": None, "ci_low": None, "ci_high": None,
+            "badge": "—", "low_n_warning": n_subjects < LOW_N_THRESHOLD,
+            "error": None,
+        }
+
+        if n_items < 1:
+            row["error"] = "No items found."
+            rows.append(row)
+            continue
+
+        if n_items == 1:
+            row["method"] = "single_item_no_reliability"
+            row["error"] = "Single-item indicator -- reliability not estimable."
+            rows.append(row)
+            continue
+
+        wide = g.pivot_table(
+            index="user_id", columns="question_id", values="item_score",
+        ).dropna()
+
+        if len(wide) < 3:
+            row["method"] = "not_tested"
+            row["error"] = f"Too few complete cases (n={len(wide)}) to test reliability."
+            rows.append(row)
+            continue
+
+        if n_items == 2:
+            row["method"] = "spearman_brown"
+            cols = list(wide.columns)
+            r_val = wide[cols[0]].corr(wide[cols[1]])
+            sb = _spearman_brown(r_val)
+            row["value"] = round(float(sb), 4) if not np.isnan(sb) else None
+            row["badge"] = spearman_brown_badge(sb)
+        else:
+            try:
+                import pingouin as pg
+                long_df = wide.reset_index().melt(
+                    id_vars="user_id", var_name="question_id", value_name="item_score",
+                )
+                alpha, ci = pg.cronbach_alpha(
+                    data=long_df, items="question_id",
+                    scores="item_score", subject="user_id",
+                )
+                row["method"] = "cronbach_alpha"
+                row["value"] = round(float(alpha), 4)
+                row["ci_low"] = round(float(ci[0]), 4)
+                row["ci_high"] = round(float(ci[1]), 4)
+                row["badge"] = alpha_badge(alpha)
+            except ImportError:
+                row["error"] = "pingouin not installed -- Cronbach's alpha unavailable."
+            except Exception as e:
+                row["error"] = str(e)
+
+        rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
 def compute_inter_construct_correlation_matrix(
     canonical_df: pd.DataFrame,
     instrument_key: str,
