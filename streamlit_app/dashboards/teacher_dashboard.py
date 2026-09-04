@@ -2186,8 +2186,8 @@ _STAT_HELP = {
         "all modules — \"is this generally a more engaged student?\"). "
         "Pooling both into one predictor conflates two different "
         "questions. Enders, C. K., & Tofighi, D. (2007). Centering "
-        "predictors in multilevel regression models. *Psychological "
-        "Methods, 12*(2), 121-138."
+        "predictor variables in cross-sectional multilevel models: A new "
+        "look at an old issue. *Psychological Methods, 12*(2), 121-138."
     ),
     "mixed_model_blocks": (
         "**Model Comparison Table — Reading the Blocks**\n\n"
@@ -3641,9 +3641,9 @@ def _render_correlations_tab(
             "this student score better in modules where they felt more "
             "engaged than usual?) from *between-student* effects (do "
             "generally more engaged students score higher overall?). "
-            "Enders, C. K., & Tofighi, D. (2007). Centering predictors in "
-            "multilevel regression models. *Psychological Methods, "
-            "12*(2), 121-138."
+            "Enders, C. K., & Tofighi, D. (2007). Centering predictor "
+            "variables in cross-sectional multilevel models: A new look "
+            "at an old issue. *Psychological Methods, 12*(2), 121-138."
         )
 
         composite_map = st.session_state.get(
@@ -8405,9 +8405,9 @@ published instrument for full item listings.
             "section": "Correlational Analysis",
             "tag": "Centering", "color": "#FDECE3", "border": "#D55E00",
             "citation": (
-                "Enders, C. K., & Tofighi, D. (2007). Centering predictors in "
-                "multilevel regression models: A new look at an old issue. "
-                "*Psychological Methods, 12*(2), 121–138."
+                "Enders, C. K., & Tofighi, D. (2007). Centering predictor "
+                "variables in cross-sectional multilevel models: A new look "
+                "at an old issue. *Psychological Methods, 12*(2), 121–138."
             ),
             "note": "Person-mean-centering (within/between-person effects), Correlations tab's mixed-effects model.",
         },

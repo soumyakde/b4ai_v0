@@ -70,9 +70,9 @@ Unlu, A. (2016). Adjusting potentially confounded scoring protocols for
 Eisinga, R., Te Grotenhuis, M., & Pelzer, B. (2013). The reliability of
     a two-item scale: Pearson, Cronbach, or Spearman-Brown? International
     Journal of Public Health, 58(4), 637-642.
-Enders, C. K., & Tofighi, D. (2007). Centering predictors in multilevel
-    regression models: A new look at an old issue. Psychological
-    Methods, 12(2), 121-138.
+Enders, C. K., & Tofighi, D. (2007). Centering predictor variables in
+    cross-sectional multilevel models: A new look at an old issue.
+    Psychological Methods, 12(2), 121-138.
 Pinheiro, J. C., & Bates, D. M. (2000). Mixed-Effects Models in S and
     S-PLUS. Springer. (Sec. 2.4 -- REML likelihoods are only comparable
     across models with identical fixed effects; use ML for model
