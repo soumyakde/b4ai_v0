@@ -14,6 +14,10 @@ Changes:
   - Added BACKUP_INTERVAL_HOURS env var support (default: 24)
   - system_service.py does NOT import Streamlit — scheduler is safe
     to start in a background thread
+  - 2026-09-29: added prune_old_backups() (no retention previously existed —
+    daily unpruned backups had filled the production volume to 84% full) and
+    AUTO_BACKUP_ENABLED (default false; pilot ended 2026-08-08, so the
+    scheduler no longer starts by default). Manual backups are unaffected.
 """
 
 import os
@@ -43,6 +47,22 @@ CACHE_DIR  = _DATA_DIR / "cache"
 
 # Auto-backup interval — override via .env
 BACKUP_INTERVAL_HOURS = int(os.getenv("BACKUP_INTERVAL_HOURS", "24"))
+
+# Auto-backup was disabled 2026-09-29 (pilot ended 2026-08-08; daily backups
+# with no retention had filled the production volume to 84%). Manual backups
+# from the admin dashboard still work regardless of this flag. Re-enable via
+# .env (AUTO_BACKUP_ENABLED=true) if live data collection resumes.
+AUTO_BACKUP_ENABLED = os.getenv("AUTO_BACKUP_ENABLED", "false").lower() == "true"
+
+# How many of the most recent auto-backups to keep. Anything older is
+# deleted after each new backup, EXCEPT timestamps matching a protected
+# prefix below (kept forever, regardless of age or count).
+BACKUP_RETENTION_COUNT = int(os.getenv("BACKUP_RETENTION_COUNT", "7"))
+
+# Backup timestamps (YYYYMMDD prefix) that prune_old_backups() must never
+# delete. 20260808 = the pilot's last day — preserved permanently as the
+# canonical pilot-end snapshot.
+PROTECTED_BACKUP_DATE_PREFIXES = ("20260808",)
 
 
 # ---------------------------------------------------------
@@ -120,6 +140,50 @@ def list_backups() -> list[dict]:
         }
         for ts in complete
     ]
+
+
+# ---------------------------------------------------------
+# PRUNE OLD BACKUPS
+# ---------------------------------------------------------
+
+def prune_old_backups(
+    keep: int = BACKUP_RETENTION_COUNT,
+    protect_date_prefixes: tuple = PROTECTED_BACKUP_DATE_PREFIXES,
+) -> dict:
+    """
+    Delete backup sets beyond the most recent `keep`, except any timestamp
+    starting with one of `protect_date_prefixes` (kept forever regardless
+    of age or count — e.g. a specific archived snapshot).
+
+    Returns dict with "kept" and "deleted" lists of timestamps.
+    """
+    all_backups = list_backups()  # newest first
+
+    protected  = [b for b in all_backups if b["timestamp"].startswith(protect_date_prefixes)]
+    rotatable  = [b for b in all_backups if not b["timestamp"].startswith(protect_date_prefixes)]
+
+    to_keep    = rotatable[:keep]
+    to_delete  = rotatable[keep:]
+
+    deleted_ts = []
+    for b in to_delete:
+        for key in ("users", "responses"):
+            try:
+                b[key].unlink()
+            except Exception:
+                pass
+        deleted_ts.append(b["timestamp"])
+
+    if deleted_ts:
+        import logging
+        logging.getLogger(__name__).info(
+            "Pruned %d old backup set(s): %s", len(deleted_ts), ", ".join(deleted_ts)
+        )
+
+    return {
+        "kept":    [b["timestamp"] for b in protected + to_keep],
+        "deleted": deleted_ts,
+    }
 
 
 # ---------------------------------------------------------
@@ -331,6 +395,7 @@ def _auto_backup_job() -> None:
     """The scheduled job function — uses 'system' as admin_user for automated runs."""
     try:
         backup_databases(admin_user="system[auto-backup]")
+        prune_old_backups()
     except Exception as exc:
         import logging
         logging.getLogger(__name__).error("Auto-backup failed: %s", exc)
@@ -393,8 +458,17 @@ def start_auto_backup_scheduler() -> bool:
 
     Returns:
         True  — scheduler started successfully
-        False — APScheduler not available; manual backups still work
+        False — disabled via AUTO_BACKUP_ENABLED, or APScheduler not available;
+                manual backups (admin dashboard) still work either way
     """
+    if not AUTO_BACKUP_ENABLED:
+        import logging
+        logging.getLogger(__name__).info(
+            "Auto-backup scheduler disabled (AUTO_BACKUP_ENABLED=false). "
+            "Manual backups from the admin dashboard still work."
+        )
+        return False
+
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
     except ImportError:

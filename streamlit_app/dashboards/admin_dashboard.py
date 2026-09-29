@@ -1649,6 +1649,29 @@ def show_admin_dashboard(username: str):
             )
 
         st.divider()
+        st.subheader("🧹 Prune Old Backups")
+        st.caption(
+            f"Deletes backup sets beyond the most recent "
+            f"{system_service.BACKUP_RETENTION_COUNT}, except timestamps starting "
+            f"with a protected date ({', '.join(system_service.PROTECTED_BACKUP_DATE_PREFIXES)} "
+            f"— the pilot-end snapshot — which are never deleted. Auto-backup runs this "
+            f"automatically after every scheduled backup; use this button for a one-off "
+            f"cleanup of backups accumulated before retention existed."
+        )
+        if st.button("🧹 Prune Now", key="prune_backups_btn"):
+            try:
+                _result = system_service.prune_old_backups()
+                if _result["deleted"]:
+                    st.success(
+                        f"Deleted {len(_result['deleted'])} old backup set(s). "
+                        f"{len(_result['kept'])} kept."
+                    )
+                else:
+                    st.info(f"Nothing to prune — {len(_result['kept'])} backup set(s) kept.")
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+        st.divider()
         if st.button("Clone Databases"):
             try:
                 clones = system_service.clone_databases(username)
