@@ -10,7 +10,9 @@ from pathlib import Path
 
 from modules.registry.module_registry import module_registry
 from core.progress_engine import get_completed_instruments
+from core.scoring_engine import compute_score
 from core.submission_engine import submit_instrument
+from utils.yaml_loader import load_yaml
 from utils.question_bank_loader import load_question_bank   # ← NEW
 
 
@@ -197,23 +199,27 @@ def render_content_mcq(assessment_def, assessment_key, username):
                 st.error("Please answer all questions.")
                 st.stop()
 
-            score = 0
             letter_responses = {}
 
             for question in questions:
 
                 qid = question["id"]
                 options = question["options"]
-                correct_letter = question.get("answer")
 
                 selected_text = responses[qid]
                 option_index = options.index(selected_text)
-                selected_letter = chr(65 + option_index)
+                letter_responses[qid] = chr(65 + option_index)
 
-                letter_responses[qid] = selected_letter
-
-                if correct_letter and selected_letter == correct_letter:
-                    score += 1
+            # Answer keys live in the scoring YAML, not in the question bank
+            # (the bank has no "answer" field), so score against that file.
+            # If it cannot be loaded, store no score rather than a wrong one.
+            try:
+                score = compute_score(
+                    letter_responses,
+                    load_yaml(f"surveys/{assessment_key}_scoring.yaml"),
+                )
+            except Exception:
+                score = None
 
             submit_instrument(
                 user_id=username,
@@ -225,10 +231,10 @@ def render_content_mcq(assessment_def, assessment_key, username):
 
             st.session_state.completed_instruments.add(assessment_key)
 
-            st.success(
-                f"✅ Assessment submitted successfully. "
-                f"Score: {score}/{len(questions)}"
+            score_note = (
+                f" Score: {score}/{len(questions)}" if score is not None else ""
             )
+            st.success(f"✅ Assessment submitted successfully.{score_note}")
 
             st.rerun()
 

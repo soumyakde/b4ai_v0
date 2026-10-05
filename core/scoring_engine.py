@@ -63,6 +63,21 @@ silently skipped — they will not be in either scale.
 from typing import Dict, Any
 
 
+def normalize_choice(value: Any) -> Any:
+    """
+    Reduce a stored answer to the value the scoring key is written in.
+
+    Option-style answers are stored as "A: Artificial Intelligence" while the
+    key is just "A", so only the part before the first colon is compared.
+    Plain answers ("True", "No", "B") are only stripped. Shared by this engine
+    and DatasetBuilder so the two scoring paths cannot disagree.
+    """
+    if value is None:
+        return value
+    text = str(value).strip()
+    return text.split(":")[0].strip() if ":" in text else text
+
+
 def compute_score(
     responses: Dict[str, Any],
     scoring_yaml: Dict[str, Any]
@@ -146,7 +161,7 @@ def compute_score(
         # Questions in the bank but not answered contribute 0.
         for question_id, correct_value in correct_answers.items():
             if question_id in responses:
-                if responses[question_id] == correct_value:
+                if normalize_choice(responses[question_id]) == normalize_choice(correct_value):
                     total_score += 1
 
         return total_score

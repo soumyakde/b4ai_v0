@@ -1,0 +1,48 @@
+---
+# LEGACY KEY - applies ONLY to responses submitted before 2026-07-08.
+# Recovered from git history: the Module 3 scoring key as it stood just before commit 9be90b4,
+# when the question bank and answer key were rewritten. Cohorts that took the assessment
+# before that date saw the OLD questions; scoring them with today's key is wrong.
+# Read by core/analytics/datasets/canonical_loader.py (legacy_versions) - do not edit.
+valid_until: "2026-07-08"
+instrument_key: module3_content_mcq_assessment
+instrument_type: assessment
+version: 1.0
+module_id: module3
+scope: module
+title: module3_content_mcq_assessment_scoring
+description: Scoring key for Module 3 MCQ Assessment
+scoring_type: binary
+true_value: 1
+
+correct_answers:
+  Q1: "B"
+  Q2: "C"
+  Q3: "B"
+  Q4: "D"
+  Q5: "D"
+  Q6: "D"
+  Q7: "D"
+  Q8: "A"
+  Q9: "C"
+  Q10: "B"
+  Q11: "C"
+  Q12: "D"
+  Q13: "A"
+  Q14: "D"
+  Q15: "B"
+  Q16: "C"
+  Q17: "A"
+  Q18: "C"
+  Q19: "B"
+  Q20: "A"
+  Q21: "D"
+  Q22: "B"
+  Q23: "A"
+  Q24: "A"
+  Q25: "B"
+  Q26: "A"
+  Q27: "D"
+  Q28: "A"
+  Q29: "C"
+  Q30: "B"
