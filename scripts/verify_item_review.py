@@ -34,7 +34,17 @@ def check(name, ok, detail=""):
 
 # ---------------------------------------------------------------- 1. item bank
 inst = list_instruments()
-check("9 instruments listed (7 module banks + AI-CI + Misconceptions)", len(inst) == 9, str(len(inst)))
+check("13 instruments listed (7 module banks + 4 Cohort-1 versions of Modules 1-4 + AI-CI + Misconceptions)", len(inst) == 13, str(len(inst)))
+c1m1 = load_item_bank("module1_content_mcq_assessment@cohort1")
+check("Cohort 1 Module 1 version: the 10 items Cohort 1 answered (incl. Q23, Q53 absent from today's bank), all keyed from the legacy key",
+      [i["question_id"] for i in c1m1] == ["Q1","Q5","Q10","Q15","Q23","Q28","Q32","Q35","Q40","Q53"] and all(i["key"] for i in c1m1))
+now_ids = {i["question_id"] for i in load_item_bank("module1_content_mcq_assessment")}
+check("Q23/Q53 are not in today's Module 1 bank (so the Cohort-1 version cannot be replaced by it)", "Q23" not in now_ids and "Q53" not in now_ids)
+c1m4 = {i["question_id"]: i for i in load_item_bank("module4_content_mcq_assessment@cohort1")}
+m4 = {i["question_id"]: i for i in load_item_bank("module4_content_mcq_assessment")}
+check("Cohort 1 Module 4 Q1 wording differs from today's Q1 (item_hash differs -> separate ratings)", c1m4["Q1"]["item_hash"] != m4["Q1"]["item_hash"])
+check("Modules 5-7: no separate Cohort-1 version (git history shows 10/10 identical items)",
+      "module5_content_mcq_assessment@cohort1" not in inst)
 m1 = load_item_bank("module1_content_mcq_assessment")
 check("Module 1 bank: 15 items, options lettered consecutively from A (13 four-option + 2 True/False items), every item keyed",
       len(m1) == 15 and all([o["label"] for o in i["options"]] == list("ABCD")[:len(i["options"])] and i["key"] for i in m1)

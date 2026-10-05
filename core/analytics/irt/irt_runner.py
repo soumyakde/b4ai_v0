@@ -65,6 +65,53 @@ MIN_N_WARN = 100
 # Internal helpers
 # -----------------------------------------------------------------------
 
+# Sample size: warnings, not gates (decision 2026-10-05).
+# MIN_N_2PL / MIN_N_GRM above are kept for import compatibility but are NO LONGER blocking limits.
+# The only hard stop is MIN_N_HARD: below it the estimators cannot be fitted at all.
+MIN_N_HARD = 10
+
+
+def sample_size_notes(model_type: str, n: int, n_items: Optional[int] = None) -> List[str]:
+    """
+    Plain-language, cited sample-size cautions for one model fit. Never blocks.
+
+    Rasch  : Linacre (1994), Rasch Measurement Transactions 7(4), 328 (table, dichotomous items):
+             about 30 persons for item difficulties stable within +/-1 logit (95% confidence),
+             50 for 99%; about 100 (95%) to 150 (99%) for +/-1/2 logit; 250 for high-stakes use.
+    2PL    : Hulin, Lissak & Drasgow (1982), Applied Psychological Measurement 6(3), 249-260,
+             doi 10.1177/014662168200600301: with the 2PL model, 30 items and 500 examinees
+             "appear adequate for some purposes" (their smallest simulated sample was 200).
+    GRM    : Linacre (1994) asks for at least 10 observations per response category for polytomous
+             data; no published minimum for GRM was verified for this tool, so none is claimed.
+    """
+    notes: List[str] = []
+    m = (model_type or "").lower()
+    if m in ("rasch", "1pl"):
+        if n < 30:
+            notes.append(f"Only {n} students: below Linacre's (1994) minimum of about 30 for item difficulties "
+                         "stable within ±1 logit (95% confidence). Treat the results as exploratory only.")
+        elif n < 50:
+            notes.append(f"{n} students meets Linacre's (1994) minimum of about 30 (±1 logit, 95%) but not the "
+                         "conservative 50 (99%). Expect wide uncertainty.")
+        elif n < 100:
+            notes.append(f"{n} students gives roughly ±1 logit stability; about 100 (95%) to 150 (99%) students are "
+                         "needed for ±½ logit (Linacre, 1994).")
+        elif n < 150:
+            notes.append(f"{n} students: about ±½ logit at 95% confidence; 150 are needed for 99% (Linacre, 1994).")
+    elif m == "2pl":
+        if n < 500:
+            extra = (f" {n} is also below the smallest sample (200) in their simulations." if n < 200 else "")
+            notes.append(f"With {n} students the 2PL (discrimination) estimates are likely unreliable. Hulin, Lissak & "
+                         "Drasgow (1982) found 30 items with about 500 students adequate for some purposes." + extra +
+                         " Rasch or classical item analysis is safer at this size.")
+    elif m == "grm":
+        notes.append("Graded response models estimate several thresholds and a discrimination per item. Linacre (1994) "
+                     "asks for at least 10 observations in every response category; with skewed answers (most "
+                     f"students choosing the top categories) {n} students will often not meet that for the rarely "
+                     "used categories. Read the item parameters as exploratory.")
+    return notes
+
+
 def _check_girth():
     if not _GIRTH_AVAILABLE:
         raise RuntimeError(
@@ -219,6 +266,7 @@ def run_rasch_model(
         "n_persons":     len(response_matrix),
         "n_items":       len(item_ids),
         "low_n_warning": len(response_matrix) < MIN_N_WARN,
+        "warnings":      sample_size_notes("Rasch", len(response_matrix), len(item_ids)),
         "error":         None,
     }
 
@@ -294,7 +342,9 @@ def run_2pl_model(
     item_ids: List[str],
 ) -> Dict[str, Any]:
     """
-    Fit a 2PL IRT model using girth.twopl_mml. Requires n >= MIN_N_2PL.
+    Fit a 2PL IRT model using girth.twopl_mml. Runs whenever the estimator can run
+    (n >= MIN_N_HARD); sample-size adequacy is reported as "warnings", not enforced
+    (Hulin, Lissak & Drasgow, 1982: about 500 students recommended).
     """
     n = len(response_matrix)
     result: Dict[str, Any] = {
@@ -302,15 +352,14 @@ def run_2pl_model(
         "n_persons":     n,
         "n_items":       len(item_ids),
         "low_n_warning": n < MIN_N_WARN,
+        "warnings":      sample_size_notes("2PL", n, len(item_ids)),
         "error":         None,
     }
 
-    if n < MIN_N_2PL:
+    if n < MIN_N_HARD:
         result["error"] = (
-            f"2PL model requires n >= {MIN_N_2PL} persons. "
-            f"Current n = {n}. "
-            f"This model will be available after the July/August cohort "
-            f"(expected n ~90)."
+            f"The 2PL model cannot be fitted with fewer than {MIN_N_HARD} students (current n = {n}). "
+            "Use classical item analysis or Item Review instead."
         )
         return result
 
@@ -377,7 +426,8 @@ def run_grm_model(
     item_ids: List[str],
 ) -> Dict[str, Any]:
     """
-    Fit a Graded Response Model using girth.grm_mml. Requires n >= MIN_N_GRM.
+    Fit a Graded Response Model using girth.grm_mml. Runs whenever the estimator can run
+    (n >= MIN_N_HARD); sample-size adequacy is reported as "warnings", not enforced.
     """
     n = len(response_matrix)
     result: Dict[str, Any] = {
@@ -385,14 +435,13 @@ def run_grm_model(
         "n_persons":     n,
         "n_items":       len(item_ids),
         "low_n_warning": n < MIN_N_WARN,
+        "warnings":      sample_size_notes("GRM", n, len(item_ids)),
         "error":         None,
     }
 
-    if n < MIN_N_GRM:
+    if n < MIN_N_HARD:
         result["error"] = (
-            f"GRM requires n >= {MIN_N_GRM} persons. "
-            f"Current n = {n}. "
-            f"This model will be available after the July/August cohort."
+            f"The graded response model cannot be fitted with fewer than {MIN_N_HARD} students (current n = {n})."
         )
         return result
 

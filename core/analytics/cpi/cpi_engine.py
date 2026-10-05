@@ -205,6 +205,7 @@ def compute_cpi_quant_irt(
             return result
 
         result["dropped_items"] = irt_result.get("dropped_items")
+        result["warnings"] = irt_result.get("warnings", [])
 
         person_params = irt_result.get("person_params", pd.DataFrame())
         if person_params.empty or "theta" not in person_params.columns:

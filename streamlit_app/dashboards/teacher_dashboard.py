@@ -2430,8 +2430,9 @@ _IRT_HELP = {
         "the item separates high- from low-ability students. "
         "A high discrimination value (a > 1.0) means the item reliably "
         "distinguishes students who understand the concept from those who do not.\n\n"
-        "Requires n ≥ 50 for stable estimates. With n = 13, Rasch (1PL) is "
-        "more appropriate — 2PL estimates will be unreliable."
+        "About 500 students with 30 items is the size Hulin, Lissak & Drasgow (1982) found adequate for "
+        "some purposes. The model will run on smaller groups, with a warning, but the discrimination "
+        "estimates are then likely unreliable; Rasch or classical item analysis is safer."
     ),
     "grm": (
         "**Graded Response Model (GRM)**\n\n"
@@ -2441,7 +2442,8 @@ _IRT_HELP = {
         "The person ability parameter (θ) reflects the latent trait being "
         "measured — e.g. intrinsic motivation or engagement with task. "
         "Higher θ means stronger presence of the construct.\n\n"
-        "Requires n ≥ 50 for reliable estimates."
+        "Needs enough answers in every response category (Linacre, 1994: at least 10 per category). "
+        "It will run on smaller groups, with a warning."
     ),
     "theta": (
         "**Person Ability (θ, theta)**\n\n"
@@ -4104,7 +4106,7 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
         with col_q:
             _quant_method = st.radio(
                 "CPI_quant method",
-                options=["CTT (proportion correct)", "IRT (Rasch)", "IRT (2PL, n≥50)",
+                options=["CTT (proportion correct)", "IRT (Rasch)", "IRT (2PL, large samples)",
                          "Both — show side by side"],
                 horizontal=False,
                 key="cpi_quant_method",
@@ -4139,7 +4141,7 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
                     "IRT (Rasch)", "Both — show side by side"
                 )
                 _run_2pl   = _quant_method in (
-                    "IRT (2PL, n≥50)", "Both — show side by side"
+                    "IRT (2PL, large samples)", "Both — show side by side"
                 )
 
                 if _run_rasch:
@@ -4219,6 +4221,8 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
                             f"⚠️ n < 100. Rasch estimates are exploratory "
                             f"at this sample size."
                         )
+                    for _w in _irt_rasch.get("warnings", []):
+                        st.caption("⚠️ " + _w)
                     _pp = _irt_rasch["person_df"]
                     _pp_disp = _pp[
                         ["user_id", "theta", "theta_se", "cpi_quant_irt"]
@@ -4908,7 +4912,8 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
     st.caption(
         "Item Response Theory analysis powered by the **girth** Python library. "
         "Rasch (1PL) runs at any n with a low-n warning. "
-        f"2PL and GRM require n ≥ {MIN_N_2PL}."
+        "Sample-size cautions (Linacre, 1994; Hulin, Lissak & Drasgow, 1982) appear as warnings next to "
+        "the results; they never block an analysis."
     )
 
     with st.expander("ℹ️ IRT — Plain-language guide for teachers", expanded=False):
@@ -4948,6 +4953,7 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
     # Binary Assessment IRT
     # ==============================================================
     if irt_type == "Binary Assessment":
+        _render_item_method_guide()
         irt_method = st.radio(
             "**Analysis method:**",
             options=["Item Response Theory (Rasch / 2PL)", "Classical item analysis (CTT)",
@@ -4983,7 +4989,7 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
         with col2:
             model_choice = st.selectbox(
                 "IRT Model",
-                options=["Rasch (1PL)", "2PL (requires n≥50)"],
+                options=["Rasch (1PL)", "2PL (about 500+ students recommended)"],
                 key="irt_bin_model",
             )
 
@@ -5303,6 +5309,13 @@ def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
             st.markdown(f"AI suggested level **{spread}** (median: {BLOOM_LEVELS[med]['label']}) "
                         f"over {sug['n_runs']} run(s) · model {sug['model']} · prompt {sug['prompt_version']}")
             st.caption("AI rationale: " + (sug["rationale"] or ""))
+            if sug["n_runs"] == 1:
+                st.warning("⚠️ This is a **single run**. The AI does not give the same answer every time, so asking again "
+                           "could produce a different level. Use 'Runs (1-3)' and 'Ask again' to see how much it varies "
+                           "before leaning on it.")
+            elif sug["level_min"] != sug["level_max"]:
+                st.warning(f"⚠️ The AI's runs **disagreed** (levels {sug['level_min']}–{sug['level_max']}). Treat its "
+                           "suggestion for this item as uncertain.")
             if sug.get("needs_figure"):
                 st.warning("The AI said this item depends on a figure it could not see.")
             mk = [v for v in sug["blind_matches_key"] if v is not None]
@@ -5438,6 +5451,77 @@ def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
             (st.success if out["n_err"] == 0 else st.warning)(
                 f"Run {out['run_id']}: {out['n_ok']} succeeded, {out['n_err']} failed or were declined · actual cost "
                 f"${out['cost_usd']:.3f}.")
+
+
+_ITEM_METHOD_GUIDE = """
+| | **1. Classical item analysis** | **2. Random-effects logistic model** | **3. Item Review (AI-assisted Bloom rating)** |
+|---|---|---|---|
+| **Tells you** | How many got each item right, how well it separates strong from weak students, how each wrong option behaved, test reliability (KR-20) | Each item's difficulty on a common scale, with a standard error and interval | What kind of thinking each question asks for; possible key or wording problems |
+| **Needs** | Almost any group; a warning appears under 30 | About 30+ students (more is better); one test form at a time | Any group size, even 8 students; no student data |
+| **Strengths** | Easy to explain; flags mis-keyed items and dead options; no model | Honest uncertainty; handles gaps and unbalanced data; steadies small groups | Works when statistics cannot; you rate first, the AI is a second opinion |
+| **Limits** | Describes this group on this form; correlations unstable in small groups | Assumes one trait and equal discrimination; intervals slightly narrow in our tests; hard item vs unlearned topic look alike | Bloom level is **not** difficulty (Kibble & Johnson, 2011); AI cannot see pictures; AI answers vary between runs |
+| **Main sources** | Kuder & Richardson (1937); Crocker & Algina (1986); Gierl et al. (2017) | De Boeck et al. (2011); Doran et al. (2007); Linacre (1994) | Anderson & Krathwohl (2001); Kibble & Johnson (2011); Parasuraman & Manzey (2010) |
+"""
+
+_ITEM_METHOD_REFS = """
+**References**
+Anderson, L. W., & Krathwohl, D. R. (Eds.). (2001). *A taxonomy for learning, teaching, and assessing*. Longman.
+Cohen, J. (1968). Weighted kappa. *Psychological Bulletin, 70*(4), 213-220.
+Crocker, L., & Algina, J. (1986). *Introduction to classical and modern test theory*. Holt, Rinehart & Winston.
+De Boeck, P., Bakker, M., Zwitser, R., Nivard, M., Hofman, A., Tuerlinckx, F., & Partchev, I. (2011). The estimation of item response models with the lmer function from the lme4 package in R. *Journal of Statistical Software, 39*(12).
+Doran, H., Bates, D., Bliese, P., & Dowling, M. (2007). Estimating the multilevel Rasch model: With the lme4 package. *Journal of Statistical Software, 20*(2).
+Gierl, M. J., Bulut, O., Guo, Q., & Zhang, X. (2017). Developing, analyzing, and using distractors for multiple-choice tests in education: A comprehensive review. *Review of Educational Research, 87*(6), 1082-1116.
+Haladyna, T. M., Downing, S. M., & Rodriguez, M. C. (2002). A review of multiple-choice item-writing guidelines for classroom assessment. *Applied Measurement in Education, 15*(3), 309-333.
+Hulin, C. L., Lissak, R. I., & Drasgow, F. (1982). Recovery of two- and three-parameter logistic item characteristic curves: A Monte Carlo study. *Applied Psychological Measurement, 6*(3), 249-260.
+Kibble, J. D., & Johnson, T. (2011). Are faculty predictions or item taxonomies useful for estimating the outcome of multiple-choice examinations? *Advances in Physiology Education, 35*, 396-401.
+Kuder, G. F., & Richardson, M. W. (1937). The theory of the estimation of test reliability. *Psychometrika, 2*(3), 151-160.
+Landis, J. R., & Koch, G. G. (1977). The measurement of observer agreement for categorical data. *Biometrics, 33*(1), 159-174.
+Linacre, J. M. (1994). Sample size and item calibration stability. *Rasch Measurement Transactions, 7*(4), 328. https://www.rasch.org/rmt/rmt74m.htm
+Parasuraman, R., & Manzey, D. (2010). Complacency and bias in human use of automation. *Human Factors, 52*(3), 381-410.
+"""
+
+
+def _render_item_method_guide() -> None:
+    """Guide: which item-difficulty method to use, by group size, with pros/cons and references."""
+    with st.expander("📘 Which method should I use? (guide for teachers and researchers)", expanded=False):
+        st.markdown(
+            "Three ways to look at how hard or well-working each question is. They answer **different questions**, "
+            "so they complement each other. Pick by how many students you have:"
+        )
+        n = st.number_input("How many students are in the group you want to analyse?", min_value=1, value=90, step=1,
+                            key="guide_n")
+        if n < 30:
+            st.warning(
+                f"**{int(n)} students — start with Item Review (method 3).** Statistics are very unstable at this size "
+                "(Linacre, 1994: about 30 students is the minimum for item difficulties stable within ±1 logit). "
+                "Classical item analysis (method 1) can still be read as a description of this group only."
+            )
+        elif n < 100:
+            st.info(
+                f"**{int(n)} students — use classical item analysis (method 1) first, then the random-effects model "
+                "(method 2) for difficulty with uncertainty.** Use Item Review (method 3) for context. Rasch (IRT) is "
+                "possible; expect roughly ±1 logit precision (Linacre, 1994). 2PL is not advisable."
+            )
+        elif n < 500:
+            st.info(
+                f"**{int(n)} students — methods 1 and 2 are well supported, and Rasch (IRT) is reasonable.** About 100 "
+                "(95%) to 150 (99%) students give ±½ logit precision (Linacre, 1994). 2PL is still below the size "
+                "(about 500 with 30 items) that Hulin, Lissak & Drasgow (1982) found adequate for some purposes."
+            )
+        else:
+            st.success(
+                f"**{int(n)} students — all methods are feasible, and 2PL becomes defensible** (about 500 students and "
+                "30 items; Hulin, Lissak & Drasgow, 1982). Keep using classical item analysis to review item quality."
+            )
+        st.markdown(_ITEM_METHOD_GUIDE)
+        st.warning(
+            "**What none of these can tell you:** whether a question is hard because it is poorly written or hard "
+            "because the topic was not learned. For that you need an outside reference, such as expert review or "
+            "a pre-test on the same content."
+        )
+        st.caption("Sample-size figures are guidance from the sources cited, not pass/fail rules; the tool warns "
+                   "but never blocks.")
+        st.markdown(_ITEM_METHOD_REFS)
 
 
 def _ctt_option_info(instrument_key: str, item_ids: List[str], canonical_df: pd.DataFrame):
@@ -5740,14 +5824,11 @@ def _render_irt_result(
     n = result["n_persons"]
     model = result["model_type"]
 
-    # Low-n warning
-    if result.get("low_n_warning"):
-        st.warning(
-            f"⚠️ **n = {n}** — IRT parameter estimates at this sample size "
-            f"are unstable. Results are shown for pipeline verification. "
-            f"Reliable IRT analysis requires n ≥ {MIN_N_WARN}. "
-            f"Re-run after the July/August cohort (expected n ≈ 90)."
-        )
+    # Sample-size cautions (warnings, never gates)
+    for _w in result.get("warnings", []):
+        st.warning("⚠️ " + _w)
+    if result.get("low_n_warning") and not result.get("warnings"):
+        st.warning(f"⚠️ **n = {n}**: estimates at this sample size are unstable; read them as exploratory.")
 
     # Model fit row
     c1, c2, c3, c4 = st.columns(4)
@@ -10100,7 +10181,9 @@ def _report_irt(canonical_df: pd.DataFrame) -> None:
         )
     with col2:
         if irt_report_type == "Binary Assessments":
-            irt_model = st.selectbox("Model", ["Rasch (1PL)", "2PL (requires n≥50)"],
+            irt_model = st.selectbox("Model", ["Rasch (1PL)", "2PL (about 500+ students recommended)",
+                                               "Classical item analysis (CTT)",
+                                               "Random-effects logistic (Python engine)"],
                                      key="rpt_irt_model")
         else:
             irt_survey = st.selectbox(
@@ -10131,6 +10214,57 @@ def _report_irt(canonical_df: pd.DataFrame) -> None:
                             mat, item_ids = build_binary_response_matrix(canonical_df, inst_key)
                             if len(mat) < 3:
                                 continue
+                            if irt_model.startswith("Classical") or irt_model.startswith("Random"):
+                                _forms = list_forms(mat)
+                                if _forms.empty:
+                                    continue
+                                _sub = subset_form(mat, _forms, _forms.loc[0, "form"])
+                                _label = _ASSESSMENT_LABELS.get(inst_key, inst_key)
+                                _fnote = (f" Largest form of {len(_forms)} (students saw different item sets in "
+                                          "different cohorts)." if len(_forms) > 1 else "")
+                                if irt_model.startswith("Classical"):
+                                    _ca = compute_item_analysis(_sub)
+                                    if _ca.get("error"):
+                                        continue
+                                    _it = _ca["items"]
+                                    _tbl = pd.DataFrame({
+                                        "Item": _it["item"], "n": _it["n"],
+                                        "% correct": (100 * _it["p"]).round(0),
+                                        "r (item-total)": _it["r_it"].round(2),
+                                        "Review flags": _it["flags"],
+                                    })
+                                    _t = _ca["test"]
+                                    _kr = _t.get("kr20")
+                                    sections.append({
+                                        "heading": f"Classical item analysis - {_label}",
+                                        "body": (f"Students: {_ca['n_persons']}  |  Items: {_t.get('k_items')}  |  "
+                                                 f"KR-20: {(f'{_kr:.2f}' if _kr == _kr else 'n/a')}.{_fnote} "
+                                                 f"{_ca.get('note') or ''}"),
+                                        "table": _tbl,
+                                        "caption": ("p = share correct (higher = easier); r = corrected item-total "
+                                                    "correlation. Describes this group on this form only. "
+                                                    "Kuder & Richardson (1937); Crocker & Algina (1986)."),
+                                    })
+                                else:
+                                    _g = fit_item_difficulty_glmm(_sub, engine="python")
+                                    if _g.get("error"):
+                                        continue
+                                    _gi = _g["items"]
+                                    _tbl = pd.DataFrame({
+                                        "Item": _gi["item"], "% correct": (100 * _gi["p"]).round(0),
+                                        "Difficulty (logits)": _gi["difficulty"].round(2), "SE": _gi["se"].round(2),
+                                        "Rank (1=hardest)": _gi["rank_hardest"],
+                                    })
+                                    sections.append({
+                                        "heading": f"Random-effects item difficulty - {_label}",
+                                        "body": (f"Students: {_g['n_persons']}  |  Items: {_g['n_items']}  |  "
+                                                 f"Item effects: {_g['mode']}.{_fnote} " + " ".join(_g.get("warnings", []))),
+                                        "table": _tbl,
+                                        "caption": ("Logit scale, average student = 0, higher = harder. Python engine "
+                                                    "(variational Bayes); intervals run slightly narrow. "
+                                                    "De Boeck et al. (2011); Doran et al. (2007); Linacre (1994)."),
+                                    })
+                                continue
                             if "2PL" in irt_model:
                                 res = run_2pl_model(mat, item_ids)
                             else:
@@ -10145,7 +10279,8 @@ def _report_irt(canonical_df: pd.DataFrame) -> None:
                                     f"Model: {res['model_type']}  |  "
                                     f"N persons: {res['n_persons']}  |  "
                                     f"N items: {res['n_items']}  |  "
-                                    f"AIC: {res.get('aic','—')}"
+                                    f"AIC: {res.get('aic','—')}  |  "
+                                    + " ".join(res.get("warnings", []))
                                 ),
                                 "table":   params.round(3) if not params.empty else None,
                                 "caption": "Item parameters estimated by IRT model.",

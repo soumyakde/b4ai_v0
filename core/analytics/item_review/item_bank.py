@@ -11,6 +11,10 @@ Sources
                         streamlit_app/surveys/module{n}_content_mcq_assessment_scoring.yaml
 * AI-CI, Misconceptions: streamlit_app/surveys/pre_*_assessment.yaml (+ *_scoring.yaml); the post-test
                         uses the same items.
+* "@cohort1" versions  : Modules 1-4 as Cohort 1 (NWACC 1D) took them on 2026-06-29, BEFORE the banks were
+                        rewritten on 5-8 July. Snapshots of exactly the items Cohort 1 answered, taken from git
+                        history, in content_dev/legacy_cohort1/; keys from the legacy scoring YAMLs.
+                        (Modules 5-7 were not changed after that date: Cohort 1's items are identical to today's.)
 
 Each item is a dict:
     instrument_key, instrument_label, module_n (int | None), question_id, text,
@@ -44,6 +48,7 @@ BLOOM_LEVELS: Dict[int, Dict[str, str]] = {
 _FIGURE = re.compile(r"\b(image|picture|diagram|photo|photograph|figure|chart|graph|illustration|"
                      r"shown (below|above)|look at|the (tree|map|table) (below|above))\b", re.I)
 
+COHORT1_SUFFIX = "@cohort1"
 MODULE_LABELS = {n: f"Module {n} — Content MCQ" for n in range(1, 8)}
 SURVEY_INSTRUMENTS = {
     "precourse_pre_aici_assessment": ("AI Conceptual Inventory (pre = post items)", "pre_aici_assessment"),
@@ -61,6 +66,9 @@ def list_instruments() -> Dict[str, str]:
     out = {f"module{n}_content_mcq_assessment": lab for n, lab in MODULE_LABELS.items()
            if (ROOT / "content_dev" / f"module{n}_question_bank.json").exists()}
     out.update({k: v[0] for k, v in SURVEY_INSTRUMENTS.items()})
+    for n in range(1, 5):
+        if (ROOT / "content_dev" / "legacy_cohort1" / f"module{n}_question_bank_cohort1_20260629.json").exists():
+            out[f"module{n}_content_mcq_assessment{COHORT1_SUFFIX}"] = f"Module {n} — Cohort 1 version (as taken 2026-06-29)"
     return out
 
 
@@ -94,8 +102,33 @@ def _key_map(scoring_yaml: str) -> Dict[str, str]:
     return {str(k): str(v).strip() for k, v in (d.get("correct_answers") or {}).items()}
 
 
+def _legacy_key_map(module_n: int) -> Dict[str, str]:
+    fs = sorted((ROOT / "streamlit_app" / "surveys").glob(f"module{module_n}_content_mcq_assessment_scoring_legacy_until_*.yaml"))
+    if not fs:
+        return {}
+    d = yaml.safe_load(fs[0].read_text(encoding="utf-8")) or {}
+    return {str(k): str(v).strip() for k, v in (d.get("correct_answers") or {}).items()}
+
+
 def load_item_bank(instrument_key: str) -> List[Dict]:
     items: List[Dict] = []
+    ml = re.match(r"^module(\d+)_content_mcq_assessment" + re.escape(COHORT1_SUFFIX) + r"$", instrument_key)
+    if ml:
+        n = int(ml.group(1))
+        raw = json.loads((ROOT / "content_dev" / "legacy_cohort1" /
+                          f"module{n}_question_bank_cohort1_20260629.json").read_text(encoding="utf-8"))
+        keys = _legacy_key_map(n)
+        for q in raw:
+            opts = [_parse_option(o, i) for i, o in enumerate(q["options"])]
+            text = q["question"].strip()
+            items.append({
+                "instrument_key": instrument_key, "instrument_label": f"Module {n} — Cohort 1 version", "module_n": n,
+                "question_id": str(q["id"]), "text": text, "options": opts,
+                "key": keys.get(str(q["id"])), "item_hash": item_hash(text, opts),
+                "depends_on_figure": bool(_FIGURE.search(text + " " + " ".join(o["text"] for o in opts))),
+                "in_current_selection": None,
+            })
+        return items
     m = re.match(r"^module(\d+)_content_mcq_assessment$", instrument_key)
     if m:
         n = int(m.group(1))
