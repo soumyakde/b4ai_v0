@@ -219,10 +219,24 @@ def _build_scoring_dict() -> Dict[str, Any]:
     for n in _all_module_numbers():
         try:
             mcq_s = _load_yaml(f"module{n}_content_mcq_assessment_scoring.yaml")
-            scoring[f"module{n}_content_mcq_assessment"] = {
+            entry = {
                 "scoring_type":   mcq_s["scoring_type"],
                 "correct_answers": mcq_s["correct_answers"],
             }
+            # Older answer keys for cohorts that took the assessment before its
+            # question bank was revised (see DatasetBuilder "legacy_versions").
+            legacy = []
+            for p in sorted(_SURVEYS_DIR.glob(
+                f"module{n}_content_mcq_assessment_scoring_legacy_*.yaml"
+            )):
+                ls = _load_yaml(p.name)
+                legacy.append({
+                    "until": str(ls["valid_until"]),
+                    "correct_answers": ls["correct_answers"],
+                })
+            if legacy:
+                entry["legacy_versions"] = legacy
+            scoring[f"module{n}_content_mcq_assessment"] = entry
         except FileNotFoundError:
             pass   # no scoring for this module yet — item_score stays NaN
 

@@ -10,7 +10,6 @@ Supports:
 
 import os
 import sqlite3
-import csv
 from pathlib import Path
 
 from core.admin.audit_logger import log_admin_action, AdminAction
@@ -56,70 +55,33 @@ def get_loaded_instruments():
 
 def export_research_dataset(admin_user):
     """
-    Generates a research dataset for statistical analysis.
-    Combines responses, completions, survey_scores, and assessment_scores.
+    Exports the item-level research dataset (one row per response) for
+    statistical analysis, from the same canonical scored data the dashboards use.
+
+    Columns: user_id, module_id, instrument_key, question_id, response_value,
+    item_score, construct, grade, submitted_at, completed_at, cohort_id.
+
+    It deliberately does not read the survey_scores/assessment_scores tables:
+    those hold submission-time scores only, and the previous query joined them
+    on user_id alone, multiplying each response row by every score and
+    completion row of the same student (about 17.6 million rows from 30,789
+    responses on the pilot database).
     """
-    conn = get_connection()
-    cursor = conn.cursor()
+    from core.analytics.datasets.canonical_loader import load_canonical_data
 
-    cursor.execute("""
-        SELECT
-            r.user_id,
-            r.instrument_name,
-            r.question_id,
-            r.response_value,
-            r.submitted_at,
-            c.module_id,
-            c.instrument_key,
-            c.completed_at,
-            s.survey_key,
-            s.score AS survey_score,
-            s.calculated_at AS survey_calculated_at,
-            a.assessment_code,
-            a.score AS assessment_score,
-            a.calculated_at AS assessment_calculated_at
-        FROM responses r
-        LEFT JOIN completions c
-            ON r.user_id = c.user_id
-        LEFT JOIN survey_scores s
-            ON r.user_id = s.user_id
-        LEFT JOIN assessment_scores a
-            ON r.user_id = a.user_id
-        ORDER BY r.user_id, r.instrument_name, r.question_id
-    """)
-
-    rows = cursor.fetchall()
-    conn.close()
+    canonical_df, _, _ = load_canonical_data()
+    canonical_df = canonical_df.sort_values(
+        ["user_id", "instrument_key", "question_id"]
+    )
 
     output_path = BASE_DIR / "exports" / "research_dataset.csv"
     output_path.parent.mkdir(exist_ok=True)
-
-    with open(output_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-
-        writer.writerow([
-            "user_id",
-            "instrument_name",
-            "question_id",
-            "response_value",
-            "submitted_at",
-            "module_id",
-            "instrument_key",
-            "completed_at",
-            "survey_key",
-            "survey_score",
-            "survey_calculated_at",
-            "assessment_code",
-            "assessment_score",
-            "assessment_calculated_at"
-        ])
-
-        writer.writerows(rows)
+    canonical_df.to_csv(output_path, index=False, encoding="utf-8")
 
     log_admin_action(
         admin_user,
         AdminAction.RUN_DIAGNOSTICS,
-        f"research dataset exported with {len(rows)} rows"
+        f"research dataset exported with {len(canonical_df)} rows"
     )
 
     return output_path

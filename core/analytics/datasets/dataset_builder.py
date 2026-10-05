@@ -5,6 +5,7 @@ import hashlib
 import json
 
 from core.analytics.filters.filter_spec import FilterSpec
+from core.scoring_engine import normalize_choice
 from utils.module_normalizer import normalize_module_id
 
 
@@ -156,17 +157,34 @@ class DatasetBuilder:
                 def normalize_response(x):
                     if pd.isna(x):
                         return x
-                    x = str(x).strip()
-                    if ":" in x:
-                        return x.split(":")[0].strip()
-                    return x
+                    return normalize_choice(x)
 
                 responses = df.loc[mask, "response_value"].apply(normalize_response)
-                correct_map = df.loc[mask, "question_id"].map(correct_answers)
+                question_ids = df.loc[mask, "question_id"]
+                correct_map = question_ids.map(correct_answers)
 
+                # Question banks and keys were revised after some cohorts had
+                # already taken an assessment. Score each response against the
+                # key in force when it was submitted: "legacy_versions" is a
+                # list of {"until": "YYYY-MM-DD", "correct_answers": {...}}
+                # holding the older keys, applied to responses before "until".
+                if "submitted_at" in df.columns:
+                    submitted = df.loc[mask, "submitted_at"].astype(str)
+                    for version in sorted(
+                        scoring_info.get("legacy_versions", []),
+                        key=lambda v: v["until"],
+                        reverse=True,
+                    ):
+                        older = submitted < version["until"]
+                        correct_map = correct_map.where(
+                            ~older, question_ids.map(version["correct_answers"])
+                        )
+
+                # A question with no key (unknown ID) cannot be scored: leave
+                # it NaN so aggregates exclude it, instead of counting it wrong.
                 item_scores.loc[mask] = (
-                    responses == correct_map
-                ).astype(float)
+                    (responses == correct_map).astype(float).where(correct_map.notna())
+                )
 
             # -------------------------
             # UNKNOWN SCORING TYPE
