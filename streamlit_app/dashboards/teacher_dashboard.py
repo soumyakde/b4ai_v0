@@ -4827,6 +4827,7 @@ def show_teacher_dashboard(username: str) -> None:
         "🤖 LLM Analysis",
         "📉 Competency Progression",
         "🔬 IRT Analysis",
+        "🧠 Item Review",
         "📄 Report Generation",
     ]
     if "teacher_dash_tab" not in st.session_state:
@@ -4845,6 +4846,7 @@ def show_teacher_dashboard(username: str) -> None:
         "🤖 LLM Analysis":           ("#CC79A7", "#F9EEF5"),
         "📉 Competency Progression": ("#534AB7", "#EEEDFE"),
         "🔬 IRT Analysis":           ("#009E73", "#E6F7F1"),
+        "🧠 Item Review":            ("#7A4FB5", "#F1EAF9"),
         "📄 Report Generation":      ("#888888", "#F0F0F0"),
     }
     _tc, _tbg = _TAB_COLORS.get(active_tab, ("#333", "#F8F8F8"))
@@ -4873,6 +4875,9 @@ def show_teacher_dashboard(username: str) -> None:
 
     elif active_tab == "🔬 IRT Analysis":
         _render_irt_tab(filtered_canonical)
+
+    elif active_tab == "🧠 Item Review":
+        _render_item_review_tab(username, filtered_canonical)
 
     elif active_tab == "🤖 LLM Analysis":
         _render_llm_tab(username, filtered_canonical)
@@ -5170,6 +5175,269 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
                         )
                 except ImportError:
                     st.error("Deploy core/analytics/irt/reliability_analysis.py first.")
+
+
+_ITEM_REVIEW_HELP = """
+**Item Review -- describing what each question asks learners to think about (Method 3 of 3)**
+
+**What this is.** For each assessment question you record its cognitive demand on the six levels of the
+revised Bloom's taxonomy (Remember, Understand, Apply, Analyze, Evaluate, Create; Anderson & Krathwohl, 2001).
+An AI model (Claude Sonnet) can suggest a level and check the answer key, but **you rate first and the
+suggestion is hidden until you lock your own rating**; you then decide. Nothing the AI says is stored as
+the rating of record.
+
+**Use it when:** the group is too small for statistics (for example fewer than 30 students), or to check that
+the questions match the intended thinking, or to find answer-key problems.
+
+**Strengths:** works at any group size; needs no student data (only the question wording is sent to the AI);
+catches ambiguous wording and possible key errors.
+
+**Limits -- please read.** A Bloom level describes the thinking asked for, **not how hard the question is**:
+Kibble & Johnson (2011) found no correlation between item cognitive level and students' scores. AI suggestions
+agree only partly with human raters, so treat them as a second opinion, and people tend to over-trust automated
+advice (Parasuraman & Manzey, 2010), which is why your rating is locked in first. The AI cannot see pictures or
+diagrams: items that mention one are flagged and its suggestion is less reliable. The AI is not run at a fixed
+setting, so repeating a request can give a different answer; you can request up to 3 runs to see the spread.
+
+**Agreement.** Weighted kappa (Cohen, 1968) with a bootstrap interval; the verbal bands (Landis & Koch, 1977) are a
+rough guide only, and with few items the interval is wide.
+"""
+
+
+def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
+    """Item Review: reviewer-first Bloom rating + advisory LLM suggestions (Method 3). Teacher/researcher only."""
+    from core.analytics.item_review import store as irs
+    from core.analytics.item_review import bloom_llm as ibl
+    from core.analytics.item_review.agreement import agreement_summary
+    from core.analytics.item_review.item_bank import BLOOM_LEVELS, list_instruments, load_item_bank
+    from core.analytics.item_review.runner import run_llm_batch
+
+    st.subheader("🧠 Item Review (cognitive demand)")
+    with st.expander("ℹ️ What this is, when to use it, strengths and limits, references", expanded=False):
+        st.markdown(_ITEM_REVIEW_HELP)
+    try:
+        irs.init_schema()
+    except Exception as e:
+        st.error(f"Could not open the ratings database: {e}")
+        return
+
+    instruments = list_instruments()
+    label = st.selectbox("Assessment", list(instruments.values()), key="ir_instrument")
+    inst_key = next(k for k, v in instruments.items() if v == label)
+    items = load_item_bank(inst_key)
+    st.caption(f"{len(items)} items · signed in as **{username}** (your ratings are stored under this name)")
+
+    if "ir_view" not in st.session_state:
+        st.session_state["ir_view"] = "Rate items"
+    view = st.radio("View", ["Rate items", "Summary & agreement", "AI batch run"], horizontal=True, key="ir_view")
+    st.divider()
+
+    levels = list(BLOOM_LEVELS.keys())
+
+    def _fmt_level(n: int) -> str:
+        return f"{n} · {BLOOM_LEVELS[n]['label']} — {BLOOM_LEVELS[n]['gloss']}"
+
+    # ------------------------------------------------------------------ Rate items
+    if view == "Rate items":
+        only_sel = False
+        if any(i.get("in_current_selection") is not None for i in items):
+            only_sel = st.checkbox("Only items in the current live selection (.env)", value=False, key="ir_only_sel")
+        pool = [i for i in items if (not only_sel or i.get("in_current_selection"))]
+        if not pool:
+            st.info("No items to show.")
+            return
+        status = {}
+        for i in pool:
+            h = irs.get_human(username, i)
+            status[i["question_id"]] = ("✅ " if (h and h["final_level"]) else "🔒 " if h else "⬜ ")
+        qid = st.selectbox("Item", [i["question_id"] for i in pool],
+                           format_func=lambda q: status[q] + q, key="ir_item")
+        item = next(i for i in pool if i["question_id"] == qid)
+
+        st.markdown(f"**{item['question_id']}.** {item['text']}")
+        for o in item["options"]:
+            st.markdown(f"&nbsp;&nbsp;**{o['label']})** {o['text']}")
+        if item["depends_on_figure"]:
+            st.warning("This item seems to refer to a picture or figure. The AI cannot see it, so its suggestion "
+                       "for this item is less reliable.")
+
+        human = irs.get_human(username, item)
+        st.markdown("#### Step 1 — Your rating (before seeing any AI suggestion)")
+        if not human:
+            lv = st.radio("Which level of thinking does this question ask for?", levels, format_func=_fmt_level,
+                          key=f"ir_lv_{inst_key}_{qid}")
+            why = st.text_area("Why? (one or two sentences, optional)", key=f"ir_why_{inst_key}_{qid}")
+            if st.button("🔒 Lock my rating", key=f"ir_lock_{inst_key}_{qid}"):
+                try:
+                    irs.lock_blind_rating(username, item, int(lv), why)
+                    st.rerun()
+                except ValueError as e:
+                    st.error(str(e))
+            st.info("The AI suggestion stays hidden until you lock your rating.")
+            return
+        st.success(f"Your first rating: **{_fmt_level(human['blind_level'])}** (locked {human['blind_locked_at']}).")
+        if human["blind_rationale"]:
+            st.caption("Your reason: " + human["blind_rationale"])
+
+        # ---- Step 2: AI suggestion
+        st.markdown("#### Step 2 — AI suggestion (Claude Sonnet) and your decision")
+        sug = irs.reveal_llm_suggestion(username, item)
+        c1, c2 = st.columns(2)
+        with c1:
+            reps = st.number_input("Runs (1-3)", min_value=1, max_value=3, value=1, step=1, key=f"ir_reps_{inst_key}_{qid}",
+                                   help="Several runs show how much the AI's answer varies.")
+        with c2:
+            if st.button("✨ Get AI suggestion for this item" if not sug else "↻ Ask again (new run)",
+                         key=f"ir_ask_{inst_key}_{qid}"):
+                with st.spinner("Asking Sonnet…"):
+                    out = run_llm_batch([item], username, steps=("blind",), repeats=int(reps))
+                if out["n_err"]:
+                    st.error("The AI request failed or was declined; see the batch log in the 'AI batch run' view. "
+                             "You can still rate this item yourself.")
+                st.rerun()
+        if not sug or not sug.get("levels"):
+            st.info("No AI suggestion stored yet for this wording of the item. You can finish without one.")
+        else:
+            spread = (f"{sug['level_min']}–{sug['level_max']}" if sug["level_min"] != sug["level_max"] else str(sug["level_min"]))
+            med = int(round(sug["level_median"]))
+            st.markdown(f"AI suggested level **{spread}** (median: {BLOOM_LEVELS[med]['label']}) "
+                        f"over {sug['n_runs']} run(s) · model {sug['model']} · prompt {sug['prompt_version']}")
+            st.caption("AI rationale: " + (sug["rationale"] or ""))
+            if sug.get("needs_figure"):
+                st.warning("The AI said this item depends on a figure it could not see.")
+            mk = [v for v in sug["blind_matches_key"] if v is not None]
+            if mk:
+                st.caption("The AI answered the item BLIND (without the key): "
+                           + ("it agreed with the keyed answer." if all(mk) else
+                              "**it did NOT always agree with the keyed answer — worth checking the key (Step 3).**"))
+        default = human["final_level"] or human["blind_level"]
+        fin = st.radio("Your final level", levels, index=levels.index(default), format_func=_fmt_level,
+                       key=f"ir_fin_{inst_key}_{qid}")
+        need_why = int(fin) != human["blind_level"]
+        why2 = st.text_area("Reason for your final level" + (" (required, because it differs from your first rating)" if need_why else " (optional)"),
+                            value=human["final_rationale"] or "", key=f"ir_why2_{inst_key}_{qid}")
+        if st.button("💾 Save final decision", key=f"ir_save_{inst_key}_{qid}"):
+            try:
+                r = irs.save_final_decision(username, item, int(fin), why2)
+                st.success(f"Saved ({r['decision'].replace('_', ' ')}).")
+                st.rerun()
+            except ValueError as e:
+                st.error(str(e))
+
+        # ---- Step 3: key & distractors
+        st.markdown("#### Step 3 — Answer key and answer options (advisory)")
+        if not item["key"]:
+            st.info("No answer key on file for this item.")
+        else:
+            keytxt = next((o["text"] for o in item["options"] if o["label"] == str(item["key"])), "")
+            st.caption(f"Keyed answer: **{item['key']}** — {keytxt}")
+            if st.button("🔎 Check key and options with the AI", key=f"ir_keychk_{inst_key}_{qid}"):
+                with st.spinner("Asking Sonnet…"):
+                    run_llm_batch([item], username, steps=("key",))
+                st.rerun()
+            kr = (sug or {}).get("key_review") if sug else None
+            if kr is None:
+                s2 = irs.llm_suggestion(item)
+                kr = (s2 or {}).get("key_review")
+            if kr:
+                st.markdown(f"AI view of the key: **{kr['key_defensible']}**"
+                            + (f" · another option also arguably correct: **{', '.join(kr['other_arguably_correct'])}**"
+                               if kr["other_arguably_correct"] else "")
+                            + (f" · implausible options: **{', '.join(kr['implausible_distractors'])}**"
+                               if kr["implausible_distractors"] else ""))
+                st.caption(kr["comments"])
+            kd = st.radio("Your decision about the key", ["key_ok", "needs_review"], horizontal=True,
+                          format_func=lambda v: "Key is fine" if v == "key_ok" else "Needs review",
+                          index=0 if (human.get("key_decision") or "key_ok") == "key_ok" else 1,
+                          key=f"ir_kd_{inst_key}_{qid}")
+            kn = st.text_input("Note (optional)", value=human.get("key_note") or "", key=f"ir_kn_{inst_key}_{qid}")
+            if st.button("💾 Save key decision", key=f"ir_ksave_{inst_key}_{qid}"):
+                irs.save_key_decision(username, item, kd, kn)
+                st.success("Saved.")
+                st.rerun()
+
+    # ------------------------------------------------------------------ Summary
+    elif view == "Summary & agreement":
+        tbl = irs.summary_table(items, username)
+        done = tbl["my_first_rating"].notna().sum()
+        st.caption(f"{done} of {len(items)} items rated by you. AI levels appear only for items you have locked.")
+        st.dataframe(tbl.drop(columns=["item_hash"]), hide_index=True, width="stretch")
+        both = tbl.dropna(subset=["my_first_rating", "llm_level_median"])
+        if len(both) >= 3:
+            a = both["my_first_rating"].astype(int).values
+            b = both["llm_level_median"].round().astype(int).values
+            s = agreement_summary(a, b)
+            st.markdown("**Agreement: your first rating vs the AI (median of its runs)**")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Items", s["n"])
+            m2.metric("Exact match", f"{100*s['exact']:.0f}%")
+            m3.metric("Within 1 level", f"{100*s['within1']:.0f}%")
+            m4.metric("Weighted κ", "n/a" if s["kappa_w"] != s["kappa_w"] else f"{s['kappa_w']:.2f}")
+            if s["kappa_lo"] == s["kappa_lo"]:
+                st.caption(f"Bootstrap 95% interval for κ: {s['kappa_lo']:.2f} to {s['kappa_hi']:.2f}; rough band: {s['band']} "
+                           "(Landis & Koch, 1977). Quadratic weights (Cohen, 1968).")
+            else:
+                st.caption("Too few items for an interval; read κ as indicative only.")
+            changed = int((tbl["decision"].isin(["changed", "adopted_llm"])).sum())
+            st.caption(f"You changed your rating after seeing the AI on {changed} item(s).")
+        else:
+            st.info("Lock ratings for at least 3 items that also have an AI suggestion to see agreement.")
+
+        # Bloom level vs observed difficulty (module banks only)
+        if inst_key.startswith("module") and not canonical_df.empty:
+            try:
+                matrix, _ = build_binary_response_matrix(canonical_df, inst_key)
+                forms = list_forms(matrix)
+                sub = subset_form(matrix, forms, "Form 1")
+                pdf = pd.DataFrame({"item": sub.columns, "pct_correct": (100 * sub.mean()).round(0).values})
+                j = tbl.merge(pdf, on="item").dropna(subset=["my_final_rating"] if tbl["my_final_rating"].notna().any() else ["my_first_rating"])
+                col = "my_final_rating" if tbl["my_final_rating"].notna().any() else "my_first_rating"
+                if len(j) >= 5:
+                    from scipy import stats as _st
+                    rho, p = _st.spearmanr(j[col], j["pct_correct"])
+                    st.markdown("**Your Bloom level vs observed % correct (Form 1, current main cohort)**")
+                    st.dataframe(j[["item", col, "pct_correct"]].rename(columns={col: "Bloom level"}), hide_index=True, width="stretch")
+                    st.caption(f"Spearman ρ = {rho:.2f} (p = {p:.2f}, n = {len(j)} items). Bloom level is not difficulty: "
+                               "expect a weak relationship (Kibble & Johnson, 2011).")
+            except Exception:
+                pass
+        st.download_button("⬇ Download my ratings (CSV)", tbl.to_csv(index=False).encode("utf-8"),
+                           file_name=f"item_review_{inst_key}_{username}.csv", mime="text/csv", key="ir_dl")
+
+    # ------------------------------------------------------------------ Batch
+    else:
+        st.markdown("Generate AI suggestions for many items at once. They stay hidden from each reviewer until that "
+                    "reviewer has locked their own rating of the item.")
+        scope = st.radio("Items", ["All items in this assessment", "Only items in the current live selection",
+                                   "Only items I have not locked yet"], key="ir_batch_scope")
+        pool = items
+        if scope.startswith("Only items in the current"):
+            pool = [i for i in items if i.get("in_current_selection")]
+        elif scope.startswith("Only items I have"):
+            pool = [i for i in items if not irs.get_human(username, i)]
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            s_blind = st.checkbox("Bloom suggestion (blind)", value=True, key="ir_b_blind")
+        with c2:
+            s_key = st.checkbox("Key & options check", value=True, key="ir_b_key")
+        with c3:
+            reps = st.number_input("Runs per item (1-3)", 1, 3, 1, key="ir_b_reps")
+        steps = tuple(s for s, on in (("blind", s_blind), ("key", s_key)) if on)
+        est = ibl.estimate_cost_usd(len(pool), steps=max(1, len(steps)), repeats=int(reps) if s_blind else 1)
+        st.info(f"{len(pool)} items × {len(steps)} step(s) with model **{ibl.MODEL}**. Estimated cost about "
+                f"**${est:.2f}** (an estimate; the actual cost is shown afterwards). Only question wording is sent.")
+        if len(pool) > 200:
+            st.error("Too many items for one run (limit 200).")
+            return
+        ok = st.checkbox("I understand this uses the project's Anthropic API key and spends the amount above.", key="ir_b_ok")
+        if st.button("▶ Run AI batch", disabled=not (ok and steps and pool), key="ir_b_run"):
+            bar = st.progress(0.0)
+            out = run_llm_batch(pool, username, steps=steps, repeats=int(reps),
+                                progress=lambda i, n, q: bar.progress(min(1.0, i / max(n, 1)), text=f"Item {q}"))
+            bar.empty()
+            (st.success if out["n_err"] == 0 else st.warning)(
+                f"Run {out['run_id']}: {out['n_ok']} succeeded, {out['n_err']} failed or were declined · actual cost "
+                f"${out['cost_usd']:.3f}.")
 
 
 def _ctt_option_info(instrument_key: str, item_ids: List[str], canonical_df: pd.DataFrame):
