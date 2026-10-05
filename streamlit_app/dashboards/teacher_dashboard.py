@@ -4921,10 +4921,11 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
             key="irt_bin_method",
             help=(
                 "Classical item analysis works at almost any class size and is the "
-                "recommended first look. IRT needs larger groups: Linacre (1994) puts "
-                "item-difficulty error at about +/-1 logit with 50 students and +/-0.5 with "
-                "200; for 2PL, Hulin, Lissak & Drasgow (1982) found 30 items and about 500 "
-                "students adequate for some purposes."
+                "recommended first look. IRT needs larger groups. For Rasch, Linacre (1994) "
+                "gives about 30 students as the minimum for item difficulties stable to "
+                "+/-1 logit (95% confidence), 50 for 99%, and roughly 100-150 for +/-0.5 logit. "
+                "For 2PL, Hulin, Lissak & Drasgow (1982) found 30 items and about 500 students "
+                "adequate for some purposes."
             ),
         )
         if irt_method.startswith("Classical"):
@@ -5196,8 +5197,9 @@ def _render_ctt_item_analysis(canonical_df: pd.DataFrame) -> None:
         return
     if len(forms) > 1:
         st.info(
-            f"This assessment was given in {len(forms)} different forms (students saw different "
-            "sets of items, e.g. before and after the question bank was revised). Classical "
+            f"This assessment exists in {len(forms)} versions (forms) taken by different cohorts, "
+            "for example the original question bank versus the revised, shorter one. Every student "
+            "in a cohort saw the same items, but items differ between forms. Classical "
             "statistics are only defined within one form, so pick one."
         )
     st.dataframe(
