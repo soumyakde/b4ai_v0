@@ -2384,6 +2384,35 @@ Attali & Fraenkel, 2000) · Wilson (1927), *JASA* 22(158), 209-212 (the interval
 Flag thresholds (p < .20, p > .90, r < .20) are common rules of thumb, not verdicts.
 """
 
+_GLMM_HELP = """
+**Random-effects logistic model (Rasch as a mixed model) -- Method 2 of 3 for judging item difficulty**
+
+**What it does.** Estimates every item's difficulty and every student's ability together on one
+logit scale from all individual right/wrong answers, and gives each item a standard error and a
+95% interval. With *random items* the estimates are pulled slightly toward the average (shrinkage),
+which steadies small groups; with *fixed items* there is no shrinkage.
+
+**Use it when:** you want difficulty estimates with honest uncertainty, your data are unbalanced or
+have gaps, and you have roughly 30+ students (Linacre, 1994: about 30 students for item difficulties
+stable to ±1 logit at 95% confidence, 50 at 99%; about 100 to 150 for ±½ logit). It is not
+meant for groups under 30, where the classical view (Method 1) or the cognitive-demand view
+(Method 3) is more appropriate.
+
+**Strengths:** every item gets an interval; no special handling of missing responses; shrinkage
+helps in small groups; one clear scale for items and students.
+
+**Limits:** it assumes all items measure one trait and discriminate equally (a Rasch assumption), so it
+is not a substitute for checking item quality (use Method 1 for that); estimates still depend on this
+group; with fewer than 10 items the spread of difficulty is poorly estimated, so use *Fixed*. The
+Python engine is an approximation (variational Bayes) that we validated against R lme4: item
+difficulties agreed (correlation about 1.00, largest gap 0.15 logits), but its intervals ran slightly
+narrow (about 90% coverage against a nominal 95%). A hard item and an unlearned topic look the same.
+
+**References.** De Boeck, Bakker, Zwitser, Nivard, Hofman, Tuerlinckx & Partchev (2011), *Journal of
+Statistical Software* 39(12) · Doran, Bates, Bliese & Dowling (2007), *Journal of Statistical Software*
+20(2) · Linacre (1994), *Rasch Measurement Transactions* 7(4), 328 (sample-size table).
+"""
+
 _IRT_HELP = {
     "rasch": (
         "**Rasch Model (1-Parameter Logistic, 1PL)**\n\n"
@@ -4916,7 +4945,8 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
     if irt_type == "Binary Assessment":
         irt_method = st.radio(
             "**Analysis method:**",
-            options=["Item Response Theory (Rasch / 2PL)", "Classical item analysis (CTT)"],
+            options=["Item Response Theory (Rasch / 2PL)", "Classical item analysis (CTT)",
+                     "Random-effects logistic model (item difficulty)"],
             horizontal=True,
             key="irt_bin_method",
             help=(
@@ -4930,6 +4960,9 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
         )
         if irt_method.startswith("Classical"):
             _render_ctt_item_analysis(canonical_df)
+            return
+        if irt_method.startswith("Random-effects"):
+            _render_glmm_item_difficulty(canonical_df)
             return
 
         st.markdown("### Binary Assessment — Item Response Theory")
@@ -5292,6 +5325,134 @@ def _render_ctt_item_analysis(canonical_df: pd.DataFrame) -> None:
                 file_name=f"ctt_distractors_{inst_key}_{form.replace(' ', '')}.csv",
                 mime="text/csv", key="ctt_dl_dist",
             )
+
+
+def _render_glmm_item_difficulty(canonical_df: pd.DataFrame) -> None:
+    """Item difficulty by crossed random-effects logistic model -- Method 2 of the item-difficulty options."""
+    from core.analytics.irt.glmm_item_difficulty import fit_item_difficulty_glmm, r_available
+
+    st.markdown("### Binary Assessment — Item Difficulty by Random-Effects Logistic Model")
+    with st.expander("ℹ️ What this shows, when to use it, strengths and limits, references", expanded=False):
+        st.markdown(_GLMM_HELP)
+
+    present = set(canonical_df["instrument_key"].unique()) if not canonical_df.empty else set()
+    options = {k: v for k, v in _ASSESSMENT_LABELS.items()
+               if k in present or any(str(x).endswith("_" + k) for x in present)}
+    if not options:
+        st.warning("No binary assessments in the current filter.")
+        return
+    label = st.selectbox("Assessment", options=list(options.values()), key="glmm_instrument")
+    inst_key = next(k for k, v in options.items() if v == label)
+    try:
+        matrix, _ids = build_binary_response_matrix(canonical_df, inst_key)
+    except ValueError as e:
+        st.warning(str(e))
+        return
+    forms = list_forms(matrix)
+    if forms.empty:
+        st.warning("No scorable responses.")
+        return
+    if len(forms) > 1:
+        st.info(
+            f"This assessment exists in {len(forms)} versions (forms) taken by different cohorts. "
+            "Every student in a cohort saw the same items, but items differ between forms, so the "
+            "model is fitted to one form at a time."
+        )
+    st.dataframe(forms[["form", "n_students", "n_items"]].rename(
+        columns={"form": "Form", "n_students": "Students", "n_items": "Items"}),
+        hide_index=True, width="stretch")
+    form = st.selectbox("Form to analyse", options=list(forms["form"]), key="glmm_form")
+    sub = subset_form(matrix, forms, form)
+
+    has_r = r_available()
+    c1, c2 = st.columns(2)
+    with c1:
+        eng_label = st.selectbox(
+            "Computation engine",
+            options=["Automatic (R if available, else Python)", "Python (portable approximation)"]
+                    + (["R lme4 (reference)"] if has_r else []),
+            key="glmm_engine",
+            help="R lme4 is the reference implementation but is only installed on the researcher's "
+                 "computer, not on the web server. The Python engine runs everywhere and agrees "
+                 "closely with lme4 in our validation.",
+        )
+    with c2:
+        eff_label = st.selectbox(
+            "Item effects",
+            options=["Automatic (random if 10+ items)", "Random (shrinks toward the average)", "Fixed (no shrinkage)"],
+            key="glmm_effects",
+            help="Random item effects stabilise estimates but need enough items to estimate how much "
+                 "difficulty varies; with fewer than 10 items use Fixed.",
+        )
+    engine = ("python" if eng_label.startswith("Python") else "r" if eng_label.startswith("R ") else "auto")
+    effects = ("random" if eff_label.startswith("Random") else "fixed" if eff_label.startswith("Fixed") else "auto")
+
+    if st.button("▶ Fit model", key="glmm_run"):
+        with st.spinner("Fitting model…"):
+            st.session_state["_glmm_result"] = (
+                (inst_key, form, engine, effects),
+                fit_item_difficulty_glmm(sub, engine=engine, item_effects=effects),
+                compute_item_analysis(sub)["items"][["item", "p"]],
+            )
+    stored = st.session_state.get("_glmm_result")
+    if not stored or stored[0] != (inst_key, form, engine, effects):
+        st.caption("Choose settings and press **Fit model**.")
+        return
+    _k, res, _ctt = stored
+    if res.get("error"):
+        st.error(res["error"])
+        return
+
+    engine_name = {"r": "R lme4 (Laplace approximation)", "python": "Python statsmodels (variational Bayes)"}[res["engine"]]
+    st.caption(
+        f"Engine: **{engine_name}** · item effects: **{res['mode']}** · {res['n_persons']} students × "
+        f"{res['n_items']} items · {res['n_obs']} responses · "
+        f"student ability SD = {res['sigma_person']:.2f} logits"
+        + (f" · item difficulty SD = {res['sigma_item']:.2f} logits" if res.get("sigma_item") else "")
+    )
+    if res.get("engine_note"):
+        st.info(res["engine_note"])
+    for w in res.get("warnings", []):
+        st.warning(w)
+
+    it = res["items"].copy()
+    show = pd.DataFrame({
+        "Item": it["item"],
+        "n": it["n"],
+        "% correct (p)": (100 * it["p"]).round(0),
+        "Difficulty (logits)": it["difficulty"].round(2),
+        "SE": it["se"].round(2),
+        "95% interval": [f"{a:.2f} to {b:.2f}" for a, b in zip(it["ci_low"], it["ci_high"])],
+        "Rank (1 = hardest)": it["rank_hardest"],
+    })
+    st.markdown("**Item difficulty** (logit scale; the average student's ability = 0; higher = harder)")
+    st.dataframe(show, hide_index=True, width="stretch")
+
+    try:
+        import plotly.graph_objects as go
+        order = it.sort_values("difficulty")
+        fig = go.Figure(go.Scatter(
+            x=order["difficulty"], y=order["item"], mode="markers",
+            error_x=dict(type="data", symmetric=False,
+                         array=(order["ci_high"] - order["difficulty"]).values,
+                         arrayminus=(order["difficulty"] - order["ci_low"]).values),
+            marker=dict(size=8, color="#0077BB"),
+        ))
+        fig.update_layout(height=max(300, 22 * len(order) + 120), margin=dict(l=10, r=10, t=30, b=40),
+                          xaxis_title="Difficulty (logits) with 95% interval", yaxis=dict(autorange="reversed"),
+                          title="Item difficulties, easiest to hardest")
+        st.plotly_chart(fig, width="stretch")
+    except Exception:
+        pass
+    st.caption(
+        "The intervals describe uncertainty in estimating each item from THIS group; in our simulations "
+        "they covered the true value about 90–92% of the time (nominal 95%), so read them as slightly "
+        "optimistic. Difficulty here cannot separate a hard item from content that was not learned."
+    )
+    st.download_button(
+        "⬇ Download item difficulties (CSV)", show.to_csv(index=False).encode("utf-8"),
+        file_name=f"glmm_item_difficulty_{inst_key}_{form.replace(' ', '')}.csv", mime="text/csv", key="glmm_dl",
+    )
 
 
 def _render_irt_result(
