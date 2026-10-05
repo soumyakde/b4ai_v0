@@ -58,6 +58,13 @@ from core.analytics.correlational.correlation_engine import (
     run_mixed_model,
     run_repeated_measures_correlations,
 )
+from core.analytics.irt.ctt_item_analysis import (
+    compute_item_analysis,
+    compute_distractor_analysis,
+    list_forms,
+    subset_form,
+    sample_size_note,
+)
 try:
     from core.analytics.irt.irt_runner import (
         build_binary_response_matrix,
@@ -2346,6 +2353,36 @@ _STAT_HELP = {
         "not instead of it."
     ),
 }
+
+_CTT_HELP = """
+**Classical item analysis (CTT) -- Method 1 of 3 for judging item difficulty**
+
+**What it does.** For each question it reports the share of students who got it right
+(*p*, "item difficulty": higher = easier), how well it separates stronger from weaker
+students (the corrected item-total correlation, *r*), and how each answer option was used.
+For the whole test it reports KR-20 reliability and the standard error of measurement.
+
+**Use it when:** you want a quick, assumption-free look at which items to review, at almost
+any class size. Every number is shown with its uncertainty, so a small group is visible as a
+wide interval, not hidden.
+
+**Strengths:** easy to explain to teachers; works with small groups; needs no model fitting;
+catches mis-keyed items (negative discrimination, accuracy below chance) and dead distractors.
+
+**Limits:** *p* and *r* describe THIS group on THIS form of the test, so they change with the
+group. A low *p* cannot tell you whether the item is hard or the content was not learned.
+Item-total correlations are unstable in small groups (use them to flag, not to rank).
+KR-20 needs every student to have answered the same items, so each test **form** is analysed
+separately.
+
+**References.** Kuder & Richardson (1937), *Psychometrika* 2(3), 151-160 (KR-20) ·
+Crocker & Algina (1986), *Introduction to Classical and Modern Test Theory* ·
+Gierl, Bulut, Guo & Zhang (2017), *Review of Educational Research* 87(6), 1082-1116
+(distractor analysis; the < 5% non-functioning-distractor rule is credited there to
+Haladyna & Downing, 1993; ability-group trace table; distractor point-biserial of
+Attali & Fraenkel, 2000) · Wilson (1927), *JASA* 22(158), 209-212 (the intervals).
+Flag thresholds (p < .20, p > .90, r < .20) are common rules of thumb, not verdicts.
+"""
 
 _IRT_HELP = {
     "rasch": (
@@ -4877,6 +4914,23 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
     # Binary Assessment IRT
     # ==============================================================
     if irt_type == "Binary Assessment":
+        irt_method = st.radio(
+            "**Analysis method:**",
+            options=["Item Response Theory (Rasch / 2PL)", "Classical item analysis (CTT)"],
+            horizontal=True,
+            key="irt_bin_method",
+            help=(
+                "Classical item analysis works at almost any class size and is the "
+                "recommended first look. IRT needs larger groups: Linacre (1994) puts "
+                "item-difficulty error at about +/-1 logit with 50 students and +/-0.5 with "
+                "200; for 2PL, Hulin, Lissak & Drasgow (1982) found 30 items and about 500 "
+                "students adequate for some purposes."
+            ),
+        )
+        if irt_method.startswith("Classical"):
+            _render_ctt_item_analysis(canonical_df)
+            return
+
         st.markdown("### Binary Assessment — Item Response Theory")
 
         col1, col2 = st.columns(2)
@@ -5082,6 +5136,160 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
                         )
                 except ImportError:
                     st.error("Deploy core/analytics/irt/reliability_analysis.py first.")
+
+
+def _ctt_option_info(instrument_key: str, item_ids: List[str], canonical_df: pd.DataFrame):
+    """
+    Option letters / counts per item. Uses the instrument YAML when it lists options
+    (AI-CI, Misconceptions); for module MCQs (YAML holds ids only) falls back to the
+    letters A..max actually chosen, so the chance level there is an estimate.
+    """
+    letters: Dict[str, List[str]] = {}
+    try:
+        from core.analytics.datasets.canonical_loader import _build_instruments_dict
+        inst = _build_instruments_dict().get(instrument_key) or {}
+        for q in inst.get("questions", []) or []:
+            if isinstance(q, dict) and q.get("options") and q.get("id") in item_ids:
+                letters[q["id"]] = [str(o).split(":")[0].strip() for o in q["options"]]
+    except Exception:
+        letters = {}
+    inferred = False
+    missing = [i for i in item_ids if i not in letters]
+    if missing:
+        mask = ((canonical_df["instrument_key"] == instrument_key)
+                | canonical_df["instrument_key"].str.endswith("_" + instrument_key))
+        sub = canonical_df[mask & canonical_df["question_id"].isin(missing)]
+        for q, g in sub.groupby("question_id"):
+            seen = {str(v).split(":")[0].strip() for v in g["response_value"].dropna()}
+            seen = {x for x in seen if len(x) == 1 and x.isalpha()}
+            if seen:
+                top = max(ord(x.upper()) for x in seen)
+                letters[q] = [chr(c) for c in range(ord("A"), top + 1)]
+                inferred = True
+    return letters, {q: len(v) for q, v in letters.items()}, inferred
+
+
+def _render_ctt_item_analysis(canonical_df: pd.DataFrame) -> None:
+    """Classical (CTT) item analysis -- Method 1 of the item-difficulty options."""
+    st.markdown("### Binary Assessment — Classical Item Analysis (CTT)")
+    with st.expander("ℹ️ What this shows, when to use it, strengths and limits, references", expanded=False):
+        st.markdown(_CTT_HELP)
+
+    present = set(canonical_df["instrument_key"].unique()) if not canonical_df.empty else set()
+    options = {k: v for k, v in _ASSESSMENT_LABELS.items()
+               if k in present or any(str(x).endswith("_" + k) for x in present)}
+    if not options:
+        st.warning("No binary assessments in the current filter.")
+        return
+    label = st.selectbox("Assessment", options=list(options.values()), key="ctt_instrument")
+    inst_key = next(k for k, v in options.items() if v == label)
+
+    try:
+        matrix, item_ids = build_binary_response_matrix(canonical_df, inst_key)
+    except ValueError as e:
+        st.warning(str(e))
+        return
+
+    forms = list_forms(matrix)
+    if forms.empty:
+        st.warning("No scorable responses.")
+        return
+    if len(forms) > 1:
+        st.info(
+            f"This assessment was given in {len(forms)} different forms (students saw different "
+            "sets of items, e.g. before and after the question bank was revised). Classical "
+            "statistics are only defined within one form, so pick one."
+        )
+    st.dataframe(
+        forms[["form", "n_students", "n_items"]].rename(
+            columns={"form": "Form", "n_students": "Students", "n_items": "Items"}),
+        hide_index=True, width="stretch",
+    )
+    form = st.selectbox("Form to analyse", options=list(forms["form"]), key="ctt_form")
+    sub = subset_form(matrix, forms, form)
+
+    letters, n_opts, inferred = _ctt_option_info(inst_key, list(sub.columns), canonical_df)
+    res = compute_item_analysis(sub, n_options=n_opts or None)
+    if res.get("error"):
+        st.warning(res["error"])
+        return
+
+    note = res.get("note")
+    if note:
+        (st.warning if res["n_persons"] < 30 else st.info)(note)
+
+    t = res["test"]
+
+    def _fmt(v, d=2):
+        return f"{v:.{d}f}" if isinstance(v, (int, float)) and v == v else "n/a"
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Students", res["n_persons"])
+    c2.metric("Items", t.get("k_items"))
+    c3.metric("Mean item difficulty (p)", _fmt(t.get("mean_item_p")))
+    c4.metric("KR-20", _fmt(t.get("kr20")))
+    c5.metric("SEM (score points)", _fmt(t.get("sem")))
+    if t.get("k_items", 0) < 8:
+        st.caption("With fewer than 8 items KR-20 is low by construction (short tests are less reliable; "
+                   "Crocker & Algina, 1986). Judge it with that in mind.")
+    if inferred:
+        st.caption("Number of answer options was inferred from the letters students chose (A…max), "
+                   "so the below-chance check is approximate for this assessment.")
+
+    items = res["items"].copy()
+    show = pd.DataFrame({
+        "Item": items["item"],
+        "n": items["n"],
+        "% correct (p)": (100 * items["p"]).round(0),
+        "95% interval": [f"{100*a:.0f}–{100*b:.0f}%" for a, b in zip(items["p_ci_low"], items["p_ci_high"])],
+        "Item–total r": items["r_it"].round(2),
+        "r 95% interval": [("" if a != a else f"{a:.2f} to {b:.2f}")
+                           for a, b in zip(items["r_ci_low"], items["r_ci_high"])],
+        "KR-20 if deleted": items["alpha_if_deleted"].round(2),
+        "Review flags": items["flags"],
+    })
+    st.markdown("**Item statistics**")
+    st.dataframe(show, hide_index=True, width="stretch")
+    st.caption("p = share correct (higher = easier). It reflects this group and this test form, and cannot by "
+               "itself separate a hard item from content that was not learned.")
+    st.download_button(
+        "⬇ Download item statistics (CSV)", show.to_csv(index=False).encode("utf-8"),
+        file_name=f"ctt_item_statistics_{inst_key}_{form.replace(' ', '')}.csv",
+        mime="text/csv", key="ctt_dl_items",
+    )
+
+    with st.expander("🔎 Distractor analysis (how each answer option was used)", expanded=False):
+        st.caption(
+            "Shares of students choosing each option, overall and in five ability groups (g1 = lowest, "
+            "g5 = highest; ability = score on the other items). A well-working wrong option is chosen "
+            "more by weaker students. Options chosen by < 5% are flagged as non-functioning, except on "
+            "very easy items (Gierl et al., 2017)."
+        )
+        try:
+            students = list(sub.index)
+            dsub = canonical_df[canonical_df["user_id"].isin(students)
+                                & canonical_df["question_id"].isin(list(sub.columns))]
+            dist = compute_distractor_analysis(dsub, inst_key, option_letters=letters or None)
+        except Exception as e:  # an optional table must never break the tab
+            dist = pd.DataFrame()
+            st.warning(f"Distractor analysis unavailable: {e}")
+        if dist.empty:
+            st.info("No option-level data for this assessment.")
+        else:
+            d = dist.copy()
+            d["Option"] = d["option"] + d["keyed"].map({True: " ✔ (key)", False: ""})
+            cols = ["item", "Option", "share"] + [f"g{j}" for j in range(1, 6)] + ["distractor_r", "flags"]
+            d = d[cols].rename(columns={"item": "Item", "share": "All",
+                                        "distractor_r": "Distractor r", "flags": "Review flags"})
+            for c in ["All"] + [f"g{j}" for j in range(1, 6)]:
+                d[c] = (100 * d[c]).round(0)
+            d["Distractor r"] = d["Distractor r"].round(2)
+            st.dataframe(d, hide_index=True, width="stretch")
+            st.download_button(
+                "⬇ Download distractor table (CSV)", d.to_csv(index=False).encode("utf-8"),
+                file_name=f"ctt_distractors_{inst_key}_{form.replace(' ', '')}.csv",
+                mime="text/csv", key="ctt_dl_dist",
+            )
 
 
 def _render_irt_result(
