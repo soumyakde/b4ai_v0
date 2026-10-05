@@ -6,6 +6,7 @@ Optional: pass --live to also make ONE real Sonnet call per step on one item (co
 Usage (project root, env b4ai_v0):  python scripts/verify_item_review.py [--live]
 Exit code 0 = all checks passed.
 """
+import json
 import os
 import sys
 import tempfile
@@ -132,7 +133,7 @@ check("edited item (new hash) is treated as unrated", store.get_human("rev1", ed
 calls = []
 
 
-def fake_call(system, user, schema, max_tokens=4000, effort="medium"):
+def fake_call(system, user, schema, max_tokens=4000, effort="medium", provider="claude"):
     calls.append((system[:30], user, schema))
     if "answer key" in system and "NOT given" in system:      # step 1
         return dict(fake, data=dict(fake["data"], solved_answer="B"))
@@ -165,17 +166,88 @@ finally:
 est = bloom_llm.estimate_cost_usd(148, 2, 1)
 check("cost estimate for all 148 module items, 2 steps, 1 repeat is a few dollars at most", 0 < est < 5, f"${est:.2f}")
 
+
+# ---------------------------------------------------------------- 4b. multi-model: parsing, validation, retry, storage
+sch = bloom_llm.schema_step1(item)
+check("extract_json handles markdown fences and surrounding prose",
+      bloom_llm.extract_json("```json" + chr(10) + '{"a": 1}' + chr(10) + "```") == {"a": 1}
+      and bloom_llm.extract_json('Sure! {"a": 2} Hope it helps') == {"a": 2})
+good = {"solved_answer": "A", "solve_confidence": "high", "bloom_level": 2, "rationale": "r", "needs_figure": False}
+check("validator accepts a correct answer", bloom_llm.validate_against_schema(good, sch) == [])
+check("validator rejects bad level, missing key, extra key, wrong type",
+      len(bloom_llm.validate_against_schema(dict(good, bloom_level=7), sch)) == 1
+      and len(bloom_llm.validate_against_schema({k: v for k, v in good.items() if k != "rationale"}, sch)) == 1
+      and len(bloom_llm.validate_against_schema(dict(good, extra=1), sch)) == 1
+      and len(bloom_llm.validate_against_schema(dict(good, needs_figure="no"), sch)) == 1)
+check("schema instructions list every key and the allowed letters", all(k in bloom_llm.schema_instructions(sch) for k in sch["properties"])
+      and "unsure" in bloom_llm.schema_instructions(sch))
+check("four providers registered: claude, gpt, gemini, groq; Groq label does NOT claim Llama",
+      sorted(bloom_llm.PROVIDERS) == ["claude", "gemini", "gpt", "groq"] and "Llama" in bloom_llm.PROVIDERS["groq"]["label"]
+      and "no Llama" in bloom_llm.PROVIDERS["groq"]["label"])
+check("Claude cost is computed, other providers' cost is not assumed",
+      bloom_llm.cost_from_usage(1000, 1000, "claude") > 0 and bloom_llm.cost_from_usage(1000, 1000, "gpt") == 0)
+
+# retry path: first answer invalid -> one correction retry -> valid
+seq = iter(['not json at all', json.dumps(good)])
+orig_gpt = bloom_llm._call_openai
+bloom_llm._call_openai = lambda system, user, max_tokens: dict(bloom_llm._blank(), raw=next(seq), tokens_in=10, tokens_out=5)
+try:
+    r = bloom_llm._call("s", "u", sch, provider="gpt")
+    check("non-Claude provider: invalid first answer triggers ONE correction retry, then succeeds, tokens summed",
+          r["ok"] and r["data"]["bloom_level"] == 2 and r["tokens_in"] == 20 and r["tokens_out"] == 10)
+    bloom_llm._call_openai = lambda system, user, max_tokens: dict(bloom_llm._blank(), raw='{"bloom_level": 9}', tokens_in=1, tokens_out=1)
+    r = bloom_llm._call("s", "u", sch, provider="gpt")
+    check("two invalid answers -> clean error, nothing stored as ok", (not r["ok"]) and "required format" in r["error"])
+finally:
+    bloom_llm._call_openai = orig_gpt
+
+# multi-model storage: two models rate one item; reviewer-first applies to all; consensus + per-model columns
+mi = m1[2]
+def _fake(level, model):
+    return {"ok": True, "data": {"solved_answer": mi["key"], "solve_confidence": "high", "bloom_level": level, "rationale": "r",
+                                 "needs_figure": False, "blind_matches_key": True}, "raw": "{}", "error": None,
+            "stop_reason": "x", "tokens_in": 5, "tokens_out": 5}
+for model, lvl in (("claude-sonnet-5-5", 2), ("gpt-5.5", 4), ("gemini-2.5-pro", 2)):
+    rid2 = store.create_run("tester", model, "v", mi["instrument_key"], "blind", 1, 1, 0, tmp)
+    store.save_llm_result(rid2, mi, "blind", 0, _fake(lvl, model), model, "v", tmp)
+check("three models stored for one item", sorted(store.llm_models_for_item(mi, tmp)) == ["claude-sonnet-5-5", "gemini-2.5-pro", "gpt-5.5"])
+check("REVIEWER-FIRST (multi-model): nothing revealed before locking", store.reveal_llm_suggestions("rev9", mi, tmp) == {})
+store.lock_blind_rating("rev9", mi, 3, "x", tmp)
+rv = store.reveal_llm_suggestions("rev9", mi, tmp)
+check("after locking, all three models are revealed with their own levels", {m: v["level_median"] for m, v in rv.items()} ==
+      {"claude-sonnet-5-5": 2.0, "gpt-5.5": 4.0, "gemini-2.5-pro": 2.0})
+cons = store.consensus_level(rv)
+check("consensus = median of model medians (2), spread 2-4, 3 models", cons["median"] == 2.0 and (cons["min"], cons["max"]) == (2.0, 4.0) and cons["n_models"] == 3)
+t2 = store.summary_table([mi], "rev9", tmp)
+check("summary table has a column per model and the consensus", "llm[gpt-5.5]" in t2.columns and t2.loc[0, "llm_level_median"] == 2.0 and t2.loc[0, "llm_models"] == 3)
+h9 = store.save_final_decision("rev9", mi, 4, "agree with the GPT reading", tmp)
+check("final level equal to ANY model's median counts as 'adopted_llm'", h9["decision"] == "adopted_llm")
+orig_batch_call = bloom_llm._call
+bloom_llm._call = lambda system, user, schema, max_tokens=4000, effort="medium", provider="claude": dict(fake, data=dict(fake["data"]))
+try:
+    out2 = run_llm_batch(m1[:2], "tester", steps=("blind",), repeats=1, db_path=tmp, providers=("claude", "gpt", "gemini", "groq"))
+    check("batch over 4 providers: 4 runs, one per model id, 2 items each", len(out2["runs"]) == 4 and out2["n_ok"] == 8
+          and {v["model"] for v in out2["runs"].values()} == {bloom_llm.model_id(p) for p in bloom_llm.PROVIDERS})
+finally:
+    bloom_llm._call = orig_batch_call
+
 # ---------------------------------------------------------------- 5. optional live call
 if "--live" in sys.argv:
-    print("\nLIVE call to", bloom_llm.MODEL, "(item AI-CI Q4_1, step 1 and 2)")
     it = aici[0]
-    r = bloom_llm.rate_blind(it)
-    print("  step 1:", r["ok"], r["error"], r["data"], "tokens", r["tokens_in"], r["tokens_out"], "stop", r["stop_reason"])
-    check("live step 1 returned valid parsed JSON", r["ok"] and 1 <= r["data"]["bloom_level"] <= 6)
-    r2 = bloom_llm.review_key(it)
-    print("  step 2:", r2["ok"], r2["error"], r2["data"], "tokens", r2["tokens_in"], r2["tokens_out"])
-    check("live step 2 returned valid parsed JSON", r2["ok"] and r2["data"]["key_defensible"] in ("yes", "no", "uncertain"))
-    print("  cost this test: $%.4f" % (bloom_llm.cost_from_usage(r["tokens_in"] + r2["tokens_in"], r["tokens_out"] + r2["tokens_out"])))
+    only = [a.split("=", 1)[1] for a in sys.argv if a.startswith("--only=")]
+    for prov in bloom_llm.PROVIDERS:
+        if only and prov not in only:
+            continue
+        if not bloom_llm.provider_available(prov):
+            print("\nLIVE " + prov + ": no API key configured, skipped")
+            continue
+        print("\nLIVE " + prov + " -> " + bloom_llm.model_id(prov) + " (AI-CI Q4_1, steps 1 and 2)")
+        r = bloom_llm.rate_blind(it, provider=prov)
+        print("  step 1:", r["ok"], r["error"], r["data"], "tokens", r["tokens_in"], r["tokens_out"], "stop", r["stop_reason"])
+        check("live " + prov + " step 1: valid JSON, Bloom level 1-6", r["ok"] and 1 <= r["data"]["bloom_level"] <= 6, str(r["error"] or ""))
+        r2 = bloom_llm.review_key(it, provider=prov)
+        print("  step 2:", r2["ok"], r2["error"], (r2["data"] or {}).get("key_defensible"), "tokens", r2["tokens_in"], r2["tokens_out"])
+        check("live " + prov + " step 2: valid JSON key review", r2["ok"] and r2["data"]["key_defensible"] in ("yes", "no", "uncertain"), str(r2["error"] or ""))
 
 print("\n" + ("ALL CHECKS PASSED" if not fail else "FAILED: " + ", ".join(fail)))
 sys.exit(1 if fail else 0)

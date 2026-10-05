@@ -166,11 +166,15 @@ def save_llm_result(run_id: str, item: Dict, step: str, repeat_idx: int, res: Di
     c.close()
 
 
-def _latest_results(item: Dict, step: str, db_path=None) -> List[sqlite3.Row]:
+def _latest_results(item: Dict, step: str, db_path=None, model: Optional[str] = None) -> List[sqlite3.Row]:
     c = _conn(db_path)
-    rows = c.execute("SELECT * FROM item_llm_results WHERE instrument_key=? AND question_id=? AND item_hash=? "
-                     "AND step=? AND ok=1 ORDER BY created_at DESC, id DESC",
-                     (item["instrument_key"], item["question_id"], item["item_hash"], step)).fetchall()
+    q = ("SELECT * FROM item_llm_results WHERE instrument_key=? AND question_id=? AND item_hash=? "
+         "AND step=? AND ok=1")
+    args: list = [item["instrument_key"], item["question_id"], item["item_hash"], step]
+    if model:
+        q += " AND model=?"
+        args.append(model)
+    rows = c.execute(q + " ORDER BY created_at DESC, id DESC", args).fetchall()
     c.close()
     if not rows:
         return []
@@ -178,13 +182,14 @@ def _latest_results(item: Dict, step: str, db_path=None) -> List[sqlite3.Row]:
     return [r for r in rows if r["run_id"] == last_run]
 
 
-def llm_suggestion(item: Dict, db_path=None) -> Optional[Dict]:
+def llm_suggestion(item: Dict, db_path=None, model: Optional[str] = None) -> Optional[Dict]:
     """
     Latest successful LLM suggestion for this item version (blind step + key step) or None.
-    INTERNAL: callers showing it to a reviewer must use reveal_llm_suggestion().
+    With model=None this is the latest run of ANY model; pass a model id for one model.
+    INTERNAL: callers showing it to a reviewer must use reveal_llm_suggestions().
     """
-    blind = _latest_results(item, "blind", db_path)
-    key = _latest_results(item, "key", db_path)
+    blind = _latest_results(item, "blind", db_path, model)
+    key = _latest_results(item, "key", db_path, model)
     if not blind and not key:
         return None
     out: Dict[str, Any] = {"n_runs": len(blind)}
@@ -204,6 +209,35 @@ def llm_suggestion(item: Dict, db_path=None) -> Optional[Dict]:
             "implausible_distractors": json.loads(r["implausible_distractors"] or "[]"),
             "model": r["model"], "prompt_version": r["prompt_version"]}
     return out
+
+
+def llm_models_for_item(item: Dict, db_path=None) -> List[str]:
+    c = _conn(db_path)
+    rows = c.execute("SELECT DISTINCT model FROM item_llm_results WHERE instrument_key=? AND question_id=? "
+                     "AND item_hash=? AND ok=1 ORDER BY model",
+                     (item["instrument_key"], item["question_id"], item["item_hash"])).fetchall()
+    c.close()
+    return [r["model"] for r in rows]
+
+
+def llm_suggestions_by_model(item: Dict, db_path=None) -> Dict[str, Dict]:
+    """{model id: suggestion} for every model that has a stored result for this item version. INTERNAL."""
+    out = {}
+    for m in llm_models_for_item(item, db_path):
+        sug = llm_suggestion(item, db_path, model=m)
+        if sug:
+            out[m] = sug
+    return out
+
+
+def consensus_level(suggestions: Dict[str, Dict]) -> Optional[Dict]:
+    """Median of each model's median level, with the spread across models. None if no Bloom suggestions."""
+    meds = {m: s["level_median"] for m, s in suggestions.items() if s.get("levels")}
+    if not meds:
+        return None
+    vals = sorted(meds.values())
+    return {"median": float(statistics.median(vals)), "min": min(vals), "max": max(vals), "n_models": len(vals),
+            "per_model": meds}
 
 
 # ----------------------------------------------------------------------------- human side
@@ -232,10 +266,17 @@ def lock_blind_rating(rater: str, item: Dict, level: int, rationale: str, db_pat
 
 
 def reveal_llm_suggestion(rater: str, item: Dict, db_path=None) -> Optional[Dict]:
-    """Return the LLM suggestion ONLY if this reviewer has already locked their own rating."""
+    """Latest LLM suggestion (any model), ONLY if this reviewer has already locked their own rating."""
     if not get_human(rater, item, db_path):
         return None
     return llm_suggestion(item, db_path)
+
+
+def reveal_llm_suggestions(rater: str, item: Dict, db_path=None) -> Dict[str, Dict]:
+    """{model: suggestion} for ALL models, ONLY after this reviewer has locked their own rating."""
+    if not get_human(rater, item, db_path):
+        return {}
+    return llm_suggestions_by_model(item, db_path)
 
 
 def save_final_decision(rater: str, item: Dict, final_level: int, rationale: str, db_path=None) -> Dict:
@@ -244,14 +285,14 @@ def save_final_decision(rater: str, item: Dict, final_level: int, rationale: str
         raise ValueError("Lock your own rating first.")
     if final_level not in range(1, 7):
         raise ValueError("Bloom level must be 1-6.")
-    sug = llm_suggestion(item, db_path)
+    sugs = llm_suggestions_by_model(item, db_path)
+    model_levels = {int(round(x["level_median"])) for x in sugs.values() if x.get("levels")}
     if final_level == h["blind_level"]:
         decision = "kept"
     else:
         if not (rationale or "").strip():
             raise ValueError("A written rationale is required when the final level differs from your own first rating.")
-        decision = ("adopted_llm" if sug and sug.get("levels") and final_level == round(sug["level_median"])
-                    else "changed")
+        decision = "adopted_llm" if final_level in model_levels else "changed"
     c = _conn(db_path)
     c.execute("UPDATE item_human_ratings SET final_level=?, final_rationale=?, decision=?, decided_at=? "
               "WHERE instrument_key=? AND question_id=? AND item_hash=? AND rater=?",
@@ -280,16 +321,25 @@ def summary_table(items: List[Dict], rater: str, db_path=None) -> pd.DataFrame:
     rows = []
     for it in items:
         h = get_human(rater, it, db_path)
-        s = llm_suggestion(it, db_path) if h else None      # never expose LLM level for unlocked items
+        by_model = llm_suggestions_by_model(it, db_path) if h else {}   # never expose LLM levels for unlocked items
+        cons = consensus_level(by_model) if by_model else None
+        s = llm_suggestion(it, db_path) if h else None
         kr = (s or {}).get("key_review") or {}
-        rows.append({
+        for m_ in by_model.values():
+            if m_.get("key_review"):
+                kr = m_["key_review"]
+                break
+        row_models = {f"llm[{m}]": (round(x["level_median"], 1) if x.get("levels") else None)
+                      for m, x in by_model.items()}
+        rows.append({**row_models,
             "item": it["question_id"], "in_current_selection": it.get("in_current_selection"),
             "depends_on_figure": it["depends_on_figure"], "item_hash": it["item_hash"],
             "my_first_rating": h["blind_level"] if h else None,
             "my_final_rating": (h["final_level"] if h and h["final_level"] else None),
             "decision": h["decision"] if h else None,
-            "llm_level_median": s.get("level_median") if s else None,
-            "llm_level_spread": (f"{s['level_min']}–{s['level_max']}" if s and s.get("levels") else None),
+            "llm_level_median": cons["median"] if cons else None,
+            "llm_models": cons["n_models"] if cons else 0,
+            "llm_level_spread": (f"{cons['min']:g}–{cons['max']:g}" if cons else None),
             "llm_blind_matches_key": (None if not s or not s.get("blind_matches_key") else
                                       all(v == 1 for v in s["blind_matches_key"] if v is not None)),
             "llm_key_defensible": kr.get("key_defensible"),

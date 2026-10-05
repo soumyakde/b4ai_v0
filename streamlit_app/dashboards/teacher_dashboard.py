@@ -5188,35 +5188,60 @@ _ITEM_REVIEW_HELP = """
 
 **What this is.** For each assessment question you record its cognitive demand on the six levels of the
 revised Bloom's taxonomy (Remember, Understand, Apply, Analyze, Evaluate, Create; Anderson & Krathwohl, 2001).
-An AI model (Claude Sonnet) can suggest a level and check the answer key, but **you rate first and the
-suggestion is hidden until you lock your own rating**; you then decide. Nothing the AI says is stored as
-the rating of record.
+AI models can suggest a level and check the answer key. You can ask one or several of four models: **Claude**
+(Anthropic), **ChatGPT** (OpenAI), **Gemini** (Google) and an **open-weight model hosted by Groq** (GPT-OSS 120B;
+Groq currently offers no Llama chat model). **You rate first and every suggestion stays hidden until you lock your
+own rating**; you then decide. Nothing an AI says is stored as the rating of record.
 
 **Use it when:** the group is too small for statistics (for example fewer than 30 students), or to check that
 the questions match the intended thinking, or to find answer-key problems.
 
-**Strengths:** works at any group size; needs no student data (only the question wording is sent to the AI);
-catches ambiguous wording and possible key errors.
+**Strengths:** works at any group size; needs no student data (only the question wording is sent to the AI
+companies); several models give a quick sense of how settled a judgement is; catches ambiguous wording and
+possible key errors.
 
 **Limits -- please read.** A Bloom level describes the thinking asked for, **not how hard the question is**:
 Kibble & Johnson (2011) found no correlation between item cognitive level and students' scores. AI suggestions
 agree only partly with human raters, so treat them as a second opinion, and people tend to over-trust automated
-advice (Parasuraman & Manzey, 2010), which is why your rating is locked in first. The AI cannot see pictures or
-diagrams: items that mention one are flagged and its suggestion is less reliable. The AI is not run at a fixed
-setting, so repeating a request can give a different answer; you can request up to 3 runs to see the spread.
+advice (Parasuraman & Manzey, 2010), which is why your rating is locked in first. **The AI models do not give the
+same answer every time**, so a single run can change if you ask again; request up to 3 runs to see the spread. Different
+models are different companies' products and can disagree with each other. The AI cannot see pictures or diagrams:
+items that mention one are flagged and its suggestion is less reliable. Only Claude's cost is calculated here; for
+the others the screen shows token counts (Groq's free tier has a daily token limit).
 
 **Agreement.** Weighted kappa (Cohen, 1968) with a bootstrap interval; the verbal bands (Landis & Koch, 1977) are a
 rough guide only, and with few items the interval is wide.
 """
 
+_IR_SHORT = {"claude": "Claude", "gpt": "ChatGPT", "gemini": "Gemini", "groq": "Open-weight (Groq)"}
+
 
 def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
-    """Item Review: reviewer-first Bloom rating + advisory LLM suggestions (Method 3). Teacher/researcher only."""
+    """Item Review: reviewer-first Bloom rating + advisory multi-model LLM suggestions (Method 3). Teacher/researcher only."""
     from core.analytics.item_review import store as irs
     from core.analytics.item_review import bloom_llm as ibl
     from core.analytics.item_review.agreement import agreement_summary
     from core.analytics.item_review.item_bank import BLOOM_LEVELS, list_instruments, load_item_bank
     from core.analytics.item_review.runner import run_llm_batch
+
+    def _prov_of(model_id: str):
+        return next((k for k in ibl.PROVIDERS if ibl.model_id(k) == model_id), None)
+
+    def _mlabel(model_id: str) -> str:
+        k = _prov_of(model_id)
+        return f"{_IR_SHORT[k]} ({model_id})" if k else model_id
+
+    def _pick_models(key: str, default=("claude",)):
+        avail = [k for k in ibl.PROVIDERS if ibl.provider_available(k)]
+        missing = [k for k in ibl.PROVIDERS if k not in avail]
+        sel = st.multiselect(
+            "AI models to ask", options=avail, default=[d for d in default if d in avail],
+            format_func=lambda k: f"{_IR_SHORT[k]} — {ibl.model_id(k)}", key=key,
+            help="Each model is a different company's product. Claude's cost is calculated; for the others the "
+                 "screen shows token counts. Groq hosts an open-weight model (no Llama chat model there today).")
+        if missing:
+            st.caption("Not available on this server (no API key): " + ", ".join(_IR_SHORT[k] for k in missing))
+        return sel
 
     st.subheader("🧠 Item Review (cognitive demand)")
     with st.expander("ℹ️ What this is, when to use it, strengths and limits, references", expanded=False):
@@ -5279,50 +5304,61 @@ def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
                     st.rerun()
                 except ValueError as e:
                     st.error(str(e))
-            st.info("The AI suggestion stays hidden until you lock your rating.")
+            st.info("AI suggestions stay hidden until you lock your rating.")
             return
         st.success(f"Your first rating: **{_fmt_level(human['blind_level'])}** (locked {human['blind_locked_at']}).")
         if human["blind_rationale"]:
             st.caption("Your reason: " + human["blind_rationale"])
 
-        # ---- Step 2: AI suggestion
-        st.markdown("#### Step 2 — AI suggestion (Claude Sonnet) and your decision")
-        sug = irs.reveal_llm_suggestion(username, item)
+        # ---- Step 2: AI suggestions (one or several models)
+        st.markdown("#### Step 2 — AI suggestions and your decision")
+        sugs = irs.reveal_llm_suggestions(username, item)
+        provs = _pick_models(f"ir_provs_{inst_key}_{qid}")
         c1, c2 = st.columns(2)
         with c1:
-            reps = st.number_input("Runs (1-3)", min_value=1, max_value=3, value=1, step=1, key=f"ir_reps_{inst_key}_{qid}",
-                                   help="Several runs show how much the AI's answer varies.")
+            reps = st.number_input("Runs per model (1-3)", min_value=1, max_value=3, value=1, step=1,
+                                   key=f"ir_reps_{inst_key}_{qid}",
+                                   help="The AI does not give the same answer every time; several runs show how much it varies.")
         with c2:
-            if st.button("✨ Get AI suggestion for this item" if not sug else "↻ Ask again (new run)",
-                         key=f"ir_ask_{inst_key}_{qid}"):
-                with st.spinner("Asking Sonnet…"):
-                    out = run_llm_batch([item], username, steps=("blind",), repeats=int(reps))
-                if out["n_err"]:
-                    st.error("The AI request failed or was declined; see the batch log in the 'AI batch run' view. "
-                             "You can still rate this item yourself.")
+            if st.button("✨ Get AI suggestion(s)" if not sugs else "↻ Ask again (new run)",
+                         key=f"ir_ask_{inst_key}_{qid}", disabled=not provs):
+                with st.spinner("Asking " + ", ".join(_IR_SHORT[p] for p in provs) + "…"):
+                    out = run_llm_batch([item], username, steps=("blind",), repeats=int(reps), providers=provs)
+                bad = [f"{_IR_SHORT[p]}: {v['n_err']} failed" for p, v in out["runs"].items() if v["n_err"]]
+                if bad:
+                    st.session_state["ir_last_err"] = "; ".join(bad)
                 st.rerun()
-        if not sug or not sug.get("levels"):
+        if st.session_state.get("ir_last_err"):
+            st.error("Some requests failed or were declined (" + st.session_state.pop("ir_last_err") +
+                     "). You can still rate this item yourself.")
+        shown = {m: x for m, x in sugs.items() if x.get("levels")}
+        if not shown:
             st.info("No AI suggestion stored yet for this wording of the item. You can finish without one.")
         else:
-            spread = (f"{sug['level_min']}–{sug['level_max']}" if sug["level_min"] != sug["level_max"] else str(sug["level_min"]))
-            med = int(round(sug["level_median"]))
-            st.markdown(f"AI suggested level **{spread}** (median: {BLOOM_LEVELS[med]['label']}) "
-                        f"over {sug['n_runs']} run(s) · model {sug['model']} · prompt {sug['prompt_version']}")
-            st.caption("AI rationale: " + (sug["rationale"] or ""))
-            if sug["n_runs"] == 1:
-                st.warning("⚠️ This is a **single run**. The AI does not give the same answer every time, so asking again "
-                           "could produce a different level. Use 'Runs (1-3)' and 'Ask again' to see how much it varies "
-                           "before leaning on it.")
-            elif sug["level_min"] != sug["level_max"]:
-                st.warning(f"⚠️ The AI's runs **disagreed** (levels {sug['level_min']}–{sug['level_max']}). Treat its "
-                           "suggestion for this item as uncertain.")
-            if sug.get("needs_figure"):
-                st.warning("The AI said this item depends on a figure it could not see.")
-            mk = [v for v in sug["blind_matches_key"] if v is not None]
-            if mk:
-                st.caption("The AI answered the item BLIND (without the key): "
-                           + ("it agreed with the keyed answer." if all(mk) else
-                              "**it did NOT always agree with the keyed answer — worth checking the key (Step 3).**"))
+            cols = st.columns(len(shown)) if len(shown) <= 4 else [st.container() for _ in shown]
+            for col, (m, x) in zip(cols, shown.items()):
+                with col:
+                    spread = (f"{x['level_min']}–{x['level_max']}" if x["level_min"] != x["level_max"] else str(x["level_min"]))
+                    med = int(round(x["level_median"]))
+                    st.markdown(f"**{_mlabel(m)}**  \nsuggested level **{spread}** ({BLOOM_LEVELS[med]['label']}), "
+                                f"{x['n_runs']} run(s)")
+                    st.caption("Rationale: " + (x["rationale"] or ""))
+                    if x["n_runs"] == 1:
+                        st.caption("⚠️ Single run: it may answer differently if asked again.")
+                    elif x["level_min"] != x["level_max"]:
+                        st.caption(f"⚠️ Its runs disagreed ({x['level_min']}–{x['level_max']}).")
+                    if x.get("needs_figure"):
+                        st.caption("⚠️ Says the item depends on a figure it could not see.")
+                    mk = [v for v in x["blind_matches_key"] if v is not None]
+                    if mk and not all(mk):
+                        st.caption("⚠️ Its BLIND answer did not always match the key (see Step 3).")
+            cons = irs.consensus_level(shown)
+            if cons and cons["n_models"] > 1:
+                if cons["min"] == cons["max"]:
+                    st.success(f"The {cons['n_models']} models agree on level {cons['median']:g}.")
+                else:
+                    st.warning(f"⚠️ The {cons['n_models']} models **disagree** (levels {cons['min']:g}–{cons['max']:g}; "
+                               f"median {cons['median']:g}). Treat the AI view of this item as uncertain.")
         default = human["final_level"] or human["blind_level"]
         fin = st.radio("Your final level", levels, index=levels.index(default), format_func=_fmt_level,
                        key=f"ir_fin_{inst_key}_{qid}")
@@ -5344,21 +5380,20 @@ def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
         else:
             keytxt = next((o["text"] for o in item["options"] if o["label"] == str(item["key"])), "")
             st.caption(f"Keyed answer: **{item['key']}** — {keytxt}")
-            if st.button("🔎 Check key and options with the AI", key=f"ir_keychk_{inst_key}_{qid}"):
-                with st.spinner("Asking Sonnet…"):
-                    run_llm_batch([item], username, steps=("key",))
+            kprovs = _pick_models(f"ir_kprovs_{inst_key}_{qid}")
+            if st.button("🔎 Check key and options with the AI", key=f"ir_keychk_{inst_key}_{qid}", disabled=not kprovs):
+                with st.spinner("Asking " + ", ".join(_IR_SHORT[p] for p in kprovs) + "…"):
+                    run_llm_batch([item], username, steps=("key",), providers=kprovs)
                 st.rerun()
-            kr = (sug or {}).get("key_review") if sug else None
-            if kr is None:
-                s2 = irs.llm_suggestion(item)
-                kr = (s2 or {}).get("key_review")
-            if kr:
-                st.markdown(f"AI view of the key: **{kr['key_defensible']}**"
-                            + (f" · another option also arguably correct: **{', '.join(kr['other_arguably_correct'])}**"
-                               if kr["other_arguably_correct"] else "")
-                            + (f" · implausible options: **{', '.join(kr['implausible_distractors'])}**"
-                               if kr["implausible_distractors"] else ""))
-                st.caption(kr["comments"])
+            for m, x in irs.llm_suggestions_by_model(item).items():
+                kr = x.get("key_review")
+                if kr:
+                    st.markdown(f"**{_mlabel(m)}** on the key: **{kr['key_defensible']}**"
+                                + (f" · another option also arguably correct: **{', '.join(kr['other_arguably_correct'])}**"
+                                   if kr["other_arguably_correct"] else "")
+                                + (f" · implausible options: **{', '.join(kr['implausible_distractors'])}**"
+                                   if kr["implausible_distractors"] else ""))
+                    st.caption(kr["comments"])
             kd = st.radio("Your decision about the key", ["key_ok", "needs_review"], horizontal=True,
                           format_func=lambda v: "Key is fine" if v == "key_ok" else "Needs review",
                           index=0 if (human.get("key_decision") or "key_ok") == "key_ok" else 1,
@@ -5375,36 +5410,37 @@ def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
         done = tbl["my_first_rating"].notna().sum()
         st.caption(f"{done} of {len(items)} items rated by you. AI levels appear only for items you have locked.")
         st.dataframe(tbl.drop(columns=["item_hash"]), hide_index=True, width="stretch")
-        both = tbl.dropna(subset=["my_first_rating", "llm_level_median"])
-        if len(both) >= 3:
-            a = both["my_first_rating"].astype(int).values
-            b = both["llm_level_median"].round().astype(int).values
-            s = agreement_summary(a, b)
-            st.markdown("**Agreement: your first rating vs the AI (median of its runs)**")
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Items", s["n"])
-            m2.metric("Exact match", f"{100*s['exact']:.0f}%")
-            m3.metric("Within 1 level", f"{100*s['within1']:.0f}%")
-            m4.metric("Weighted κ", "n/a" if s["kappa_w"] != s["kappa_w"] else f"{s['kappa_w']:.2f}")
-            if s["kappa_lo"] == s["kappa_lo"]:
-                st.caption(f"Bootstrap 95% interval for κ: {s['kappa_lo']:.2f} to {s['kappa_hi']:.2f}; rough band: {s['band']} "
-                           "(Landis & Koch, 1977). Quadratic weights (Cohen, 1968).")
-            else:
-                st.caption("Too few items for an interval; read κ as indicative only.")
+
+        rows = []
+        model_cols = [c for c in tbl.columns if c.startswith("llm[")]
+        for col, name in [(c, c[4:-1]) for c in model_cols] + [("llm_level_median", "Consensus of models (median)")]:
+            both = tbl.dropna(subset=["my_first_rating", col])
+            if len(both) >= 3:
+                s = agreement_summary(both["my_first_rating"].astype(int).values, both[col].round().astype(int).values)
+                rows.append({"AI": _mlabel(name) if name in [ibl_m for ibl_m in [c[4:-1] for c in model_cols]] else name,
+                             "Items": s["n"], "Exact": f"{100*s['exact']:.0f}%", "Within 1": f"{100*s['within1']:.0f}%",
+                             "Weighted κ": "n/a" if s["kappa_w"] != s["kappa_w"] else f"{s['kappa_w']:.2f}",
+                             "κ 95% interval": ("" if s["kappa_lo"] != s["kappa_lo"] else f"{s['kappa_lo']:.2f} to {s['kappa_hi']:.2f}"),
+                             "Band": s["band"]})
+        if rows:
+            st.markdown("**Agreement: your first rating vs each AI model (median of its runs)**")
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+            st.caption("Weighted kappa with quadratic weights (Cohen, 1968); bootstrap interval; verbal band after Landis & "
+                       "Koch (1977), a rough guide only. With few items read these as indicative.")
             changed = int((tbl["decision"].isin(["changed", "adopted_llm"])).sum())
             st.caption(f"You changed your rating after seeing the AI on {changed} item(s).")
         else:
             st.info("Lock ratings for at least 3 items that also have an AI suggestion to see agreement.")
 
         # Bloom level vs observed difficulty (module banks only)
-        if inst_key.startswith("module") and not canonical_df.empty:
+        if inst_key.startswith("module") and "@" not in inst_key and not canonical_df.empty:
             try:
                 matrix, _ = build_binary_response_matrix(canonical_df, inst_key)
                 forms = list_forms(matrix)
                 sub = subset_form(matrix, forms, "Form 1")
                 pdf = pd.DataFrame({"item": sub.columns, "pct_correct": (100 * sub.mean()).round(0).values})
-                j = tbl.merge(pdf, on="item").dropna(subset=["my_final_rating"] if tbl["my_final_rating"].notna().any() else ["my_first_rating"])
                 col = "my_final_rating" if tbl["my_final_rating"].notna().any() else "my_first_rating"
+                j = tbl.merge(pdf, on="item").dropna(subset=[col])
                 if len(j) >= 5:
                     from scipy import stats as _st
                     rho, p = _st.spearmanr(j[col], j["pct_correct"])
@@ -5428,6 +5464,7 @@ def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
             pool = [i for i in items if i.get("in_current_selection")]
         elif scope.startswith("Only items I have"):
             pool = [i for i in items if not irs.get_human(username, i)]
+        provs = _pick_models("ir_b_provs")
         c1, c2, c3 = st.columns(3)
         with c1:
             s_blind = st.checkbox("Bloom suggestion (blind)", value=True, key="ir_b_blind")
@@ -5436,21 +5473,31 @@ def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
         with c3:
             reps = st.number_input("Runs per item (1-3)", 1, 3, 1, key="ir_b_reps")
         steps = tuple(s for s, on in (("blind", s_blind), ("key", s_key)) if on)
-        est = ibl.estimate_cost_usd(len(pool), steps=max(1, len(steps)), repeats=int(reps) if s_blind else 1)
-        st.info(f"{len(pool)} items × {len(steps)} step(s) with model **{ibl.MODEL}**. Estimated cost about "
-                f"**${est:.2f}** (an estimate; the actual cost is shown afterwards). Only question wording is sent.")
+        n_rep = int(reps) if s_blind else 1
+        toks = ibl.estimate_tokens(len(pool), steps=max(1, len(steps)), repeats=n_rep) * max(1, len(provs))
+        claude_est = ibl.estimate_cost_usd(len(pool), steps=max(1, len(steps)), repeats=n_rep) if "claude" in provs else 0.0
+        st.info(f"{len(pool)} items × {len(steps)} step(s) × {len(provs)} model(s) ≈ **{toks:,} tokens** in total (rough). "
+                + (f"Claude's share costs about **${claude_est:.2f}** (an estimate). " if "claude" in provs else "")
+                + ("The other models are billed by their own providers (not calculated here). " if set(provs) - {"claude"} else "")
+                + "Only question wording is sent.")
+        if "groq" in provs and toks > 80000:
+            st.warning("Groq's free tier has a daily token limit (100,000 tokens/day per the platform notes). A run this "
+                       "large may be cut off by rate limits; failed calls are recorded and the batch continues.")
         if len(pool) > 200:
             st.error("Too many items for one run (limit 200).")
             return
-        ok = st.checkbox("I understand this uses the project's Anthropic API key and spends the amount above.", key="ir_b_ok")
-        if st.button("▶ Run AI batch", disabled=not (ok and steps and pool), key="ir_b_run"):
+        ok = st.checkbox("I understand this uses the project's API keys for the models selected and spends what the providers charge.",
+                         key="ir_b_ok")
+        if st.button("▶ Run AI batch", disabled=not (ok and steps and pool and provs), key="ir_b_run"):
             bar = st.progress(0.0)
-            out = run_llm_batch(pool, username, steps=steps, repeats=int(reps),
+            out = run_llm_batch(pool, username, steps=steps, repeats=int(reps), providers=provs,
                                 progress=lambda i, n, q: bar.progress(min(1.0, i / max(n, 1)), text=f"Item {q}"))
             bar.empty()
-            (st.success if out["n_err"] == 0 else st.warning)(
-                f"Run {out['run_id']}: {out['n_ok']} succeeded, {out['n_err']} failed or were declined · actual cost "
-                f"${out['cost_usd']:.3f}.")
+            for p, v in out["runs"].items():
+                (st.success if v["n_err"] == 0 else st.warning)(
+                    f"{_IR_SHORT[p]} ({v['model']}): {v['n_ok']} succeeded, {v['n_err']} failed or were declined · "
+                    f"{v['tokens_in'] + v['tokens_out']:,} tokens"
+                    + (f" · ${v['cost_usd']:.3f}" if p == "claude" else "") + f" · run {v['run_id']}")
 
 
 _ITEM_METHOD_GUIDE = """
