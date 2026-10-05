@@ -1,16 +1,11 @@
-# WORDING v2.0 - effective for responses submitted from 2026-10-05 onward.
-# Q3_4 and Q3_6 were reworded for clarity (v1.0 wording: Q3_4 'AI methods work similar to the brain.';
-# Q3_6 '...are all examples of AI.'). Question IDs and answer keys are UNCHANGED (Q3_4 False, Q3_6 Yes),
-# so scoring is unaffected, but Q3_4/Q3_6 must be analysed separately before/after 2026-10-05.
-# v1.0 copy: docs/instrument_versions/ (kept outside surveys/ because every *.yaml here is loaded).
 ---
-instrument_key: post_ai_misconceptions_assessment
+instrument_key: pre_ai_misconceptions_assessment
 instrument_type: assessment
-version: 2.0
+version: 1.0
 
 module_id: global
-scope: post
-title: "Post-Intervention: What you know about AI now?"
+scope: pre
+title: "Pre-Intervention: What you know about AI already?"
 
 questions:
   - id: Q3_1
@@ -37,7 +32,7 @@ questions:
       - "False"
 
   - id: Q3_4
-    text: "AI methods work in exactly the same way as the human brain."
+    text: "AI methods work similar to the brain."
     type: select
     options:
       - "True"
@@ -52,8 +47,8 @@ questions:
 
   - id: Q3_6
     text: >
-      Recommendation systems in games, social media, or search engines that learn
-      from what you do are examples of AI.
+      Recommendation systems in games, social media, or search engines are all
+      examples of AI.
     type: select
     options:
       - "Yes"
