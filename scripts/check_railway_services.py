@@ -10,8 +10,8 @@ Usage:  python scripts/check_railway_services.py
 Exit code 0 = all up, 1 = at least one is not up.
 """
 import sys
-import urllib.request
-import urllib.error
+
+import requests          # uses its own certificate bundle; plain urllib fails on this PC's Windows certificate store
 
 URLS = {
     "basics4ai-staging (production)": "https://basics4ai-staging-production.up.railway.app/",
@@ -29,14 +29,11 @@ URLS = {
 
 
 def probe(url):
-    req = urllib.request.Request(url, headers={"User-Agent": "b4ai-health-check"})
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return r.status, r.headers.get("x-railway-fallback")
-    except urllib.error.HTTPError as e:
-        return e.code, e.headers.get("x-railway-fallback")
+        r = requests.get(url, timeout=30, headers={"User-Agent": "b4ai-health-check"})
+        return r.status_code, r.headers.get("x-railway-fallback")
     except Exception as e:
-        return None, str(e)[:60]
+        return None, type(e).__name__
 
 
 bad = 0
