@@ -70,7 +70,8 @@ canon["cohort_id"] = None
 
 # Documented fact (informational): how the scoring file stores the two constructs
 cm = compute_construct_means(canon).pivot_table(index="user_id", columns="construct", values="mean_score")
-print("Construct means as stored (1-4). Raw 'Strongly agree' to amotivation items is stored as 1, i.e. reversed:")
+print("Construct means as stored (1-4). Since the 2026-10-08 fix every SIMS construct reads 'higher = MORE'")
+print("(before the fix, Strongly agree to an amotivation item was stored as 1, i.e. reversed):")
 print(cm.round(2).to_string(), "\n")
 
 rai = compute_rai(canon, "b4ai_sims_survey").groupby("user_id").rai.mean()

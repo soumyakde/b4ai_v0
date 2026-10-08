@@ -22,11 +22,13 @@ reverse_scale:
   Agree: 2
   Strongly agree: 1
 
-reverse_questions:
-  - Q4_1
-  - Q4_2
-  - Q4_3
-  - Q4_4
-  - Q5_1
-  - Q5_2
-  - Q5_3
+# SIMS direction (changed 2026-10-08): NO item is reverse-scored. Every SIMS item is keyed so that
+# "Strongly agree" = MORE of that regulation ("Because I have no choice" = more External regulation;
+# "I do not see any [good reasons]" = more Amotivation), the standard SIMS direction (Guay et al., 2000).
+# The constructs therefore read "higher = more" for all four subscales, and
+#   RAI = 2*Intrinsic + Identified - External - 2*Amotivation   (correlation_engine.compute_rai)
+#   CPI_process flips External and Amotivation ON PURPOSE so that higher = better (cpi_engine.compute_cpi_process)
+# are both correct as written. Before this date Q4_1-Q4_4 and Q5_1-Q5_3 were reversed here AND corrected again
+# downstream (double reversal): see PROJECT_STATUS.md and scripts/verify_cpi_sims_direction.py.
+# reverse_scale above is kept (unused) so a future item can be reverse-scored by adding its id below.
+reverse_questions: []
