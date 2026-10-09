@@ -1,4 +1,10 @@
 """
+*** PRE-FIX DIAGNOSTIC ONLY (kept for the record). Valid ONLY while b4ai_sims_scoring.yaml still reverse-scores
+*** Q4_1-Q4_4 and Q5_1-Q5_3. Since the 2026-10-08 fix (reverse_questions: []) the stored scores are RAW, so this script's
+*** extra "(5 - stored)" flip is itself wrong and its "AS CODED" / "CORRECTED" labels are SWAPPED in meaning (the AS CODED
+*** line now holds the correct values). To re-run the paper numbers after the fix use scripts/rerun_lak27_rai_analyses.py;
+*** to check direction use scripts/verify_cpi_sims_direction.py.
+
 diagnose_sims_direction_real_data.py -- READ-ONLY impact check of the SIMS double-reversal defect on the pilot data
 (see scripts/verify_cpi_sims_direction.py and PROJECT_STATUS.md, 2026-10-08).
 
