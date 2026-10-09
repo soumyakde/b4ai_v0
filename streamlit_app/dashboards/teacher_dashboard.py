@@ -673,14 +673,14 @@ _SCCCES_QUESTION_MAP = {
 }
 
 # ── SIMS ────────────────────────────────────────────────────────────────
-# SIMS scoring rationale (De Charms & Muir 1978 / Deci & Ryan 1985 SDT):
-# Q4_1–Q4_4 (External Regulation) and Q5_1–Q5_3 (Amotivation) are item-reverse-coded.
-# Reason: Agree with "Because I have no choice" is a BAD outcome; after reversal (5−x)
-# the scored mean is HIGH when the learner is NOT externally regulated or amotivated.
-# This makes ALL four SIMS constructs point in the same positive direction:
-#   HIGH score on any SIMS construct = BETTER outcome for the learner.
-# The scoring YAML (b4ai_sims_scoring.yaml) lists Q4_1–Q4_4 and Q5_1–Q5_3
-# under reverse_questions, which DatasetBuilder applies as 5−raw_score.
+# SIMS scoring (changed 2026-10-08; Guay, Vallerand & Blanchard 2000): NO SIMS item is reverse-scored.
+# Every item is keyed so "Strongly agree" = 4 = MORE of that regulation ("Because I have no choice" = more
+# External regulation; "I do not see any [good reasons]" = more Amotivation). So:
+#   Intrinsic / Identified: HIGH mean = better;  External / Amotivation: HIGH mean = WORSE.
+# b4ai_sims_scoring.yaml has reverse_questions: []. The direction is corrected exactly once, inside
+# RAI (subtracts External and Amotivation) and CPI_process (5 − mean). The interpretation panel handles the
+# two "high = worse" constructs through reverse_coded=True in _CONSTRUCT_DEFINITIONS.
+# The False flags below mean "no item-level reversal" (used for the ⚠️ columns).
 _SIMS_QUESTION_MAP = {
     "Q2_1":  ("Intrinsic Motivation",   "Because I think that this activity is interesting.",                                                         False),
     "Q2_2":  ("Intrinsic Motivation",   "Because I like doing this activity.",                                                                         False),
@@ -688,19 +688,15 @@ _SIMS_QUESTION_MAP = {
     "Q3_1":  ("Identified Regulation",  "Because I think that this activity is good for me.",                                                          False),
     "Q3_2":  ("Identified Regulation",  "Because I think that this activity is important for me.",                                                     False),
     "Q3_3":  ("Identified Regulation",  "Because this activity will help me later.",                                                                   False),
-    # ⚠️ Q4_1–Q4_4: External Regulation — item-reverse-coded
-    #   Raw: Agree=3 means externally pressured (bad). Reversed: Agree→2, so
-    #   higher score = LESS external regulation = GOOD. Same direction as intrinsic/identified.
-    "Q4_1":  ("External Regulation",    "Because I am supposed to do it.",                                                                             True),
-    "Q4_2":  ("External Regulation",    "Because I have no choice.",                                                                                   True),
-    "Q4_3":  ("External Regulation",    "Because I do not want to get in trouble.",                                                                    True),
-    "Q4_4":  ("External Regulation",    "Because I feel I have to do it.",                                                                             True),
-    # ⚠️ Q5_1–Q5_3: Amotivation — item-reverse-coded
-    #   Raw: Agree=3 means amotivated (bad). Reversed: Agree→2, so
-    #   higher score = LESS amotivation = GOOD. Consistent direction across all SIMS constructs.
-    "Q5_1":  ("Amotivation",            "There may be good reasons to do this activity, but personally, I do not see any.",                           True),
-    "Q5_2":  ("Amotivation",            "I am doing this activity, but I am not sure if it is worth it.",                                             True),
-    "Q5_3":  ("Amotivation",            "I am doing this activity, but I am not sure it is a good thing to pursue it.",                               True),
+    # Q4_1–Q4_4: External Regulation — scored raw (Agree = 3 = more external pressure; higher mean = worse)
+    "Q4_1":  ("External Regulation",    "Because I am supposed to do it.",                                                                             False),
+    "Q4_2":  ("External Regulation",    "Because I have no choice.",                                                                                   False),
+    "Q4_3":  ("External Regulation",    "Because I do not want to get in trouble.",                                                                    False),
+    "Q4_4":  ("External Regulation",    "Because I feel I have to do it.",                                                                             False),
+    # Q5_1–Q5_3: Amotivation — scored raw (Agree = 3 = more amotivated; higher mean = worse)
+    "Q5_1":  ("Amotivation",            "There may be good reasons to do this activity, but personally, I do not see any.",                           False),
+    "Q5_2":  ("Amotivation",            "I am doing this activity, but I am not sure if it is worth it.",                                             False),
+    "Q5_3":  ("Amotivation",            "I am doing this activity, but I am not sure it is a good thing to pursue it.",                               False),
 }
 
 # Merged view for backward-compat lookup (instrument+qid → tuple)
@@ -1321,25 +1317,28 @@ _CONSTRUCT_DEFINITIONS = {
         "scale_high": "Learners personally endorsed the activity as valuable and important for their development.",
         "reverse_coded": False,
     },
+    # External Regulation and Amotivation are scored RAW (no item is reversed; "Strongly agree" = 4 = MORE of
+    # the regulation), so a HIGH mean is the concerning direction. reverse_coded=True makes the interpretation
+    # panel show high = red / low = green. scale_low/scale_high below therefore describe LOW and HIGH raw means.
     "external_regulation": {
         "label": "External Regulation",
         "definition": "Doing the activity because of external pressure, rules, or to avoid consequences.",
         "analytic_focus": ["rewards", "pressure", "compliance"],
-        "scale_low":  "Learners felt strongly externally pressured — they felt they had no choice or feared consequences.",
+        "scale_low":  "Learners were NOT externally pressured — they chose to participate freely.",
         "scale_mid":  "Learners felt some external pressure but also had some personal buy-in.",
-        "scale_high": "Learners were NOT externally pressured — they chose to participate freely.",
-        "reverse_coded": False,
-        "item_reverse_note": "⚠️ Items Q4_1–Q4_4 are item-reverse-coded (5−x) so that HIGH scores indicate LESS external regulation. A low mean (≤ 2.5) warrants attention — it means learners felt coerced rather than freely choosing to participate.",
+        "scale_high": "Learners felt strongly externally pressured — they felt they had no choice or feared consequences.",
+        "reverse_coded": True,
+        "reverse_note": "⚠️ Higher = MORE external regulation (worse). Items Q4_1–Q4_4 are scored as answered (Strongly disagree = 1 … Strongly agree = 4); none is reverse-scored. A high mean (≥ 3.0) warrants attention — it means learners felt coerced rather than freely choosing to participate. The direction is flipped only inside RAI and CPI.",
     },
     "amotivation": {
         "label": "Amotivation",
         "definition": "A lack of motivation — feeling no reason to do the activity and disconnected from outcomes.",
         "analytic_focus": ["disengagement", "helplessness", "lack of purpose"],
-        "scale_low":  "Learners were amotivated — they could see no reason to participate and felt disconnected.",
+        "scale_low":  "Learners were NOT amotivated — they had clear reasons to participate and felt engaged.",
         "scale_mid":  "Learners showed some motivational uncertainty or occasional disengagement.",
-        "scale_high": "Learners were NOT amotivated — they had clear reasons to participate and felt engaged.",
-        "reverse_coded": False,
-        "item_reverse_note": "⚠️ Items Q5_1–Q5_3 are item-reverse-coded (5−x) so that HIGH scores indicate LESS amotivation. A low mean (≤ 2.0) is a concern — it means learners saw little point in the activity.",
+        "scale_high": "Learners were amotivated — they could see no reason to participate and felt disconnected.",
+        "reverse_coded": True,
+        "reverse_note": "⚠️ Higher = MORE amotivation (worse). Items Q5_1–Q5_3 are scored as answered (Strongly disagree = 1 … Strongly agree = 4); none is reverse-scored. A high mean (≥ 3.0) is a concern — it means learners saw little point in the activity. The direction is flipped only inside RAI and CPI.",
     },
 }
 
@@ -8919,10 +8918,13 @@ Source: **Guay, Vallerand & Blanchard (2000)**. Measures motivation type in
 four constructs: Intrinsic Motivation, Identified Regulation, External
 Regulation, and Amotivation. The original instrument has 16 items on a
 7-point scale; this adaptation uses 13 items on a 4-point scale. Items
-Q4_1–Q4_4 (External Regulation) and Q5_1–Q5_3 (Amotivation) are
-reverse-scored so that all four constructs read in the same direction:
-**higher mean = better self-determined motivation**. The Relative Autonomy
-Index (RAI), computed from these four constructs, adapts the standard SDT
+Q4_1–Q4_4 (External Regulation) and Q5_1–Q5_3 (Amotivation) are NOT
+reverse-scored: for all four constructs a higher mean means MORE of that
+regulation (Strongly disagree = 1 … Strongly agree = 4). A high mean is
+therefore good for Intrinsic Motivation and Identified Regulation but a
+concern for External Regulation and Amotivation. The Relative Autonomy
+Index (RAI), computed from these four constructs, subtracts External
+Regulation and Amotivation (higher RAI = more self-determined) and adapts the standard SDT
 scoring protocol -- see **Grolnick & Ryan (1989)**, **Ryan & Connell
 (1989)**, **Vallerand (2007)**, and **Ünlü (2016)** below -- to this
 instrument's 4-subscale structure, which has no Introjected Regulation
@@ -8971,7 +8973,7 @@ published instrument for full item listings.
                 "*Motivation and Emotion, 24*(3), 175–213. "
                 "https://doi.org/10.1023/a:1005614228250"
             ),
-            "note": "SIMS source instrument. Adapted for Basics4AI: 13 of 16 items, 4-point (not 7-point) scale; External Regulation and Amotivation items reverse-scored.",
+            "note": "SIMS source instrument. Adapted for Basics4AI: 13 of 16 items, 4-point (not 7-point) scale; no item reverse-scored (higher External Regulation / Amotivation = worse; direction flipped only inside RAI and CPI).",
         },
         {
             "section": "Instruments",
