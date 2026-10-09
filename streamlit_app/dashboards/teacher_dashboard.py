@@ -1493,12 +1493,15 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
                         range_y=[1, 4],
                         color_discrete_sequence=px.colors.qualitative.Safe,
                     )
+                    # Legend below the plot: a right-hand legend was clipped
+                    # ("Situational Cognitive Engagemen") by the narrow right margin.
                     _fig_comp.update_layout(
-                        height=420,
-                        margin=dict(t=50, b=10, l=10, r=120),
+                        height=460,
+                        margin=dict(t=50, b=10, l=10, r=20),
                         xaxis_title="Module",
                         yaxis_title="Mean Score (1–4 Likert)",
-                        legend_title="Composite",
+                        legend=dict(title="Composite", orientation="h",
+                                    yanchor="top", y=-0.22, xanchor="left", x=0),
                     )
                     st.plotly_chart(_fig_comp, width="stretch")
                 else:
@@ -1550,6 +1553,12 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
                 "Mean score per construct per module (averaged across all students). "
                 "Each line traces how a construct evolves through the programme."
             )
+            if selected_survey_base == "b4ai_sims_survey":
+                st.caption(
+                    "Direction: for Intrinsic Motivation and Identified Regulation a higher "
+                    "mean is better; for External Regulation and Amotivation a HIGHER mean is "
+                    "worse (more pressure / more amotivation). No SIMS item is reverse-scored."
+                )
             # Compute mean score per construct × module
             _traj = (
                 cm_survey.groupby(["module_id", "construct"])["mean_score"]
@@ -1591,20 +1600,24 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
                     range_y=[1, 4],
                     color_discrete_sequence=px.colors.qualitative.Safe,
                 )
-                _fig_traj.add_hline(
-                    y=3.0,
-                    line_dash="dot",
-                    line_color="gray",
-                    annotation_text="3.0 (positive threshold)",
-                    annotation_position="right",
-                )
-                _fig_traj.add_hline(
-                    y=2.5,
-                    line_dash="dash",
-                    line_color="orange",
-                    annotation_text="2.5 (attention threshold)",
-                    annotation_position="right",
-                )
+                # The 3.0 / 2.5 reference lines assume "higher = better", which is true
+                # for every SCCCES construct but NOT for SIMS External Regulation and
+                # Amotivation (higher = worse), so they are drawn for SCCCES only.
+                if selected_survey_base == "b4ai_sccces_survey":
+                    _fig_traj.add_hline(
+                        y=3.0,
+                        line_dash="dot",
+                        line_color="gray",
+                        annotation_text="3.0 (positive threshold)",
+                        annotation_position="right",
+                    )
+                    _fig_traj.add_hline(
+                        y=2.5,
+                        line_dash="dash",
+                        line_color="orange",
+                        annotation_text="2.5 (attention threshold)",
+                        annotation_position="right",
+                    )
                 _fig_traj.update_layout(
                     height=480,
                     margin=dict(t=50, b=10, l=10, r=120),
