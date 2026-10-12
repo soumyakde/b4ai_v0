@@ -48,5 +48,14 @@ src = open(os.path.join(ROOT, "streamlit_app", "dashboards", "teacher_dashboard.
 check("interpretation panel: reverse_coded branch shows High as red",
       'if cdef.get("reverse_coded"):\n                        if cmean_val >= 3.0:\n                            interp = f"🔴 High' in src)
 
+# Construct-trajectory chart: the 3.0 / 2.5 "higher = better" reference lines and their caption must be SCCCES-only
+i_line = src.index("_fig_traj.add_hline(")
+check("trajectory chart: 3.0 / 2.5 reference lines drawn for SCCCES only",
+      'if selected_survey_base == "b4ai_sccces_survey":' in src[max(0, i_line - 300):i_line])
+i_cap = src.index("Dotted line = 3.0")
+check("trajectory chart: caption about the dotted/dashed lines is SCCCES-only and SIMS has its own caption",
+      'if selected_survey_base == "b4ai_sccces_survey":' in src[max(0, i_cap - 200):i_cap]
+      and "No threshold lines are drawn for SIMS" in src)
+
 print("\n" + ("ALL CHECKS PASSED" if not fail else "FAILED: " + ", ".join(fail)))
 sys.exit(1 if fail else 0)

@@ -1633,11 +1633,21 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
                 )
                 st.line_chart(_pivot)
 
-            st.caption(
-                "Dotted line = 3.0 (positive engagement threshold). "
-                "Dashed line = 2.5 (attention warranted). "
-                "Scale: 1 = Strongly disagree → 4 = Strongly agree."
-            )
+            if selected_survey_base == "b4ai_sccces_survey":
+                st.caption(
+                    "Dotted line = 3.0 (positive engagement threshold). "
+                    "Dashed line = 2.5 (attention warranted). "
+                    "Scale: 1 = Strongly disagree → 4 = Strongly agree."
+                )
+            else:
+                # SIMS: no threshold lines are drawn (higher = worse for External
+                # Regulation and Amotivation), so the caption must not describe them.
+                st.caption(
+                    "No threshold lines are drawn for SIMS: a higher mean is better for "
+                    "Intrinsic Motivation and Identified Regulation but worse for External "
+                    "Regulation and Amotivation. "
+                    "Scale: 1 = Strongly disagree → 4 = Strongly agree."
+                )
             st.divider()
 
     if cm_display.empty:
