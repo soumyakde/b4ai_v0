@@ -6177,6 +6177,8 @@ def _count_available_sources(cohort_ids: list = None) -> dict:
                     "WHERE instrument_name LIKE '%module_reflections%' "
                     "AND response_value IS NOT NULL"
                 ).fetchall()
+            from core.exclusions import is_excluded as _is_excl
+            rows = [r for r in rows if not _is_excl(r[0])]
             if cohort_ids:
                 from auth.user_manager import get_user_cohort_map
                 _cmap = get_user_cohort_map()
@@ -6248,6 +6250,8 @@ def _load_combined_transcripts(
                 "AND response_value IS NOT NULL"
             ).fetchall()
             conn.close()
+            from core.exclusions import is_excluded as _is_excl
+            rows = [r for r in rows if not _is_excl(r[0])]
             _reflection_cohort_map = {}
             if cohort_ids:
                 try:
@@ -8492,6 +8496,8 @@ def _execute_lo_run(username, models, temperature,
         "AND response_value IS NOT NULL"
     ).fetchall()
     conn3.close()
+    from core.exclusions import is_excluded as _is_excl
+    rows3 = [r for r in rows3 if not _is_excl(r[0])]
     lo_trans = []
     for uid, iname, rval in rows3:
         if not str(rval).strip(): continue

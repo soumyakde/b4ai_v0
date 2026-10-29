@@ -108,6 +108,13 @@ check("every binary-assessment response is scorable", nan_rows == 0, "%d unscora
 
 # 4. research export returns one row per response (the old query returned ~17.6M)
 n_resp = conn.execute("SELECT COUNT(*) FROM responses").fetchone()[0]
+# participants listed in B4AI_EXCLUDE_USERS are deliberately left out of the canonical data (core/exclusions.py)
+from core.exclusions import excluded_user_ids
+_excl = excluded_user_ids()
+if _excl:
+    _n_excl = sum(1 for (u,) in conn.execute("SELECT user_id FROM responses") if str(u).strip().lower() in _excl)
+    n_resp -= _n_excl
+    print("note: %d raw rows of excluded participants %s are not expected in the canonical data" % (_n_excl, sorted(_excl)))
 check("canonical data has one row per response", len(canonical_df) == n_resp, "%d rows vs %d responses" % (len(canonical_df), n_resp))
 dups = canonical_df.duplicated(["user_id", "instrument_key", "question_id", "submitted_at"]).sum()
 check("no duplicated response rows", dups == 0, "%d duplicates" % dups)

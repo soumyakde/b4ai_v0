@@ -328,6 +328,10 @@ def load_canonical_data(
     )
     conn.close()
 
+    # Participants listed in B4AI_EXCLUDE_USERS (e.g. left mid-session) are left out of every calculation.
+    from core.exclusions import drop_excluded, excluded_user_ids
+    responses_df = drop_excluded(responses_df)
+
     #if responses_df.empty: #results in teacher dashboard being inaccessible due to a crash when no data is in the responses.db
     #    raise ValueError("responses table is empty.")
     # replaced by 
@@ -341,6 +345,10 @@ def load_canonical_data(
 
     # ---- 3. Load cohort map ----
     cohort_map = get_user_cohort_map()
+    _excl = excluded_user_ids()
+    if _excl:
+        demographics_df = drop_excluded(demographics_df)
+        cohort_map = {k: v for k, v in cohort_map.items() if str(k).strip().lower() not in _excl}
 
     # ---- 4. Build instruments_dict and scoring_dict ----
     instruments_dict = _build_instruments_dict()

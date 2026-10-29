@@ -517,6 +517,8 @@ def load_for_analysis(
             params.append(f"%{module_id}%")
         rows = conn.execute(query, params).fetchall()
         conn.close()
+        from core.exclusions import is_excluded
+        rows = [r for r in rows if not is_excluded(r[0])]
         results = []
         for uid, iname, rval in rows:
             if rval and str(rval).strip():
