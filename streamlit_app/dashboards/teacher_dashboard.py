@@ -58,6 +58,7 @@ from core.analytics.correlational.correlation_engine import (
     run_mixed_model,
     run_repeated_measures_correlations,
 )
+from core.analytics.irt.glmm_item_difficulty import fit_item_difficulty_glmm
 from core.analytics.irt.ctt_item_analysis import (
     compute_item_analysis,
     compute_distractor_analysis,
@@ -10242,6 +10243,133 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
 # iii. IRT Analysis report
 # -----------------------------------------------------------------------
 
+def _irt_report_sections(canonical_df, irt_report_type, irt_model=None,
+                         irt_survey=None, irt_construct=None):
+    """Build the IRT report sections. Returns (sections, failed) where failed lists
+    (instrument, reason) for every instrument that could not be analysed."""
+    sections = [{"heading": "IRT Analysis Report", "body": ""}]
+    failed = []
+    if irt_report_type == "Binary Assessments":
+        # Run Rasch on all binary instruments
+        for inst_key in [
+            "precourse_pre_ai_misconceptions_assessment",
+            "postcourse_post_ai_misconceptions_assessment",
+            "precourse_pre_aici_assessment",
+            "postcourse_post_aici_assessment",
+        ] + [f"module{n}_content_mcq_assessment" for n in discover_all_module_numbers()]:
+            label = _ASSESSMENT_LABELS.get(inst_key, inst_key)
+            try:
+                try:
+                    mat, item_ids = build_binary_response_matrix(canonical_df, inst_key)
+                except ValueError as _e:
+                    if str(_e).startswith("No data found"):
+                        continue   # instrument not administered: nothing to report
+                    raise
+                if len(mat) < 3:
+                    failed.append((label, f"only {len(mat)} student(s); at least 3 needed"))
+                    continue
+                if irt_model.startswith("Classical") or irt_model.startswith("Random"):
+                    _forms = list_forms(mat)
+                    if _forms.empty:
+                        failed.append((label, "no response form found"))
+                        continue
+                    _sub = subset_form(mat, _forms, _forms.loc[0, "form"])
+                    _label = label
+                    _fnote = (f" Largest form of {len(_forms)} (students saw different item sets in "
+                              "different cohorts)." if len(_forms) > 1 else "")
+                    if irt_model.startswith("Classical"):
+                        _ca = compute_item_analysis(_sub)
+                        if _ca.get("error"):
+                            failed.append((label, str(_ca["error"])))
+                            continue
+                        _it = _ca["items"]
+                        _tbl = pd.DataFrame({
+                            "Item": _it["item"], "n": _it["n"],
+                            "% correct": (100 * _it["p"]).round(0),
+                            "r (item-total)": _it["r_it"].round(2),
+                            "Review flags": _it["flags"],
+                        })
+                        _t = _ca["test"]
+                        _kr = _t.get("kr20")
+                        sections.append({
+                            "heading": f"Classical item analysis - {_label}",
+                            "body": (f"Students: {_ca['n_persons']}  |  Items: {_t.get('k_items')}  |  "
+                                     f"KR-20: {(f'{_kr:.2f}' if _kr == _kr else 'n/a')}.{_fnote} "
+                                     f"{_ca.get('note') or ''}"),
+                            "table": _tbl,
+                            "caption": ("p = share correct (higher = easier); r = corrected item-total "
+                                        "correlation. Describes this group on this form only. "
+                                        "Kuder & Richardson (1937); Crocker & Algina (1986)."),
+                        })
+                    else:
+                        _g = fit_item_difficulty_glmm(_sub, engine="python")
+                        if _g.get("error"):
+                            failed.append((label, str(_g["error"])))
+                            continue
+                        _gi = _g["items"]
+                        _tbl = pd.DataFrame({
+                            "Item": _gi["item"], "% correct": (100 * _gi["p"]).round(0),
+                            "Difficulty (logits)": _gi["difficulty"].round(2), "SE": _gi["se"].round(2),
+                            "Rank (1=hardest)": _gi["rank_hardest"],
+                        })
+                        sections.append({
+                            "heading": f"Random-effects item difficulty - {_label}",
+                            "body": (f"Students: {_g['n_persons']}  |  Items: {_g['n_items']}  |  "
+                                     f"Item effects: {_g['mode']}.{_fnote} " + " ".join(_g.get("warnings", []))),
+                            "table": _tbl,
+                            "caption": ("Logit scale, average student = 0, higher = harder. Python engine "
+                                        "(variational Bayes); intervals run slightly narrow. "
+                                        "De Boeck et al. (2011); Doran et al. (2007); Linacre (1994)."),
+                        })
+                    continue
+                if "2PL" in irt_model:
+                    res = run_2pl_model(mat, item_ids)
+                else:
+                    res = run_rasch_model(mat, item_ids)
+                if res.get("error"):
+                    failed.append((label, str(res["error"])))
+                    continue
+                params = res.get("item_params", pd.DataFrame())
+                sections.append({
+                    "heading": f"IRT — {label}",
+                    "body":    (
+                        f"Model: {res['model_type']}  |  "
+                        f"N persons: {res['n_persons']}  |  "
+                        f"N items: {res['n_items']}  |  "
+                        f"AIC: {res.get('aic','—')}  |  "
+                        + " ".join(res.get("warnings", []))
+                    ),
+                    "table":   params.round(3) if not params.empty else None,
+                    "caption": "Item parameters estimated by IRT model.",
+                })
+            except Exception as _e:
+                failed.append((label, f"{type(_e).__name__}: {_e}"))
+    else:
+        survey_key = ("b4ai_sccces_survey"
+                      if irt_survey == _SURVEY_LABELS["b4ai_sccces_survey"]
+                      else "b4ai_sims_survey")
+        lmat, litem_ids = build_likert_response_matrix(
+            canonical_df, survey_key, irt_construct
+        )
+        res = run_grm_model(lmat, litem_ids)
+        if res.get("error"):
+            failed.append((irt_construct.replace("_", " ").title(), str(res["error"])))
+        else:
+            params = res.get("item_params", pd.DataFrame())
+            sections.append({
+                "heading": f"GRM — {irt_construct.replace('_',' ').title()}",
+                "body":    (
+                    f"Model: {res['model_type']}  |  "
+                    f"N persons: {res['n_persons']}  |  "
+                    f"N items: {res['n_items']}"
+                ),
+                "table":   params.round(3) if not params.empty else None,
+                "caption": "Item parameters from Graded Response Model.",
+            })
+
+    return sections, failed
+
+
 def _report_irt(canonical_df: pd.DataFrame) -> None:
     st.markdown("### iii. IRT Analysis Report")
     st.caption("Generates a PDF of IRT model results for the selected instrument.")
@@ -10250,6 +10378,7 @@ def _report_irt(canonical_df: pd.DataFrame) -> None:
         st.error("IRT library (girth) not available — cannot generate IRT report.")
         return
 
+    irt_model = irt_survey = irt_construct = None
     col1, col2 = st.columns(2)
     with col1:
         irt_report_type = st.selectbox(
@@ -10278,114 +10407,17 @@ def _report_irt(canonical_df: pd.DataFrame) -> None:
 
     if st.button("📄 Generate IRT Report (PDF)", key="rpt_irt_gen", type="primary"):
         with st.spinner("Fitting model and building PDF…"):
-            sections = [{"heading": "IRT Analysis Report", "body": ""}]
             try:
-                if irt_report_type == "Binary Assessments":
-                    # Run Rasch on all binary instruments
-                    for inst_key in [
-                        "precourse_pre_ai_misconceptions_assessment",
-                        "postcourse_post_ai_misconceptions_assessment",
-                        "precourse_pre_aici_assessment",
-                        "postcourse_post_aici_assessment",
-                    ] + [f"module{n}_content_mcq_assessment" for n in discover_all_module_numbers()]:
-                        try:
-                            mat, item_ids = build_binary_response_matrix(canonical_df, inst_key)
-                            if len(mat) < 3:
-                                continue
-                            if irt_model.startswith("Classical") or irt_model.startswith("Random"):
-                                _forms = list_forms(mat)
-                                if _forms.empty:
-                                    continue
-                                _sub = subset_form(mat, _forms, _forms.loc[0, "form"])
-                                _label = _ASSESSMENT_LABELS.get(inst_key, inst_key)
-                                _fnote = (f" Largest form of {len(_forms)} (students saw different item sets in "
-                                          "different cohorts)." if len(_forms) > 1 else "")
-                                if irt_model.startswith("Classical"):
-                                    _ca = compute_item_analysis(_sub)
-                                    if _ca.get("error"):
-                                        continue
-                                    _it = _ca["items"]
-                                    _tbl = pd.DataFrame({
-                                        "Item": _it["item"], "n": _it["n"],
-                                        "% correct": (100 * _it["p"]).round(0),
-                                        "r (item-total)": _it["r_it"].round(2),
-                                        "Review flags": _it["flags"],
-                                    })
-                                    _t = _ca["test"]
-                                    _kr = _t.get("kr20")
-                                    sections.append({
-                                        "heading": f"Classical item analysis - {_label}",
-                                        "body": (f"Students: {_ca['n_persons']}  |  Items: {_t.get('k_items')}  |  "
-                                                 f"KR-20: {(f'{_kr:.2f}' if _kr == _kr else 'n/a')}.{_fnote} "
-                                                 f"{_ca.get('note') or ''}"),
-                                        "table": _tbl,
-                                        "caption": ("p = share correct (higher = easier); r = corrected item-total "
-                                                    "correlation. Describes this group on this form only. "
-                                                    "Kuder & Richardson (1937); Crocker & Algina (1986)."),
-                                    })
-                                else:
-                                    _g = fit_item_difficulty_glmm(_sub, engine="python")
-                                    if _g.get("error"):
-                                        continue
-                                    _gi = _g["items"]
-                                    _tbl = pd.DataFrame({
-                                        "Item": _gi["item"], "% correct": (100 * _gi["p"]).round(0),
-                                        "Difficulty (logits)": _gi["difficulty"].round(2), "SE": _gi["se"].round(2),
-                                        "Rank (1=hardest)": _gi["rank_hardest"],
-                                    })
-                                    sections.append({
-                                        "heading": f"Random-effects item difficulty - {_label}",
-                                        "body": (f"Students: {_g['n_persons']}  |  Items: {_g['n_items']}  |  "
-                                                 f"Item effects: {_g['mode']}.{_fnote} " + " ".join(_g.get("warnings", []))),
-                                        "table": _tbl,
-                                        "caption": ("Logit scale, average student = 0, higher = harder. Python engine "
-                                                    "(variational Bayes); intervals run slightly narrow. "
-                                                    "De Boeck et al. (2011); Doran et al. (2007); Linacre (1994)."),
-                                    })
-                                continue
-                            if "2PL" in irt_model:
-                                res = run_2pl_model(mat, item_ids)
-                            else:
-                                res = run_rasch_model(mat, item_ids)
-                            if res.get("error"):
-                                continue
-                            label = _ASSESSMENT_LABELS.get(inst_key, inst_key)
-                            params = res.get("item_params", pd.DataFrame())
-                            sections.append({
-                                "heading": f"IRT — {label}",
-                                "body":    (
-                                    f"Model: {res['model_type']}  |  "
-                                    f"N persons: {res['n_persons']}  |  "
-                                    f"N items: {res['n_items']}  |  "
-                                    f"AIC: {res.get('aic','—')}  |  "
-                                    + " ".join(res.get("warnings", []))
-                                ),
-                                "table":   params.round(3) if not params.empty else None,
-                                "caption": "Item parameters estimated by IRT model.",
-                            })
-                        except Exception:
-                            pass
-                else:
-                    survey_key = ("b4ai_sccces_survey"
-                                  if irt_survey == _SURVEY_LABELS["b4ai_sccces_survey"]
-                                  else "b4ai_sims_survey")
-                    lmat, litem_ids = build_likert_response_matrix(
-                        canonical_df, survey_key, irt_construct
-                    )
-                    res = run_grm_model(lmat, litem_ids)
-                    if not res.get("error"):
-                        params = res.get("item_params", pd.DataFrame())
-                        sections.append({
-                            "heading": f"GRM — {irt_construct.replace('_',' ').title()}",
-                            "body":    (
-                                f"Model: {res['model_type']}  |  "
-                                f"N persons: {res['n_persons']}  |  "
-                                f"N items: {res['n_items']}"
-                            ),
-                            "table":   params.round(3) if not params.empty else None,
-                            "caption": "Item parameters from Graded Response Model.",
-                        })
-
+                sections, failed = _irt_report_sections(
+                    canonical_df, irt_report_type,
+                    irt_model=irt_model,
+                    irt_survey=irt_survey,
+                    irt_construct=irt_construct)
+                if failed:
+                    sections.append({
+                        "heading": "Not analysed",
+                        "body": "\n".join(f"- {_n}: {_why}" for _n, _why in failed),
+                    })
                 pdf_bytes = _build_pdf(sections, "IRT Analysis Report")
                 st.download_button(
                     "⬇️ Download IRT Report (PDF)",
@@ -10394,7 +10426,14 @@ def _report_irt(canonical_df: pd.DataFrame) -> None:
                     mime="application/pdf",
                     key="rpt_irt_dl",
                 )
-                st.success("PDF ready.")
+                if len(sections) - (1 if failed else 0) <= 1:
+                    st.warning("No analysis section could be produced, so the PDF has no results. "
+                               "See the list below.")
+                else:
+                    st.success("PDF ready.")
+                if failed:
+                    st.warning("Not analysed (also listed at the end of the PDF):\n\n"
+                               + "\n".join(f"- **{_n}**: {_why}" for _n, _why in failed))
             except Exception as e:
                 st.error(f"IRT report error: {e}")
 
