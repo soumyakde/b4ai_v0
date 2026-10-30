@@ -9542,6 +9542,22 @@ published instrument for full item listings.
 # PDF builder — shared utility
 # -----------------------------------------------------------------------
 
+# Characters the PDF font (Helvetica) has no glyph for print as black squares. LLM text (ITA reports) often
+# contains these; map them to plain look-alikes. Characters Helvetica or its fallbacks can draw are left alone.
+_PDF_CHAR_MAP = {
+    **{c: "-" for c in "‐‑‒⁃"},      # hyphen, non-breaking hyphen, figure dash, hyphen bullet
+    "―": "—",                                      # horizontal bar -> em dash
+    **{c: " " for c in "           　"},
+    **{c: "" for c in "­​‌‍⁠﻿"},   # soft hyphen, zero-width characters
+}
+_PDF_CHAR_TABLE = str.maketrans(_PDF_CHAR_MAP)
+
+
+def _pdf_clean(text) -> str:
+    """Replace characters the PDF font cannot draw (black squares) by plain look-alikes."""
+    return str(text).translate(_PDF_CHAR_TABLE)
+
+
 def _build_pdf(sections: list, title: str) -> bytes:
     """
     Build a PDF report from a list of content sections.
@@ -9604,6 +9620,14 @@ def _build_pdf(sections: list, title: str) -> bytes:
     )
 
     story = []
+    title = _pdf_clean(title)
+    sections = [
+        {**sec,
+         **{k: _pdf_clean(sec[k]) for k in ("heading", "body", "caption") if sec.get(k)},
+         **({"table": sec["table"].rename(columns=_pdf_clean).astype(str).apply(lambda c: c.map(_pdf_clean))}
+            if sec.get("table") is not None and not sec["table"].empty else {})}
+        for sec in sections
+    ]
 
     # ── Cover ──────────────────────────────────────────────────────────────
     story.append(Paragraph("Basics4AI Programme", styles["Heading2"]))
