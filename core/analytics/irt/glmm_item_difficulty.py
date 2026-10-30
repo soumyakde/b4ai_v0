@@ -194,6 +194,12 @@ def sample_size_warnings(n_persons: int, n_items: int, mode: str) -> List[str]:
     return w
 
 
+def rank_hardest(difficulty: pd.Series, decimals: int = 2) -> pd.Series:
+    """1 = hardest. Ranks use the difficulty as displayed (rounded), so items that show the same
+    difficulty share a rank instead of being split by hidden digits."""
+    return difficulty.round(decimals).rank(ascending=False, method="min").astype(int)
+
+
 def fit_item_difficulty_glmm(
     matrix: pd.DataFrame,
     engine: str = "auto",
@@ -257,7 +263,7 @@ def fit_item_difficulty_glmm(
     items["ci_high"] = items["difficulty"] + 1.96 * items["se"]
     cnt = long.groupby("item")["y"].agg(n="count", p="mean")
     items = items.merge(cnt, left_on="item", right_index=True, how="left")
-    items["rank_hardest"] = items["difficulty"].rank(ascending=False, method="min").astype(int)
+    items["rank_hardest"] = rank_hardest(items["difficulty"])
     items["_k"] = items["item"].map(lambda s: re.sub(r"\d+", lambda m: m.group().zfill(6), str(s)))
     out["items"] = (items.sort_values("_k").drop(columns=["_k", "easiness"])
                     [["item", "n", "p", "difficulty", "se", "ci_low", "ci_high", "rank_hardest"]]

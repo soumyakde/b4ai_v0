@@ -4244,8 +4244,7 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
                             f"⚠️ n < 100. Rasch estimates are exploratory "
                             f"at this sample size."
                         )
-                    for _w in _irt_rasch.get("warnings", []):
-                        st.caption("⚠️ " + _w)
+                    _show_engine_warnings(_irt_rasch)
                     _pp = _irt_rasch["person_df"]
                     _pp_disp = _pp[
                         ["user_id", "theta", "theta_se", "cpi_quant_irt"]
@@ -4267,6 +4266,7 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
                     f"IRT (2PL) — θ→sigmoid per student "
                     f"(n={_irt_2pl['n_persons']})", expanded=False
                 ):
+                    _show_engine_warnings(_irt_2pl)
                     _pp2 = _irt_2pl["person_df"]
                     _pp2_disp = _pp2[
                         ["user_id", "theta", "theta_se", "cpi_quant_irt"]
@@ -5239,6 +5239,22 @@ rough guide only, and with few items the interval is wide.
 _IR_SHORT = {"claude": "Claude", "gpt": "ChatGPT", "gemini": "Gemini", "groq": "Open-weight (Groq)"}
 
 
+def _show_engine_warnings(res: dict) -> None:
+    """Show an analysis engine's own sample-size warnings (res["warnings"]) under an expander title."""
+    for _w in res.get("warnings", []):
+        st.caption("⚠️ " + _w)
+
+
+def _show_flag_details(df: pd.DataFrame, item_col: str, flag_col: str, title: str = "Review flags in full") -> None:
+    """A data grid cuts long text off, so list each flagged item's complete flag text below the table."""
+    flagged = df[df[flag_col].fillna("").astype(str).str.strip() != ""]
+    if flagged.empty:
+        return
+    with st.expander(f"{title} ({len(flagged)} item(s))", expanded=False):
+        for _, r in flagged.iterrows():
+            st.markdown(f"- **{r[item_col]}**: {r[flag_col]}")
+
+
 def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
     """Item Review: reviewer-first Bloom rating + advisory multi-model LLM suggestions (Method 3). Teacher/researcher only."""
     from core.analytics.item_review import store as irs
@@ -5731,7 +5747,9 @@ def _render_ctt_item_analysis(canonical_df: pd.DataFrame) -> None:
         "Review flags": items["flags"],
     })
     st.markdown("**Item statistics**")
-    st.dataframe(show, hide_index=True, width="stretch")
+    st.dataframe(show, hide_index=True, width="stretch",
+                 column_config={"Review flags": st.column_config.TextColumn("Review flags", width="large")})
+    _show_flag_details(show, "Item", "Review flags")
     st.caption("p = share correct (higher = easier). It reflects this group and this test form, and cannot by "
                "itself separate a hard item from content that was not learned.")
     st.download_button(
@@ -5766,7 +5784,9 @@ def _render_ctt_item_analysis(canonical_df: pd.DataFrame) -> None:
             for c in ["All"] + [f"g{j}" for j in range(1, 6)]:
                 d[c] = (100 * d[c]).round(0)
             d["Distractor r"] = d["Distractor r"].round(2)
-            st.dataframe(d, hide_index=True, width="stretch")
+            st.dataframe(d, hide_index=True, width="stretch",
+                         column_config={"Review flags": st.column_config.TextColumn("Review flags", width="large")})
+            _show_flag_details(d, "Item", "Review flags")
             st.download_button(
                 "⬇ Download distractor table (CSV)", d.to_csv(index=False).encode("utf-8"),
                 file_name=f"ctt_distractors_{inst_key}_{form.replace(' ', '')}.csv",
