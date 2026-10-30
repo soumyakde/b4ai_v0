@@ -5304,9 +5304,30 @@ def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
         for i in pool:
             h = irs.get_human(username, i)
             status[i["question_id"]] = ("✅ " if (h and h["final_level"]) else "🔒 " if h else "⬜ ")
-        qid = st.selectbox("Item", [i["question_id"] for i in pool],
-                           format_func=lambda q: status[q] + q, key="ir_item")
+        # Option labels stay plain: a label that changes (status icon) after Lock/Save makes the browser
+        # treat the dropdown as a new widget and jump back to the first item. Status is shown below instead.
+        _ids = [i["question_id"] for i in pool]
+        if st.session_state.get("ir_item") not in _ids and st.session_state.get("ir_item_sel") in _ids:
+            st.session_state["ir_item"] = st.session_state["ir_item_sel"]
+        qid = st.selectbox("Item", _ids, key="ir_item")
+        st.session_state["ir_item_sel"] = qid
         item = next(i for i in pool if i["question_id"] == qid)
+        _n_final = sum(v.startswith("✅") for v in status.values())
+        _n_lock = sum(v.startswith("🔒") for v in status.values())
+        st.caption(f"This item: {status[qid]}"
+                   f"({'final decision saved' if status[qid].startswith('✅') else 'first rating locked' if status[qid].startswith('🔒') else 'not rated yet'})"
+                   f"  ·  All {len(pool)} items: ✅ {_n_final} final · 🔒 {_n_lock} locked only · "
+                   f"⬜ {len(pool) - _n_final - _n_lock} not rated")
+
+        def _flash(where: str, msg: str = None):
+            """Confirmation that survives st.rerun(): set it before the rerun, show it on the next run."""
+            if msg is not None:
+                st.session_state["ir_flash"] = {"where": where, "inst": inst_key, "item": qid, "msg": msg}
+                return
+            f = st.session_state.get("ir_flash")
+            if f and f["where"] == where and f["inst"] == inst_key and f["item"] == qid:
+                st.session_state.pop("ir_flash")
+                st.success(f["msg"])
 
         st.markdown(f"**{item['question_id']}.** {item['text']}")
         for o in item["options"]:
@@ -5391,10 +5412,11 @@ def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
         if st.button("💾 Save final decision", key=f"ir_save_{inst_key}_{qid}"):
             try:
                 r = irs.save_final_decision(username, item, int(fin), why2)
-                st.success(f"Saved ({r['decision'].replace('_', ' ')}).")
+                _flash("final", f"Saved ({r['decision'].replace('_', ' ')}).")
                 st.rerun()
             except ValueError as e:
                 st.error(str(e))
+        _flash("final")
 
         # ---- Step 3: key & distractors
         st.markdown("#### Step 3 — Answer key and answer options (advisory)")
@@ -5424,8 +5446,9 @@ def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
             kn = st.text_input("Note (optional)", value=human.get("key_note") or "", key=f"ir_kn_{inst_key}_{qid}")
             if st.button("💾 Save key decision", key=f"ir_ksave_{inst_key}_{qid}"):
                 irs.save_key_decision(username, item, kd, kn)
-                st.success("Saved.")
+                _flash("key", "Saved.")
                 st.rerun()
+            _flash("key")
 
     # ------------------------------------------------------------------ Summary
     elif view == "Summary & agreement":
