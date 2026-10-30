@@ -5319,15 +5319,17 @@ def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
                    f"  ·  All {len(pool)} items: ✅ {_n_final} final · 🔒 {_n_lock} locked only · "
                    f"⬜ {len(pool) - _n_final - _n_lock} not rated")
 
-        def _flash(where: str, msg: str = None):
-            """Confirmation that survives st.rerun(): set it before the rerun, show it on the next run."""
+        def _flash(where: str, sig, msg: str = None):
+            """Confirmation that survives st.rerun() AND any further rerun: set it before the rerun, show it
+            on every run until the reviewer opens another item or edits the saved inputs (sig changes)."""
             if msg is not None:
-                st.session_state["ir_flash"] = {"where": where, "inst": inst_key, "item": qid, "msg": msg}
+                st.session_state["ir_flash"] = {"where": where, "inst": inst_key, "item": qid, "sig": sig, "msg": msg}
                 return
             f = st.session_state.get("ir_flash")
-            if f and f["where"] == where and f["inst"] == inst_key and f["item"] == qid:
-                st.session_state.pop("ir_flash")
+            if f and f["where"] == where and f["inst"] == inst_key and f["item"] == qid and f["sig"] == sig:
                 st.success(f["msg"])
+            elif f and f["where"] == where:
+                st.session_state.pop("ir_flash")
 
         st.markdown(f"**{item['question_id']}.** {item['text']}")
         for o in item["options"]:
@@ -5412,11 +5414,11 @@ def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
         if st.button("💾 Save final decision", key=f"ir_save_{inst_key}_{qid}"):
             try:
                 r = irs.save_final_decision(username, item, int(fin), why2)
-                _flash("final", f"Saved ({r['decision'].replace('_', ' ')}).")
+                _flash("final", (int(fin), why2), f"Saved ({r['decision'].replace('_', ' ')}).")
                 st.rerun()
             except ValueError as e:
                 st.error(str(e))
-        _flash("final")
+        _flash("final", (int(fin), why2))
 
         # ---- Step 3: key & distractors
         st.markdown("#### Step 3 — Answer key and answer options (advisory)")
@@ -5446,9 +5448,9 @@ def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
             kn = st.text_input("Note (optional)", value=human.get("key_note") or "", key=f"ir_kn_{inst_key}_{qid}")
             if st.button("💾 Save key decision", key=f"ir_ksave_{inst_key}_{qid}"):
                 irs.save_key_decision(username, item, kd, kn)
-                _flash("key", "Saved.")
+                _flash("key", (kd, kn), "Saved.")
                 st.rerun()
-            _flash("key")
+            _flash("key", (kd, kn))
 
     # ------------------------------------------------------------------ Summary
     elif view == "Summary & agreement":

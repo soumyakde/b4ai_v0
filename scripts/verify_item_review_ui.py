@@ -53,11 +53,17 @@ if save:
           at.selectbox(key="ir_item").value == target, f"now {at.selectbox(key='ir_item').value}")
     check("D-4: 'Saved (...)' confirmation is still visible after the reload",
           any(str(s.value).startswith("Saved") for s in at.success), str([s.value for s in at.success]))
+    at.run()    # a second, automatic rerun with no user action (timer, fragment, websocket reconnect)
+    check("D-4: ...and still visible after a SECOND rerun with no user action",
+          any(str(s.value).startswith("Saved") for s in at.success), str([s.value for s in at.success]))
 
 ksave = [b for b in at.button if b.label.startswith("💾 Save key")]
 if ksave:
     ksave[0].click().run()
     check("D-4: key decision 'Saved.' confirmation is still visible after the reload",
+          any(str(s.value).startswith("Saved") for s in at.success), str([s.value for s in at.success]))
+    at.run()
+    check("D-4: ...key decision confirmation survives a second rerun",
           any(str(s.value).startswith("Saved") for s in at.success), str([s.value for s in at.success]))
     check("D-2: dropdown unchanged after key decision", at.selectbox(key="ir_item").value == target)
 
