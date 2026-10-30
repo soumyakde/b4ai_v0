@@ -72,5 +72,34 @@ at.selectbox(key="ir_item").select(ids[0]).run()
 check("confirmation is cleared when another item is opened",
       not any(str(s.value).startswith("Saved") for s in at.success))
 
+# ---- D-8: Summary view, Module 2: with fewer than 5 rated items the Bloom-vs-difficulty block must say why it is absent
+def app_summary():
+    import numpy as np, pandas as pd
+    import streamlit_app.dashboards.teacher_dashboard as td
+    from core.analytics.item_review.item_bank import load_item_bank
+    qs = [i["question_id"] for i in load_item_bank("module2_content_mcq_assessment")]
+    rng = np.random.default_rng(1)
+    rows = [{"user_id": f"s{u}", "instrument_key": "module2_content_mcq_assessment", "question_id": q,
+             "item_score": float(rng.random() < .6)} for u in range(30) for q in qs]
+    td._render_item_review_tab("ui_tester", pd.DataFrame(rows))
+
+
+at2 = AppTest.from_function(app_summary, default_timeout=60).run()
+at2.selectbox(key="ir_instrument").select("Module 2 — Content MCQ").run()
+at2.radio(key="ir_view").set_value("Summary & agreement").run()
+cap = " ".join(str(c.value) for c in at2.caption)
+check("D-8: Summary view renders without an exception", not at2.exception, str([e.value for e in at2.exception]))
+check("D-8: fewer than 5 rated items -> a hint says the Bloom-vs-difficulty comparison needs at least 5 rated items",
+      "at least 5" in cap and "Form 1" in cap, cap[-250:])
+
+# W-1(a): Step 2 explains that the model checkboxes only choose who to ask next
+at3 = AppTest.from_function(app, default_timeout=60).run()
+at3.selectbox(key="ir_item").select(ids[1]).run()
+[b for b in at3.button if b.label.startswith("🔒 Lock")][0].click().run()
+cap3 = " ".join(str(c.value) for c in at3.caption)
+check("W-1(a): Step 2 caption says all stored suggestions are shown and the checkboxes only choose who to ask next",
+      "all stored suggestions" in cap3.lower() and "only choose who to ask next" in cap3.lower(), cap3[-300:])
+
+
 print("\n%d check(s) failed" % len(fail) if fail else "\nAll checks passed")
 sys.exit(1 if fail else 0)

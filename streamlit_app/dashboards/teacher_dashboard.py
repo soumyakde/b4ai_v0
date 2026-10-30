@@ -5376,6 +5376,7 @@ def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
         st.markdown("#### Step 2 — AI suggestions and your decision")
         sugs = irs.reveal_llm_suggestions(username, item)
         provs = _pick_models(f"ir_provs_{inst_key}_{qid}")
+        st.caption("Showing all stored suggestions for this item; the model checkboxes only choose who to ask next.")
         c1, c2 = st.columns(2)
         with c1:
             reps = st.number_input("Runs per model (1-3)", min_value=1, max_value=3, value=1, step=1,
@@ -5498,11 +5499,16 @@ def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
 
         # Bloom level vs observed difficulty (module banks only)
         if inst_key.startswith("module") and "@" not in inst_key and not canonical_df.empty:
+            _form1 = None
             try:
                 matrix, _ = build_binary_response_matrix(canonical_df, inst_key)
                 forms = list_forms(matrix)
-                sub = subset_form(matrix, forms, "Form 1")
-                pdf = pd.DataFrame({"item": sub.columns, "pct_correct": (100 * sub.mean()).round(0).values})
+                _form1 = subset_form(matrix, forms, "Form 1")
+            except (ValueError, IndexError, KeyError):
+                st.caption("Your Bloom level vs observed % correct is not shown: there is no Form 1 response "
+                           "data for this assessment in the current selection.")
+            if _form1 is not None:
+                pdf = pd.DataFrame({"item": _form1.columns, "pct_correct": (100 * _form1.mean()).round(0).values})
                 col = "my_final_rating" if tbl["my_final_rating"].notna().any() else "my_first_rating"
                 j = tbl.merge(pdf, on="item").dropna(subset=[col])
                 if len(j) >= 5:
@@ -5512,8 +5518,10 @@ def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
                     st.dataframe(j[["item", col, "pct_correct"]].rename(columns={col: "Bloom level"}), hide_index=True, width="stretch")
                     st.caption(f"Spearman ρ = {rho:.2f} (p = {p:.2f}, n = {len(j)} items). Bloom level is not difficulty: "
                                "expect a weak relationship (Kibble & Johnson, 2011).")
-            except Exception:
-                pass
+                else:
+                    st.caption(f"Your Bloom level vs observed % correct (Form 1, current main cohort) appears once at "
+                               f"least 5 items on Form 1 have your rating; {len(j)} so far. Rate more items (Form 1 has "
+                               f"{_form1.shape[1]} items).")
         st.download_button("⬇ Download my ratings (CSV)", tbl.to_csv(index=False).encode("utf-8"),
                            file_name=f"item_review_{inst_key}_{username}.csv", mime="text/csv", key="ir_dl")
 
