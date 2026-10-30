@@ -1,0 +1,102 @@
+[
+ {
+  "id": "Q1",
+  "question": "Who uses natural intelligence?",
+  "options": [
+   "Robots",
+   "People and mice",
+   "Phones",
+   "Drones"
+  ]
+ },
+ {
+  "id": "Q5",
+  "question": "Why do both people and robots need memory?",
+  "options": [
+   "To remember what worked and improve",
+   "For looks",
+   "To go slower",
+   "To show emotion"
+  ]
+ },
+ {
+  "id": "Q10",
+  "question": "Why was the robot solving the maze faster the second time?",
+  "options": [
+   "It got new sensors",
+   "It used less power",
+   "It remembered the shortest way",
+   "It skipped corners"
+  ]
+ },
+ {
+  "id": "Q15",
+  "question": "Why did the robot, solving the maze, make errors on turns on its first try?",
+  "options": [
+   "It was scared",
+   "It followed the mouse",
+   "It had weak wheels",
+   "It was exploring to learn"
+  ]
+ },
+ {
+  "id": "Q23",
+  "question": "The robot’s microprocessor is most like a mouse’s ____.",
+  "options": [
+   "Whiskers",
+   "Eyes",
+   "Brain",
+   "Legs"
+  ]
+ },
+ {
+  "id": "Q28",
+  "question": "When you solved a paper maze, which were your sensors?",
+  "options": [
+   "Arms and legs",
+   "Eyes and hands",
+   "Battery and wheels",
+   "Whiskers"
+  ]
+ },
+ {
+  "id": "Q32",
+  "question": "What is the Left‑Hand‑on‑the‑Wall strategy?",
+  "options": [
+   "Keep your left hand on the wall and move following it",
+   "Jump over the maze",
+   "Always turn right",
+   "Smell for clues"
+  ]
+ },
+ {
+  "id": "Q35",
+  "question": "What must a robot do if it begins from a new place?",
+  "options": [
+   "Learn the maze again",
+   "Use its old path",
+   "Stop moving",
+   "Guess forever"
+  ]
+ },
+ {
+  "id": "Q40",
+  "question": "When is a rescue dog better than a robot?",
+  "options": [
+   "Flying far away",
+   "Reading maps",
+   "Finding people by smell in forests",
+   "Carrying boxes"
+  ]
+ },
+ {
+  "id": "Q53",
+  "question": "What was the big idea from all the videos: What is one important idea we learned from all the videos?",
+  "options": [
+   "Ants and people can solve problems without communicating",
+   "Robots must talk like humans to solve problems together",
+   "Robots can work together without talking to each other",
+   "None of these answers are correct"
+  ]
+ }
+]

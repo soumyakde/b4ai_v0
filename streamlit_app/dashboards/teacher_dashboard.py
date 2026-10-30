@@ -58,6 +58,14 @@ from core.analytics.correlational.correlation_engine import (
     run_mixed_model,
     run_repeated_measures_correlations,
 )
+from core.analytics.irt.glmm_item_difficulty import fit_item_difficulty_glmm
+from core.analytics.irt.ctt_item_analysis import (
+    compute_item_analysis,
+    compute_distractor_analysis,
+    list_forms,
+    subset_form,
+    sample_size_note,
+)
 try:
     from core.analytics.irt.irt_runner import (
         build_binary_response_matrix,
@@ -666,14 +674,14 @@ _SCCCES_QUESTION_MAP = {
 }
 
 # ── SIMS ────────────────────────────────────────────────────────────────
-# SIMS scoring rationale (De Charms & Muir 1978 / Deci & Ryan 1985 SDT):
-# Q4_1–Q4_4 (External Regulation) and Q5_1–Q5_3 (Amotivation) are item-reverse-coded.
-# Reason: Agree with "Because I have no choice" is a BAD outcome; after reversal (5−x)
-# the scored mean is HIGH when the learner is NOT externally regulated or amotivated.
-# This makes ALL four SIMS constructs point in the same positive direction:
-#   HIGH score on any SIMS construct = BETTER outcome for the learner.
-# The scoring YAML (b4ai_sims_scoring.yaml) lists Q4_1–Q4_4 and Q5_1–Q5_3
-# under reverse_questions, which DatasetBuilder applies as 5−raw_score.
+# SIMS scoring (changed 2026-10-08; Guay, Vallerand & Blanchard 2000): NO SIMS item is reverse-scored.
+# Every item is keyed so "Strongly agree" = 4 = MORE of that regulation ("Because I have no choice" = more
+# External regulation; "I do not see any [good reasons]" = more Amotivation). So:
+#   Intrinsic / Identified: HIGH mean = better;  External / Amotivation: HIGH mean = WORSE.
+# b4ai_sims_scoring.yaml has reverse_questions: []. The direction is corrected exactly once, inside
+# RAI (subtracts External and Amotivation) and CPI_process (5 − mean). The interpretation panel handles the
+# two "high = worse" constructs through reverse_coded=True in _CONSTRUCT_DEFINITIONS.
+# The False flags below mean "no item-level reversal" (used for the ⚠️ columns).
 _SIMS_QUESTION_MAP = {
     "Q2_1":  ("Intrinsic Motivation",   "Because I think that this activity is interesting.",                                                         False),
     "Q2_2":  ("Intrinsic Motivation",   "Because I like doing this activity.",                                                                         False),
@@ -681,19 +689,15 @@ _SIMS_QUESTION_MAP = {
     "Q3_1":  ("Identified Regulation",  "Because I think that this activity is good for me.",                                                          False),
     "Q3_2":  ("Identified Regulation",  "Because I think that this activity is important for me.",                                                     False),
     "Q3_3":  ("Identified Regulation",  "Because this activity will help me later.",                                                                   False),
-    # ⚠️ Q4_1–Q4_4: External Regulation — item-reverse-coded
-    #   Raw: Agree=3 means externally pressured (bad). Reversed: Agree→2, so
-    #   higher score = LESS external regulation = GOOD. Same direction as intrinsic/identified.
-    "Q4_1":  ("External Regulation",    "Because I am supposed to do it.",                                                                             True),
-    "Q4_2":  ("External Regulation",    "Because I have no choice.",                                                                                   True),
-    "Q4_3":  ("External Regulation",    "Because I do not want to get in trouble.",                                                                    True),
-    "Q4_4":  ("External Regulation",    "Because I feel I have to do it.",                                                                             True),
-    # ⚠️ Q5_1–Q5_3: Amotivation — item-reverse-coded
-    #   Raw: Agree=3 means amotivated (bad). Reversed: Agree→2, so
-    #   higher score = LESS amotivation = GOOD. Consistent direction across all SIMS constructs.
-    "Q5_1":  ("Amotivation",            "There may be good reasons to do this activity, but personally, I do not see any.",                           True),
-    "Q5_2":  ("Amotivation",            "I am doing this activity, but I am not sure if it is worth it.",                                             True),
-    "Q5_3":  ("Amotivation",            "I am doing this activity, but I am not sure it is a good thing to pursue it.",                               True),
+    # Q4_1–Q4_4: External Regulation — scored raw (Agree = 3 = more external pressure; higher mean = worse)
+    "Q4_1":  ("External Regulation",    "Because I am supposed to do it.",                                                                             False),
+    "Q4_2":  ("External Regulation",    "Because I have no choice.",                                                                                   False),
+    "Q4_3":  ("External Regulation",    "Because I do not want to get in trouble.",                                                                    False),
+    "Q4_4":  ("External Regulation",    "Because I feel I have to do it.",                                                                             False),
+    # Q5_1–Q5_3: Amotivation — scored raw (Agree = 3 = more amotivated; higher mean = worse)
+    "Q5_1":  ("Amotivation",            "There may be good reasons to do this activity, but personally, I do not see any.",                           False),
+    "Q5_2":  ("Amotivation",            "I am doing this activity, but I am not sure if it is worth it.",                                             False),
+    "Q5_3":  ("Amotivation",            "I am doing this activity, but I am not sure it is a good thing to pursue it.",                               False),
 }
 
 # Merged view for backward-compat lookup (instrument+qid → tuple)
@@ -1314,25 +1318,28 @@ _CONSTRUCT_DEFINITIONS = {
         "scale_high": "Learners personally endorsed the activity as valuable and important for their development.",
         "reverse_coded": False,
     },
+    # External Regulation and Amotivation are scored RAW (no item is reversed; "Strongly agree" = 4 = MORE of
+    # the regulation), so a HIGH mean is the concerning direction. reverse_coded=True makes the interpretation
+    # panel show high = red / low = green. scale_low/scale_high below therefore describe LOW and HIGH raw means.
     "external_regulation": {
         "label": "External Regulation",
         "definition": "Doing the activity because of external pressure, rules, or to avoid consequences.",
         "analytic_focus": ["rewards", "pressure", "compliance"],
-        "scale_low":  "Learners felt strongly externally pressured — they felt they had no choice or feared consequences.",
+        "scale_low":  "Learners were NOT externally pressured — they chose to participate freely.",
         "scale_mid":  "Learners felt some external pressure but also had some personal buy-in.",
-        "scale_high": "Learners were NOT externally pressured — they chose to participate freely.",
-        "reverse_coded": False,
-        "item_reverse_note": "⚠️ Items Q4_1–Q4_4 are item-reverse-coded (5−x) so that HIGH scores indicate LESS external regulation. A low mean (≤ 2.5) warrants attention — it means learners felt coerced rather than freely choosing to participate.",
+        "scale_high": "Learners felt strongly externally pressured — they felt they had no choice or feared consequences.",
+        "reverse_coded": True,
+        "reverse_note": "⚠️ Higher = MORE external regulation (worse). Items Q4_1–Q4_4 are scored as answered (Strongly disagree = 1 … Strongly agree = 4); none is reverse-scored. A high mean (≥ 3.0) warrants attention — it means learners felt coerced rather than freely choosing to participate. The direction is flipped only inside RAI and CPI.",
     },
     "amotivation": {
         "label": "Amotivation",
         "definition": "A lack of motivation — feeling no reason to do the activity and disconnected from outcomes.",
         "analytic_focus": ["disengagement", "helplessness", "lack of purpose"],
-        "scale_low":  "Learners were amotivated — they could see no reason to participate and felt disconnected.",
+        "scale_low":  "Learners were NOT amotivated — they had clear reasons to participate and felt engaged.",
         "scale_mid":  "Learners showed some motivational uncertainty or occasional disengagement.",
-        "scale_high": "Learners were NOT amotivated — they had clear reasons to participate and felt engaged.",
-        "reverse_coded": False,
-        "item_reverse_note": "⚠️ Items Q5_1–Q5_3 are item-reverse-coded (5−x) so that HIGH scores indicate LESS amotivation. A low mean (≤ 2.0) is a concern — it means learners saw little point in the activity.",
+        "scale_high": "Learners were amotivated — they could see no reason to participate and felt disconnected.",
+        "reverse_coded": True,
+        "reverse_note": "⚠️ Higher = MORE amotivation (worse). Items Q5_1–Q5_3 are scored as answered (Strongly disagree = 1 … Strongly agree = 4); none is reverse-scored. A high mean (≥ 3.0) is a concern — it means learners saw little point in the activity. The direction is flipped only inside RAI and CPI.",
     },
 }
 
@@ -1487,12 +1494,15 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
                         range_y=[1, 4],
                         color_discrete_sequence=px.colors.qualitative.Safe,
                     )
+                    # Legend below the plot: a right-hand legend was clipped
+                    # ("Situational Cognitive Engagemen") by the narrow right margin.
                     _fig_comp.update_layout(
-                        height=420,
-                        margin=dict(t=50, b=10, l=10, r=120),
+                        height=460,
+                        margin=dict(t=50, b=10, l=10, r=20),
                         xaxis_title="Module",
                         yaxis_title="Mean Score (1–4 Likert)",
-                        legend_title="Composite",
+                        legend=dict(title="Composite", orientation="h",
+                                    yanchor="top", y=-0.22, xanchor="left", x=0),
                     )
                     st.plotly_chart(_fig_comp, width="stretch")
                 else:
@@ -1544,6 +1554,12 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
                 "Mean score per construct per module (averaged across all students). "
                 "Each line traces how a construct evolves through the programme."
             )
+            if selected_survey_base == "b4ai_sims_survey":
+                st.caption(
+                    "Direction: for Intrinsic Motivation and Identified Regulation a higher "
+                    "mean is better; for External Regulation and Amotivation a HIGHER mean is "
+                    "worse (more pressure / more amotivation). No SIMS item is reverse-scored."
+                )
             # Compute mean score per construct × module
             _traj = (
                 cm_survey.groupby(["module_id", "construct"])["mean_score"]
@@ -1585,20 +1601,24 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
                     range_y=[1, 4],
                     color_discrete_sequence=px.colors.qualitative.Safe,
                 )
-                _fig_traj.add_hline(
-                    y=3.0,
-                    line_dash="dot",
-                    line_color="gray",
-                    annotation_text="3.0 (positive threshold)",
-                    annotation_position="right",
-                )
-                _fig_traj.add_hline(
-                    y=2.5,
-                    line_dash="dash",
-                    line_color="orange",
-                    annotation_text="2.5 (attention threshold)",
-                    annotation_position="right",
-                )
+                # The 3.0 / 2.5 reference lines assume "higher = better", which is true
+                # for every SCCCES construct but NOT for SIMS External Regulation and
+                # Amotivation (higher = worse), so they are drawn for SCCCES only.
+                if selected_survey_base == "b4ai_sccces_survey":
+                    _fig_traj.add_hline(
+                        y=3.0,
+                        line_dash="dot",
+                        line_color="gray",
+                        annotation_text="3.0 (positive threshold)",
+                        annotation_position="right",
+                    )
+                    _fig_traj.add_hline(
+                        y=2.5,
+                        line_dash="dash",
+                        line_color="orange",
+                        annotation_text="2.5 (attention threshold)",
+                        annotation_position="right",
+                    )
                 _fig_traj.update_layout(
                     height=480,
                     margin=dict(t=50, b=10, l=10, r=120),
@@ -1614,11 +1634,21 @@ def _render_survey_construct_means(canonical_df: pd.DataFrame) -> None:
                 )
                 st.line_chart(_pivot)
 
-            st.caption(
-                "Dotted line = 3.0 (positive engagement threshold). "
-                "Dashed line = 2.5 (attention warranted). "
-                "Scale: 1 = Strongly disagree → 4 = Strongly agree."
-            )
+            if selected_survey_base == "b4ai_sccces_survey":
+                st.caption(
+                    "Dotted line = 3.0 (positive engagement threshold). "
+                    "Dashed line = 2.5 (attention warranted). "
+                    "Scale: 1 = Strongly disagree → 4 = Strongly agree."
+                )
+            else:
+                # SIMS: no threshold lines are drawn (higher = worse for External
+                # Regulation and Amotivation), so the caption must not describe them.
+                st.caption(
+                    "No threshold lines are drawn for SIMS: a higher mean is better for "
+                    "Intrinsic Motivation and Identified Regulation but worse for External "
+                    "Regulation and Amotivation. "
+                    "Scale: 1 = Strongly disagree → 4 = Strongly agree."
+                )
             st.divider()
 
     if cm_display.empty:
@@ -2347,6 +2377,65 @@ _STAT_HELP = {
     ),
 }
 
+_CTT_HELP = """
+**Classical item analysis (CTT) -- Method 1 of 3 for judging item difficulty**
+
+**What it does.** For each question it reports the share of students who got it right
+(*p*, "item difficulty": higher = easier), how well it separates stronger from weaker
+students (the corrected item-total correlation, *r*), and how each answer option was used.
+For the whole test it reports KR-20 reliability and the standard error of measurement.
+
+**Use it when:** you want a quick, assumption-free look at which items to review, at almost
+any class size. Every number is shown with its uncertainty, so a small group is visible as a
+wide interval, not hidden.
+
+**Strengths:** easy to explain to teachers; works with small groups; needs no model fitting;
+catches mis-keyed items (negative discrimination, accuracy below chance) and dead distractors.
+
+**Limits:** *p* and *r* describe THIS group on THIS form of the test, so they change with the
+group. A low *p* cannot tell you whether the item is hard or the content was not learned.
+Item-total correlations are unstable in small groups (use them to flag, not to rank).
+KR-20 needs every student to have answered the same items, so each test **form** is analysed
+separately.
+
+**References.** Kuder & Richardson (1937), *Psychometrika* 2(3), 151-160 (KR-20) ·
+Crocker & Algina (1986), *Introduction to Classical and Modern Test Theory* ·
+Gierl, Bulut, Guo & Zhang (2017), *Review of Educational Research* 87(6), 1082-1116
+(distractor analysis; the < 5% non-functioning-distractor rule is credited there to
+Haladyna & Downing, 1993; ability-group trace table; distractor point-biserial of
+Attali & Fraenkel, 2000) · Wilson (1927), *JASA* 22(158), 209-212 (the intervals).
+Flag thresholds (p < .20, p > .90, r < .20) are common rules of thumb, not verdicts.
+"""
+
+_GLMM_HELP = """
+**Random-effects logistic model (Rasch as a mixed model) -- Method 2 of 3 for judging item difficulty**
+
+**What it does.** Estimates every item's difficulty and every student's ability together on one
+logit scale from all individual right/wrong answers, and gives each item a standard error and a
+95% interval. With *random items* the estimates are pulled slightly toward the average (shrinkage),
+which steadies small groups; with *fixed items* there is no shrinkage.
+
+**Use it when:** you want difficulty estimates with honest uncertainty, your data are unbalanced or
+have gaps, and you have roughly 30+ students (Linacre, 1994: about 30 students for item difficulties
+stable to ±1 logit at 95% confidence, 50 at 99%; about 100 to 150 for ±½ logit). It is not
+meant for groups under 30, where the classical view (Method 1) or the cognitive-demand view
+(Method 3) is more appropriate.
+
+**Strengths:** every item gets an interval; no special handling of missing responses; shrinkage
+helps in small groups; one clear scale for items and students.
+
+**Limits:** it assumes all items measure one trait and discriminate equally (a Rasch assumption), so it
+is not a substitute for checking item quality (use Method 1 for that); estimates still depend on this
+group; with fewer than 10 items the spread of difficulty is poorly estimated, so use *Fixed*. The
+Python engine is an approximation (variational Bayes) that we validated against R lme4: item
+difficulties agreed (correlation about 1.00, largest gap 0.15 logits), but its intervals ran slightly
+narrow (about 90% coverage against a nominal 95%). A hard item and an unlearned topic look the same.
+
+**References.** De Boeck, Bakker, Zwitser, Nivard, Hofman, Tuerlinckx & Partchev (2011), *Journal of
+Statistical Software* 39(12) · Doran, Bates, Bliese & Dowling (2007), *Journal of Statistical Software*
+20(2) · Linacre (1994), *Rasch Measurement Transactions* 7(4), 328 (sample-size table).
+"""
+
 _IRT_HELP = {
     "rasch": (
         "**Rasch Model (1-Parameter Logistic, 1PL)**\n\n"
@@ -2364,8 +2453,9 @@ _IRT_HELP = {
         "the item separates high- from low-ability students. "
         "A high discrimination value (a > 1.0) means the item reliably "
         "distinguishes students who understand the concept from those who do not.\n\n"
-        "Requires n ≥ 50 for stable estimates. With n = 13, Rasch (1PL) is "
-        "more appropriate — 2PL estimates will be unreliable."
+        "About 500 students with 30 items is the size Hulin, Lissak & Drasgow (1982) found adequate for "
+        "some purposes. The model will run on smaller groups, with a warning, but the discrimination "
+        "estimates are then likely unreliable; Rasch or classical item analysis is safer."
     ),
     "grm": (
         "**Graded Response Model (GRM)**\n\n"
@@ -2375,7 +2465,8 @@ _IRT_HELP = {
         "The person ability parameter (θ) reflects the latent trait being "
         "measured — e.g. intrinsic motivation or engagement with task. "
         "Higher θ means stronger presence of the construct.\n\n"
-        "Requires n ≥ 50 for reliable estimates."
+        "Needs enough answers in every response category (Linacre, 1994: at least 10 per category). "
+        "It will run on smaller groups, with a warning."
     ),
     "theta": (
         "**Person Ability (θ, theta)**\n\n"
@@ -4038,7 +4129,7 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
         with col_q:
             _quant_method = st.radio(
                 "CPI_quant method",
-                options=["CTT (proportion correct)", "IRT (Rasch)", "IRT (2PL, n≥50)",
+                options=["CTT (proportion correct)", "IRT (Rasch)", "IRT (2PL, large samples)",
                          "Both — show side by side"],
                 horizontal=False,
                 key="cpi_quant_method",
@@ -4073,7 +4164,7 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
                     "IRT (Rasch)", "Both — show side by side"
                 )
                 _run_2pl   = _quant_method in (
-                    "IRT (2PL, n≥50)", "Both — show side by side"
+                    "IRT (2PL, large samples)", "Both — show side by side"
                 )
 
                 if _run_rasch:
@@ -4153,6 +4244,7 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
                             f"⚠️ n < 100. Rasch estimates are exploratory "
                             f"at this sample size."
                         )
+                    _show_engine_warnings(_irt_rasch)
                     _pp = _irt_rasch["person_df"]
                     _pp_disp = _pp[
                         ["user_id", "theta", "theta_se", "cpi_quant_irt"]
@@ -4174,6 +4266,7 @@ def _render_cpi_tab(username: str, canonical_df: pd.DataFrame) -> None:
                     f"IRT (2PL) — θ→sigmoid per student "
                     f"(n={_irt_2pl['n_persons']})", expanded=False
                 ):
+                    _show_engine_warnings(_irt_2pl)
                     _pp2 = _irt_2pl["person_df"]
                     _pp2_disp = _pp2[
                         ["user_id", "theta", "theta_se", "cpi_quant_irt"]
@@ -4761,6 +4854,7 @@ def show_teacher_dashboard(username: str) -> None:
         "🤖 LLM Analysis",
         "📉 Competency Progression",
         "🔬 IRT Analysis",
+        "🧠 Item Review",
         "📄 Report Generation",
     ]
     if "teacher_dash_tab" not in st.session_state:
@@ -4779,6 +4873,7 @@ def show_teacher_dashboard(username: str) -> None:
         "🤖 LLM Analysis":           ("#CC79A7", "#F9EEF5"),
         "📉 Competency Progression": ("#534AB7", "#EEEDFE"),
         "🔬 IRT Analysis":           ("#009E73", "#E6F7F1"),
+        "🧠 Item Review":            ("#7A4FB5", "#F1EAF9"),
         "📄 Report Generation":      ("#888888", "#F0F0F0"),
     }
     _tc, _tbg = _TAB_COLORS.get(active_tab, ("#333", "#F8F8F8"))
@@ -4807,6 +4902,9 @@ def show_teacher_dashboard(username: str) -> None:
 
     elif active_tab == "🔬 IRT Analysis":
         _render_irt_tab(filtered_canonical)
+
+    elif active_tab == "🧠 Item Review":
+        _render_item_review_tab(username, filtered_canonical)
 
     elif active_tab == "🤖 LLM Analysis":
         _render_llm_tab(username, filtered_canonical)
@@ -4837,7 +4935,8 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
     st.caption(
         "Item Response Theory analysis powered by the **girth** Python library. "
         "Rasch (1PL) runs at any n with a low-n warning. "
-        f"2PL and GRM require n ≥ {MIN_N_2PL}."
+        "Sample-size cautions (Linacre, 1994; Hulin, Lissak & Drasgow, 1982) appear as warnings next to "
+        "the results; they never block an analysis."
     )
 
     with st.expander("ℹ️ IRT — Plain-language guide for teachers", expanded=False):
@@ -4877,6 +4976,29 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
     # Binary Assessment IRT
     # ==============================================================
     if irt_type == "Binary Assessment":
+        _render_item_method_guide()
+        irt_method = st.radio(
+            "**Analysis method:**",
+            options=["Item Response Theory (Rasch / 2PL)", "Classical item analysis (CTT)",
+                     "Random-effects logistic model (item difficulty)"],
+            horizontal=True,
+            key="irt_bin_method",
+            help=(
+                "Classical item analysis works at almost any class size and is the "
+                "recommended first look. IRT needs larger groups. For Rasch, Linacre (1994) "
+                "gives about 30 students as the minimum for item difficulties stable to "
+                "+/-1 logit (95% confidence), 50 for 99%, and roughly 100-150 for +/-0.5 logit. "
+                "For 2PL, Hulin, Lissak & Drasgow (1982) found 30 items and about 500 students "
+                "adequate for some purposes."
+            ),
+        )
+        if irt_method.startswith("Classical"):
+            _render_ctt_item_analysis(canonical_df)
+            return
+        if irt_method.startswith("Random-effects"):
+            _render_glmm_item_difficulty(canonical_df)
+            return
+
         st.markdown("### Binary Assessment — Item Response Theory")
 
         col1, col2 = st.columns(2)
@@ -4890,7 +5012,7 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
         with col2:
             model_choice = st.selectbox(
                 "IRT Model",
-                options=["Rasch (1PL)", "2PL (requires n≥50)"],
+                options=["Rasch (1PL)", "2PL (about 500+ students recommended)"],
                 key="irt_bin_model",
             )
 
@@ -5084,6 +5206,730 @@ def _render_irt_tab(canonical_df: pd.DataFrame) -> None:
                     st.error("Deploy core/analytics/irt/reliability_analysis.py first.")
 
 
+_ITEM_REVIEW_HELP = """
+**Item Review -- describing what each question asks learners to think about (Method 3 of 3)**
+
+**What this is.** For each assessment question you record its cognitive demand on the six levels of the
+revised Bloom's taxonomy (Remember, Understand, Apply, Analyze, Evaluate, Create; Anderson & Krathwohl, 2001).
+AI models can suggest a level and check the answer key. You can ask one or several of four models: **Claude**
+(Anthropic), **ChatGPT** (OpenAI), **Gemini** (Google) and an **open-weight model hosted by Groq** (GPT-OSS 120B;
+Groq currently offers no Llama chat model). **You rate first and every suggestion stays hidden until you lock your
+own rating**; you then decide. Nothing an AI says is stored as the rating of record.
+
+**Use it when:** the group is too small for statistics (for example fewer than 30 students), or to check that
+the questions match the intended thinking, or to find answer-key problems.
+
+**Strengths:** works at any group size; needs no student data (only the question wording is sent to the AI
+companies); several models give a quick sense of how settled a judgement is; catches ambiguous wording and
+possible key errors.
+
+**Limits -- please read.** A Bloom level describes the thinking asked for, **not how hard the question is**:
+Kibble & Johnson (2011) found no correlation between item cognitive level and students' scores. AI suggestions
+agree only partly with human raters, so treat them as a second opinion, and people tend to over-trust automated
+advice (Parasuraman & Manzey, 2010), which is why your rating is locked in first. **The AI models do not give the
+same answer every time**, so a single run can change if you ask again; request up to 3 runs to see the spread. Different
+models are different companies' products and can disagree with each other. The AI cannot see pictures or diagrams:
+items that mention one are flagged and its suggestion is less reliable. Only Claude's cost is calculated here; for
+the others the screen shows token counts (Groq's free tier has a daily token limit).
+
+**Agreement.** Weighted kappa (Cohen, 1968) with a bootstrap interval; the verbal bands (Landis & Koch, 1977) are a
+rough guide only, and with few items the interval is wide.
+"""
+
+_IR_SHORT = {"claude": "Claude", "gpt": "ChatGPT", "gemini": "Gemini", "groq": "Open-weight (Groq)"}
+
+
+def _show_engine_warnings(res: dict) -> None:
+    """Show an analysis engine's own sample-size warnings (res["warnings"]) under an expander title."""
+    for _w in res.get("warnings", []):
+        st.caption("⚠️ " + _w)
+
+
+def _show_flag_details(df: pd.DataFrame, item_col: str, flag_col: str, title: str = "Review flags in full") -> None:
+    """A data grid cuts long text off, so list each flagged item's complete flag text below the table."""
+    flagged = df[df[flag_col].fillna("").astype(str).str.strip() != ""]
+    if flagged.empty:
+        return
+    with st.expander(f"{title} ({len(flagged)} item(s))", expanded=False):
+        for _, r in flagged.iterrows():
+            st.markdown(f"- **{r[item_col]}**: {r[flag_col]}")
+
+
+def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
+    """Item Review: reviewer-first Bloom rating + advisory multi-model LLM suggestions (Method 3). Teacher/researcher only."""
+    from core.analytics.item_review import store as irs
+    from core.analytics.item_review import bloom_llm as ibl
+    from core.analytics.item_review.agreement import agreement_summary
+    from core.analytics.item_review.item_bank import BLOOM_LEVELS, list_instruments, load_item_bank
+    from core.analytics.item_review.runner import run_llm_batch
+
+    def _prov_of(model_id: str):
+        return next((k for k in ibl.PROVIDERS if ibl.model_id(k) == model_id), None)
+
+    def _mlabel(model_id: str) -> str:
+        k = _prov_of(model_id)
+        return f"{_IR_SHORT[k]} ({model_id})" if k else model_id
+
+    def _pick_models(key: str, default=("claude",)):
+        avail = [k for k in ibl.PROVIDERS if ibl.provider_available(k)]
+        missing = [k for k in ibl.PROVIDERS if k not in avail]
+        sel = st.multiselect(
+            "AI models to ask", options=avail, default=[d for d in default if d in avail],
+            format_func=lambda k: f"{_IR_SHORT[k]} — {ibl.model_id(k)}", key=key,
+            help="Each model is a different company's product. Claude's cost is calculated; for the others the "
+                 "screen shows token counts. Groq hosts an open-weight model (no Llama chat model there today).")
+        if missing:
+            st.caption("Not available on this server (no API key): " + ", ".join(_IR_SHORT[k] for k in missing))
+        return sel
+
+    st.subheader("🧠 Item Review (cognitive demand)")
+    with st.expander("ℹ️ What this is, when to use it, strengths and limits, references", expanded=False):
+        st.markdown(_ITEM_REVIEW_HELP)
+    try:
+        irs.init_schema()
+    except Exception as e:
+        st.error(f"Could not open the ratings database: {e}")
+        return
+
+    instruments = list_instruments()
+    label = st.selectbox("Assessment", list(instruments.values()), key="ir_instrument")
+    inst_key = next(k for k, v in instruments.items() if v == label)
+    items = load_item_bank(inst_key)
+    st.caption(f"{len(items)} items · signed in as **{username}** (your ratings are stored under this name)")
+
+    if "ir_view" not in st.session_state:
+        st.session_state["ir_view"] = "Rate items"
+    view = st.radio("View", ["Rate items", "Summary & agreement", "AI batch run"], horizontal=True, key="ir_view")
+    st.divider()
+
+    levels = list(BLOOM_LEVELS.keys())
+
+    def _fmt_level(n: int) -> str:
+        return f"{n} · {BLOOM_LEVELS[n]['label']} — {BLOOM_LEVELS[n]['gloss']}"
+
+    # ------------------------------------------------------------------ Rate items
+    if view == "Rate items":
+        only_sel = False
+        if any(i.get("in_current_selection") is not None for i in items):
+            only_sel = st.checkbox("Only items in the current live selection (.env)", value=False, key="ir_only_sel")
+        pool = [i for i in items if (not only_sel or i.get("in_current_selection"))]
+        if not pool:
+            st.info("No items to show.")
+            return
+        status = {}
+        for i in pool:
+            h = irs.get_human(username, i)
+            status[i["question_id"]] = ("✅ " if (h and h["final_level"]) else "🔒 " if h else "⬜ ")
+        # Option labels stay plain: a label that changes (status icon) after Lock/Save makes the browser
+        # treat the dropdown as a new widget and jump back to the first item. Status is shown below instead.
+        _ids = [i["question_id"] for i in pool]
+        if st.session_state.get("ir_item") not in _ids and st.session_state.get("ir_item_sel") in _ids:
+            st.session_state["ir_item"] = st.session_state["ir_item_sel"]
+        qid = st.selectbox("Item", _ids, key="ir_item")
+        st.session_state["ir_item_sel"] = qid
+        item = next(i for i in pool if i["question_id"] == qid)
+        _n_final = sum(v.startswith("✅") for v in status.values())
+        _n_lock = sum(v.startswith("🔒") for v in status.values())
+        st.caption(f"This item: {status[qid]}"
+                   f"({'final decision saved' if status[qid].startswith('✅') else 'first rating locked' if status[qid].startswith('🔒') else 'not rated yet'})"
+                   f"  ·  All {len(pool)} items: ✅ {_n_final} final · 🔒 {_n_lock} locked only · "
+                   f"⬜ {len(pool) - _n_final - _n_lock} not rated")
+
+        def _flash(where: str, sig, msg: str = None):
+            """Confirmation that survives st.rerun() AND any further rerun: set it before the rerun, show it
+            on every run until the reviewer opens another item or edits the saved inputs (sig changes)."""
+            if msg is not None:
+                st.session_state["ir_flash"] = {"where": where, "inst": inst_key, "item": qid, "sig": sig, "msg": msg}
+                return
+            f = st.session_state.get("ir_flash")
+            if f and f["where"] == where and f["inst"] == inst_key and f["item"] == qid and f["sig"] == sig:
+                st.success(f["msg"])
+            elif f and f["where"] == where:
+                st.session_state.pop("ir_flash")
+
+        st.markdown(f"**{item['question_id']}.** {item['text']}")
+        for o in item["options"]:
+            st.markdown(f"&nbsp;&nbsp;**{o['label']})** {o['text']}")
+        if item["depends_on_figure"]:
+            st.warning("This item seems to refer to a picture or figure. The AI cannot see it, so its suggestion "
+                       "for this item is less reliable.")
+
+        human = irs.get_human(username, item)
+        st.markdown("#### Step 1 — Your rating (before seeing any AI suggestion)")
+        if not human:
+            lv = st.radio("Which level of thinking does this question ask for?", levels, format_func=_fmt_level,
+                          key=f"ir_lv_{inst_key}_{qid}")
+            why = st.text_area("Why? (one or two sentences, optional)", key=f"ir_why_{inst_key}_{qid}")
+            if st.button("🔒 Lock my rating", key=f"ir_lock_{inst_key}_{qid}"):
+                try:
+                    irs.lock_blind_rating(username, item, int(lv), why)
+                    st.rerun()
+                except ValueError as e:
+                    st.error(str(e))
+            st.info("AI suggestions stay hidden until you lock your rating.")
+            return
+        st.success(f"Your first rating: **{_fmt_level(human['blind_level'])}** (locked {human['blind_locked_at']}).")
+        if human["blind_rationale"]:
+            st.caption("Your reason: " + human["blind_rationale"])
+
+        # ---- Step 2: AI suggestions (one or several models)
+        st.markdown("#### Step 2 — AI suggestions and your decision")
+        sugs = irs.reveal_llm_suggestions(username, item)
+        provs = _pick_models(f"ir_provs_{inst_key}_{qid}")
+        st.caption("Showing all stored suggestions for this item; the model checkboxes only choose who to ask next.")
+        c1, c2 = st.columns(2)
+        with c1:
+            reps = st.number_input("Runs per model (1-3)", min_value=1, max_value=3, value=1, step=1,
+                                   key=f"ir_reps_{inst_key}_{qid}",
+                                   help="The AI does not give the same answer every time; several runs show how much it varies.")
+        with c2:
+            if st.button("✨ Get AI suggestion(s)" if not sugs else "↻ Ask again (new run)",
+                         key=f"ir_ask_{inst_key}_{qid}", disabled=not provs):
+                with st.spinner("Asking " + ", ".join(_IR_SHORT[p] for p in provs) + "…"):
+                    out = run_llm_batch([item], username, steps=("blind",), repeats=int(reps), providers=provs)
+                bad = [f"{_IR_SHORT[p]}: {v['n_err']} failed" for p, v in out["runs"].items() if v["n_err"]]
+                if bad:
+                    st.session_state["ir_last_err"] = "; ".join(bad)
+                st.rerun()
+        if st.session_state.get("ir_last_err"):
+            st.error("Some requests failed or were declined (" + st.session_state.pop("ir_last_err") +
+                     "). You can still rate this item yourself.")
+        shown = {m: x for m, x in sugs.items() if x.get("levels")}
+        if not shown:
+            st.info("No AI suggestion stored yet for this wording of the item. You can finish without one.")
+        else:
+            cols = st.columns(len(shown)) if len(shown) <= 4 else [st.container() for _ in shown]
+            for col, (m, x) in zip(cols, shown.items()):
+                with col:
+                    spread = (f"{x['level_min']}–{x['level_max']}" if x["level_min"] != x["level_max"] else str(x["level_min"]))
+                    med = int(round(x["level_median"]))
+                    st.markdown(f"**{_mlabel(m)}**  \nsuggested level **{spread}** ({BLOOM_LEVELS[med]['label']}), "
+                                f"{x['n_runs']} run(s)")
+                    st.caption("Rationale: " + (x["rationale"] or ""))
+                    if x["n_runs"] == 1:
+                        st.caption("⚠️ Single run: it may answer differently if asked again.")
+                    elif x["level_min"] != x["level_max"]:
+                        st.caption(f"⚠️ Its runs disagreed ({x['level_min']}–{x['level_max']}).")
+                    if x.get("needs_figure"):
+                        st.caption("⚠️ Says the item depends on a figure it could not see.")
+                    mk = [v for v in x["blind_matches_key"] if v is not None]
+                    if mk and not all(mk):
+                        st.caption("⚠️ Its BLIND answer did not always match the key (see Step 3).")
+            cons = irs.consensus_level(shown)
+            if cons and cons["n_models"] > 1:
+                if cons["min"] == cons["max"]:
+                    st.success(f"The {cons['n_models']} models agree on level {cons['median']:g}.")
+                else:
+                    st.warning(f"⚠️ The {cons['n_models']} models **disagree** (levels {cons['min']:g}–{cons['max']:g}; "
+                               f"median {cons['median']:g}). Treat the AI view of this item as uncertain.")
+        default = human["final_level"] or human["blind_level"]
+        fin = st.radio("Your final level", levels, index=levels.index(default), format_func=_fmt_level,
+                       key=f"ir_fin_{inst_key}_{qid}")
+        need_why = int(fin) != human["blind_level"]
+        why2 = st.text_area("Reason for your final level" + (" (required, because it differs from your first rating)" if need_why else " (optional)"),
+                            value=human["final_rationale"] or "", key=f"ir_why2_{inst_key}_{qid}")
+        if st.button("💾 Save final decision", key=f"ir_save_{inst_key}_{qid}"):
+            try:
+                r = irs.save_final_decision(username, item, int(fin), why2)
+                _flash("final", (int(fin), why2), f"Saved ({r['decision'].replace('_', ' ')}).")
+                st.rerun()
+            except ValueError as e:
+                st.error(str(e))
+        _flash("final", (int(fin), why2))
+
+        # ---- Step 3: key & distractors
+        st.markdown("#### Step 3 — Answer key and answer options (advisory)")
+        if not item["key"]:
+            st.info("No answer key on file for this item.")
+        else:
+            keytxt = next((o["text"] for o in item["options"] if o["label"] == str(item["key"])), "")
+            st.caption(f"Keyed answer: **{item['key']}** — {keytxt}")
+            kprovs = _pick_models(f"ir_kprovs_{inst_key}_{qid}")
+            if st.button("🔎 Check key and options with the AI", key=f"ir_keychk_{inst_key}_{qid}", disabled=not kprovs):
+                with st.spinner("Asking " + ", ".join(_IR_SHORT[p] for p in kprovs) + "…"):
+                    run_llm_batch([item], username, steps=("key",), providers=kprovs)
+                st.rerun()
+            for m, x in irs.llm_suggestions_by_model(item).items():
+                kr = x.get("key_review")
+                if kr:
+                    st.markdown(f"**{_mlabel(m)}** on the key: **{kr['key_defensible']}**"
+                                + (f" · another option also arguably correct: **{', '.join(kr['other_arguably_correct'])}**"
+                                   if kr["other_arguably_correct"] else "")
+                                + (f" · implausible options: **{', '.join(kr['implausible_distractors'])}**"
+                                   if kr["implausible_distractors"] else ""))
+                    st.caption(kr["comments"])
+            kd = st.radio("Your decision about the key", ["key_ok", "needs_review"], horizontal=True,
+                          format_func=lambda v: "Key is fine" if v == "key_ok" else "Needs review",
+                          index=0 if (human.get("key_decision") or "key_ok") == "key_ok" else 1,
+                          key=f"ir_kd_{inst_key}_{qid}")
+            kn = st.text_input("Note (optional)", value=human.get("key_note") or "", key=f"ir_kn_{inst_key}_{qid}")
+            if st.button("💾 Save key decision", key=f"ir_ksave_{inst_key}_{qid}"):
+                irs.save_key_decision(username, item, kd, kn)
+                _flash("key", (kd, kn), "Saved.")
+                st.rerun()
+            _flash("key", (kd, kn))
+
+    # ------------------------------------------------------------------ Summary
+    elif view == "Summary & agreement":
+        tbl = irs.summary_table(items, username)
+        done = tbl["my_first_rating"].notna().sum()
+        st.caption(f"{done} of {len(items)} items rated by you. AI levels appear only for items you have locked.")
+        st.dataframe(tbl.drop(columns=["item_hash"]), hide_index=True, width="stretch")
+
+        rows = []
+        model_cols = [c for c in tbl.columns if c.startswith("llm[")]
+        for col, name in [(c, c[4:-1]) for c in model_cols] + [("llm_level_median", "Consensus of models (median)")]:
+            both = tbl.dropna(subset=["my_first_rating", col])
+            if len(both) >= 3:
+                s = agreement_summary(both["my_first_rating"].astype(int).values, both[col].round().astype(int).values)
+                rows.append({"AI": _mlabel(name) if name in [ibl_m for ibl_m in [c[4:-1] for c in model_cols]] else name,
+                             "Items": s["n"], "Exact": f"{100*s['exact']:.0f}%", "Within 1": f"{100*s['within1']:.0f}%",
+                             "Weighted κ": "n/a" if s["kappa_w"] != s["kappa_w"] else f"{s['kappa_w']:.2f}",
+                             "κ 95% interval": ("" if s["kappa_lo"] != s["kappa_lo"] else f"{s['kappa_lo']:.2f} to {s['kappa_hi']:.2f}"),
+                             "Band": s["band"]})
+        if rows:
+            st.markdown("**Agreement: your first rating vs each AI model (median of its runs)**")
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+            st.caption("Weighted kappa with quadratic weights (Cohen, 1968); bootstrap interval; verbal band after Landis & "
+                       "Koch (1977), a rough guide only. With few items read these as indicative.")
+            changed = int((tbl["decision"].isin(["changed", "adopted_llm"])).sum())
+            st.caption(f"You changed your rating after seeing the AI on {changed} item(s).")
+        else:
+            st.info("Lock ratings for at least 3 items that also have an AI suggestion to see agreement.")
+
+        # Bloom level vs observed difficulty (module banks only)
+        if inst_key.startswith("module") and "@" not in inst_key and not canonical_df.empty:
+            _form1 = None
+            try:
+                matrix, _ = build_binary_response_matrix(canonical_df, inst_key)
+                forms = list_forms(matrix)
+                _form1 = subset_form(matrix, forms, "Form 1")
+            except (ValueError, IndexError, KeyError):
+                st.caption("Your Bloom level vs observed % correct is not shown: there is no Form 1 response "
+                           "data for this assessment in the current selection.")
+            if _form1 is not None:
+                pdf = pd.DataFrame({"item": _form1.columns, "pct_correct": (100 * _form1.mean()).round(0).values})
+                col = "my_final_rating" if tbl["my_final_rating"].notna().any() else "my_first_rating"
+                j = tbl.merge(pdf, on="item").dropna(subset=[col])
+                if len(j) >= 5:
+                    from scipy import stats as _st
+                    rho, p = _st.spearmanr(j[col], j["pct_correct"])
+                    st.markdown("**Your Bloom level vs observed % correct (Form 1, current main cohort)**")
+                    st.dataframe(j[["item", col, "pct_correct"]].rename(columns={col: "Bloom level"}), hide_index=True, width="stretch")
+                    st.caption(f"Spearman ρ = {rho:.2f} (p = {p:.2f}, n = {len(j)} items). Bloom level is not difficulty: "
+                               "expect a weak relationship (Kibble & Johnson, 2011).")
+                else:
+                    st.caption(f"Your Bloom level vs observed % correct (Form 1, current main cohort) appears once at "
+                               f"least 5 items on Form 1 have your rating; {len(j)} so far. Rate more items (Form 1 has "
+                               f"{_form1.shape[1]} items).")
+        st.download_button("⬇ Download my ratings (CSV)", tbl.to_csv(index=False).encode("utf-8"),
+                           file_name=f"item_review_{inst_key}_{username}.csv", mime="text/csv", key="ir_dl")
+
+    # ------------------------------------------------------------------ Batch
+    else:
+        st.markdown("Generate AI suggestions for many items at once. They stay hidden from each reviewer until that "
+                    "reviewer has locked their own rating of the item.")
+        scope = st.radio("Items", ["All items in this assessment", "Only items in the current live selection",
+                                   "Only items I have not locked yet"], key="ir_batch_scope")
+        pool = items
+        if scope.startswith("Only items in the current"):
+            pool = [i for i in items if i.get("in_current_selection")]
+        elif scope.startswith("Only items I have"):
+            pool = [i for i in items if not irs.get_human(username, i)]
+        provs = _pick_models("ir_b_provs")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            s_blind = st.checkbox("Bloom suggestion (blind)", value=True, key="ir_b_blind")
+        with c2:
+            s_key = st.checkbox("Key & options check", value=True, key="ir_b_key")
+        with c3:
+            reps = st.number_input("Runs per item (1-3)", 1, 3, 1, key="ir_b_reps")
+        steps = tuple(s for s, on in (("blind", s_blind), ("key", s_key)) if on)
+        n_rep = int(reps) if s_blind else 1
+        toks = ibl.estimate_tokens(len(pool), steps=max(1, len(steps)), repeats=n_rep) * max(1, len(provs))
+        claude_est = ibl.estimate_cost_usd(len(pool), steps=max(1, len(steps)), repeats=n_rep) if "claude" in provs else 0.0
+        st.info(f"{len(pool)} items × {len(steps)} step(s) × {len(provs)} model(s) ≈ **{toks:,} tokens** in total (rough). "
+                + (f"Claude's share costs about **${claude_est:.2f}** (an estimate). " if "claude" in provs else "")
+                + ("The other models are billed by their own providers (not calculated here). " if set(provs) - {"claude"} else "")
+                + "Only question wording is sent.")
+        if "groq" in provs and toks > 80000:
+            st.warning("Groq's free tier has a daily token limit (100,000 tokens/day per the platform notes). A run this "
+                       "large may be cut off by rate limits; failed calls are recorded and the batch continues.")
+        if len(pool) > 200:
+            st.error("Too many items for one run (limit 200).")
+            return
+        ok = st.checkbox("I understand this uses the project's API keys for the models selected and spends what the providers charge.",
+                         key="ir_b_ok")
+        if st.button("▶ Run AI batch", disabled=not (ok and steps and pool and provs), key="ir_b_run"):
+            bar = st.progress(0.0)
+            out = run_llm_batch(pool, username, steps=steps, repeats=int(reps), providers=provs,
+                                progress=lambda i, n, q: bar.progress(min(1.0, i / max(n, 1)), text=f"Item {q}"))
+            bar.empty()
+            for p, v in out["runs"].items():
+                (st.success if v["n_err"] == 0 else st.warning)(
+                    f"{_IR_SHORT[p]} ({v['model']}): {v['n_ok']} succeeded, {v['n_err']} failed or were declined · "
+                    f"{v['tokens_in'] + v['tokens_out']:,} tokens"
+                    + (f" · ${v['cost_usd']:.3f}" if p == "claude" else "") + f" · run {v['run_id']}")
+
+
+_ITEM_METHOD_GUIDE = """
+| | **1. Classical item analysis** | **2. Random-effects logistic model** | **3. Item Review (AI-assisted Bloom rating)** |
+|---|---|---|---|
+| **Tells you** | How many got each item right, how well it separates strong from weak students, how each wrong option behaved, test reliability (KR-20) | Each item's difficulty on a common scale, with a standard error and interval | What kind of thinking each question asks for; possible key or wording problems |
+| **Needs** | Almost any group; a warning appears under 30 | About 30+ students (more is better); one test form at a time | Any group size, even 8 students; no student data |
+| **Strengths** | Easy to explain; flags mis-keyed items and dead options; no model | Honest uncertainty; handles gaps and unbalanced data; steadies small groups | Works when statistics cannot; you rate first, the AI is a second opinion |
+| **Limits** | Describes this group on this form; correlations unstable in small groups | Assumes one trait and equal discrimination; intervals slightly narrow in our tests; hard item vs unlearned topic look alike | Bloom level is **not** difficulty (Kibble & Johnson, 2011); AI cannot see pictures; AI answers vary between runs |
+| **Main sources** | Kuder & Richardson (1937); Crocker & Algina (1986); Gierl et al. (2017) | De Boeck et al. (2011); Doran et al. (2007); Linacre (1994) | Anderson & Krathwohl (2001); Kibble & Johnson (2011); Parasuraman & Manzey (2010) |
+"""
+
+_ITEM_METHOD_REFS = """
+**References**
+Anderson, L. W., & Krathwohl, D. R. (Eds.). (2001). *A taxonomy for learning, teaching, and assessing*. Longman.
+Cohen, J. (1968). Weighted kappa. *Psychological Bulletin, 70*(4), 213-220.
+Crocker, L., & Algina, J. (1986). *Introduction to classical and modern test theory*. Holt, Rinehart & Winston.
+De Boeck, P., Bakker, M., Zwitser, R., Nivard, M., Hofman, A., Tuerlinckx, F., & Partchev, I. (2011). The estimation of item response models with the lmer function from the lme4 package in R. *Journal of Statistical Software, 39*(12).
+Doran, H., Bates, D., Bliese, P., & Dowling, M. (2007). Estimating the multilevel Rasch model: With the lme4 package. *Journal of Statistical Software, 20*(2).
+Gierl, M. J., Bulut, O., Guo, Q., & Zhang, X. (2017). Developing, analyzing, and using distractors for multiple-choice tests in education: A comprehensive review. *Review of Educational Research, 87*(6), 1082-1116.
+Haladyna, T. M., Downing, S. M., & Rodriguez, M. C. (2002). A review of multiple-choice item-writing guidelines for classroom assessment. *Applied Measurement in Education, 15*(3), 309-333.
+Hulin, C. L., Lissak, R. I., & Drasgow, F. (1982). Recovery of two- and three-parameter logistic item characteristic curves: A Monte Carlo study. *Applied Psychological Measurement, 6*(3), 249-260.
+Kibble, J. D., & Johnson, T. (2011). Are faculty predictions or item taxonomies useful for estimating the outcome of multiple-choice examinations? *Advances in Physiology Education, 35*, 396-401.
+Kuder, G. F., & Richardson, M. W. (1937). The theory of the estimation of test reliability. *Psychometrika, 2*(3), 151-160.
+Landis, J. R., & Koch, G. G. (1977). The measurement of observer agreement for categorical data. *Biometrics, 33*(1), 159-174.
+Linacre, J. M. (1994). Sample size and item calibration stability. *Rasch Measurement Transactions, 7*(4), 328. https://www.rasch.org/rmt/rmt74m.htm
+Parasuraman, R., & Manzey, D. (2010). Complacency and bias in human use of automation. *Human Factors, 52*(3), 381-410.
+"""
+
+
+def _render_item_method_guide() -> None:
+    """Guide: which item-difficulty method to use, by group size, with pros/cons and references."""
+    with st.expander("📘 Which method should I use? (guide for teachers and researchers)", expanded=False):
+        st.markdown(
+            "Three ways to look at how hard or well-working each question is. They answer **different questions**, "
+            "so they complement each other. Pick by how many students you have:"
+        )
+        n = st.number_input("How many students are in the group you want to analyse?", min_value=1, value=90, step=1,
+                            key="guide_n")
+        if n < 30:
+            st.warning(
+                f"**{int(n)} students — start with Item Review (method 3).** Statistics are very unstable at this size "
+                "(Linacre, 1994: about 30 students is the minimum for item difficulties stable within ±1 logit). "
+                "Classical item analysis (method 1) can still be read as a description of this group only."
+            )
+        elif n < 100:
+            st.info(
+                f"**{int(n)} students — use classical item analysis (method 1) first, then the random-effects model "
+                "(method 2) for difficulty with uncertainty.** Use Item Review (method 3) for context. Rasch (IRT) is "
+                "possible; expect roughly ±1 logit precision (Linacre, 1994). 2PL is not advisable."
+            )
+        elif n < 500:
+            st.info(
+                f"**{int(n)} students — methods 1 and 2 are well supported, and Rasch (IRT) is reasonable.** About 100 "
+                "(95%) to 150 (99%) students give ±½ logit precision (Linacre, 1994). 2PL is still below the size "
+                "(about 500 with 30 items) that Hulin, Lissak & Drasgow (1982) found adequate for some purposes."
+            )
+        else:
+            st.success(
+                f"**{int(n)} students — all methods are feasible, and 2PL becomes defensible** (about 500 students and "
+                "30 items; Hulin, Lissak & Drasgow, 1982). Keep using classical item analysis to review item quality."
+            )
+        st.markdown(_ITEM_METHOD_GUIDE)
+        st.warning(
+            "**What none of these can tell you:** whether a question is hard because it is poorly written or hard "
+            "because the topic was not learned. For that you need an outside reference, such as expert review or "
+            "a pre-test on the same content."
+        )
+        st.caption("Sample-size figures are guidance from the sources cited, not pass/fail rules; the tool warns "
+                   "but never blocks.")
+        st.markdown(_ITEM_METHOD_REFS)
+
+
+def _ctt_option_info(instrument_key: str, item_ids: List[str], canonical_df: pd.DataFrame):
+    """
+    Option letters / counts per item. Uses the instrument YAML when it lists options
+    (AI-CI, Misconceptions); for module MCQs (YAML holds ids only) falls back to the
+    letters A..max actually chosen, so the chance level there is an estimate.
+    """
+    letters: Dict[str, List[str]] = {}
+    try:
+        from core.analytics.datasets.canonical_loader import _build_instruments_dict
+        inst = _build_instruments_dict().get(instrument_key) or {}
+        for q in inst.get("questions", []) or []:
+            if isinstance(q, dict) and q.get("options") and q.get("id") in item_ids:
+                letters[q["id"]] = [str(o).split(":")[0].strip() for o in q["options"]]
+    except Exception:
+        letters = {}
+    inferred = False
+    missing = [i for i in item_ids if i not in letters]
+    if missing:
+        mask = ((canonical_df["instrument_key"] == instrument_key)
+                | canonical_df["instrument_key"].str.endswith("_" + instrument_key))
+        sub = canonical_df[mask & canonical_df["question_id"].isin(missing)]
+        for q, g in sub.groupby("question_id"):
+            seen = {str(v).split(":")[0].strip() for v in g["response_value"].dropna()}
+            seen = {x for x in seen if len(x) == 1 and x.isalpha()}
+            if seen:
+                top = max(ord(x.upper()) for x in seen)
+                letters[q] = [chr(c) for c in range(ord("A"), top + 1)]
+                inferred = True
+    return letters, {q: len(v) for q, v in letters.items()}, inferred
+
+
+def _render_ctt_item_analysis(canonical_df: pd.DataFrame) -> None:
+    """Classical (CTT) item analysis -- Method 1 of the item-difficulty options."""
+    st.markdown("### Binary Assessment — Classical Item Analysis (CTT)")
+    with st.expander("ℹ️ What this shows, when to use it, strengths and limits, references", expanded=False):
+        st.markdown(_CTT_HELP)
+
+    present = set(canonical_df["instrument_key"].unique()) if not canonical_df.empty else set()
+    options = {k: v for k, v in _ASSESSMENT_LABELS.items()
+               if k in present or any(str(x).endswith("_" + k) for x in present)}
+    if not options:
+        st.warning("No binary assessments in the current filter.")
+        return
+    label = st.selectbox("Assessment", options=list(options.values()), key="ctt_instrument")
+    inst_key = next(k for k, v in options.items() if v == label)
+
+    try:
+        matrix, item_ids = build_binary_response_matrix(canonical_df, inst_key)
+    except ValueError as e:
+        st.warning(str(e))
+        return
+
+    forms = list_forms(matrix)
+    if forms.empty:
+        st.warning("No scorable responses.")
+        return
+    if len(forms) > 1:
+        st.info(
+            f"This assessment exists in {len(forms)} versions (forms) taken by different cohorts, "
+            "for example the original question bank versus the revised, shorter one. Every student "
+            "in a cohort saw the same items, but items differ between forms. Classical "
+            "statistics are only defined within one form, so pick one."
+        )
+    st.dataframe(
+        forms[["form", "n_students", "n_items"]].rename(
+            columns={"form": "Form", "n_students": "Students", "n_items": "Items"}),
+        hide_index=True, width="stretch",
+    )
+    form = st.selectbox("Form to analyse", options=list(forms["form"]), key="ctt_form")
+    sub = subset_form(matrix, forms, form)
+
+    letters, n_opts, inferred = _ctt_option_info(inst_key, list(sub.columns), canonical_df)
+    res = compute_item_analysis(sub, n_options=n_opts or None)
+    if res.get("error"):
+        st.warning(res["error"])
+        return
+
+    note = res.get("note")
+    if note:
+        (st.warning if res["n_persons"] < 30 else st.info)(note)
+
+    t = res["test"]
+
+    def _fmt(v, d=2):
+        return f"{v:.{d}f}" if isinstance(v, (int, float)) and v == v else "n/a"
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Students", res["n_persons"])
+    c2.metric("Items", t.get("k_items"))
+    c3.metric("Mean item difficulty (p)", _fmt(t.get("mean_item_p")))
+    c4.metric("KR-20", _fmt(t.get("kr20")))
+    c5.metric("SEM (score points)", _fmt(t.get("sem")))
+    if t.get("k_items", 0) < 8:
+        st.caption("With fewer than 8 items KR-20 is low by construction (short tests are less reliable; "
+                   "Crocker & Algina, 1986). Judge it with that in mind.")
+    if inferred:
+        st.caption("Number of answer options was inferred from the letters students chose (A…max), "
+                   "so the below-chance check is approximate for this assessment.")
+
+    items = res["items"].copy()
+    show = pd.DataFrame({
+        "Item": items["item"],
+        "n": items["n"],
+        "% correct (p)": (100 * items["p"]).round(0),
+        "95% interval": [f"{100*a:.0f}–{100*b:.0f}%" for a, b in zip(items["p_ci_low"], items["p_ci_high"])],
+        "Item–total r": items["r_it"].round(2),
+        "r 95% interval": [("" if a != a else f"{a:.2f} to {b:.2f}")
+                           for a, b in zip(items["r_ci_low"], items["r_ci_high"])],
+        "KR-20 if deleted": items["alpha_if_deleted"].round(2),
+        "Review flags": items["flags"],
+    })
+    st.markdown("**Item statistics**")
+    st.dataframe(show, hide_index=True, width="stretch",
+                 column_config={"Review flags": st.column_config.TextColumn("Review flags", width="large")})
+    _show_flag_details(show, "Item", "Review flags")
+    st.caption("p = share correct (higher = easier). It reflects this group and this test form, and cannot by "
+               "itself separate a hard item from content that was not learned.")
+    st.download_button(
+        "⬇ Download item statistics (CSV)", show.to_csv(index=False).encode("utf-8"),
+        file_name=f"ctt_item_statistics_{inst_key}_{form.replace(' ', '')}.csv",
+        mime="text/csv", key="ctt_dl_items",
+    )
+
+    with st.expander("🔎 Distractor analysis (how each answer option was used)", expanded=False):
+        st.caption(
+            "Shares of students choosing each option, overall and in five ability groups (g1 = lowest, "
+            "g5 = highest; ability = score on the other items). A well-working wrong option is chosen "
+            "more by weaker students. Options chosen by < 5% are flagged as non-functioning, except on "
+            "very easy items (Gierl et al., 2017)."
+        )
+        try:
+            students = list(sub.index)
+            dsub = canonical_df[canonical_df["user_id"].isin(students)
+                                & canonical_df["question_id"].isin(list(sub.columns))]
+            dist = compute_distractor_analysis(dsub, inst_key, option_letters=letters or None)
+        except Exception as e:  # an optional table must never break the tab
+            dist = pd.DataFrame()
+            st.warning(f"Distractor analysis unavailable: {e}")
+        if dist.empty:
+            st.info("No option-level data for this assessment.")
+        else:
+            d = dist.copy()
+            d["Option"] = d["option"] + d["keyed"].map({True: " ✔ (key)", False: ""})
+            cols = ["item", "Option", "share"] + [f"g{j}" for j in range(1, 6)] + ["distractor_r", "flags"]
+            d = d[cols].rename(columns={"item": "Item", "share": "All",
+                                        "distractor_r": "Distractor r", "flags": "Review flags"})
+            for c in ["All"] + [f"g{j}" for j in range(1, 6)]:
+                d[c] = (100 * d[c]).round(0)
+            d["Distractor r"] = d["Distractor r"].round(2)
+            st.dataframe(d, hide_index=True, width="stretch",
+                         column_config={"Review flags": st.column_config.TextColumn("Review flags", width="large")})
+            _show_flag_details(d, "Item", "Review flags")
+            st.download_button(
+                "⬇ Download distractor table (CSV)", d.to_csv(index=False).encode("utf-8"),
+                file_name=f"ctt_distractors_{inst_key}_{form.replace(' ', '')}.csv",
+                mime="text/csv", key="ctt_dl_dist",
+            )
+
+
+def _render_glmm_item_difficulty(canonical_df: pd.DataFrame) -> None:
+    """Item difficulty by crossed random-effects logistic model -- Method 2 of the item-difficulty options."""
+    from core.analytics.irt.glmm_item_difficulty import fit_item_difficulty_glmm, r_available
+
+    st.markdown("### Binary Assessment — Item Difficulty by Random-Effects Logistic Model")
+    with st.expander("ℹ️ What this shows, when to use it, strengths and limits, references", expanded=False):
+        st.markdown(_GLMM_HELP)
+
+    present = set(canonical_df["instrument_key"].unique()) if not canonical_df.empty else set()
+    options = {k: v for k, v in _ASSESSMENT_LABELS.items()
+               if k in present or any(str(x).endswith("_" + k) for x in present)}
+    if not options:
+        st.warning("No binary assessments in the current filter.")
+        return
+    label = st.selectbox("Assessment", options=list(options.values()), key="glmm_instrument")
+    inst_key = next(k for k, v in options.items() if v == label)
+    try:
+        matrix, _ids = build_binary_response_matrix(canonical_df, inst_key)
+    except ValueError as e:
+        st.warning(str(e))
+        return
+    forms = list_forms(matrix)
+    if forms.empty:
+        st.warning("No scorable responses.")
+        return
+    if len(forms) > 1:
+        st.info(
+            f"This assessment exists in {len(forms)} versions (forms) taken by different cohorts. "
+            "Every student in a cohort saw the same items, but items differ between forms, so the "
+            "model is fitted to one form at a time."
+        )
+    st.dataframe(forms[["form", "n_students", "n_items"]].rename(
+        columns={"form": "Form", "n_students": "Students", "n_items": "Items"}),
+        hide_index=True, width="stretch")
+    form = st.selectbox("Form to analyse", options=list(forms["form"]), key="glmm_form")
+    sub = subset_form(matrix, forms, form)
+
+    has_r = r_available()
+    c1, c2 = st.columns(2)
+    with c1:
+        eng_label = st.selectbox(
+            "Computation engine",
+            options=["Automatic (R if available, else Python)", "Python (portable approximation)"]
+                    + (["R lme4 (reference)"] if has_r else []),
+            key="glmm_engine",
+            help="R lme4 is the reference implementation but is only installed on the researcher's "
+                 "computer, not on the web server. The Python engine runs everywhere and agrees "
+                 "closely with lme4 in our validation.",
+        )
+    with c2:
+        eff_label = st.selectbox(
+            "Item effects",
+            options=["Automatic (random if 10+ items)", "Random (shrinks toward the average)", "Fixed (no shrinkage)"],
+            key="glmm_effects",
+            help="Random item effects stabilise estimates but need enough items to estimate how much "
+                 "difficulty varies; with fewer than 10 items use Fixed.",
+        )
+    engine = ("python" if eng_label.startswith("Python") else "r" if eng_label.startswith("R ") else "auto")
+    effects = ("random" if eff_label.startswith("Random") else "fixed" if eff_label.startswith("Fixed") else "auto")
+
+    if st.button("▶ Fit model", key="glmm_run"):
+        with st.spinner("Fitting model…"):
+            st.session_state["_glmm_result"] = (
+                (inst_key, form, engine, effects),
+                fit_item_difficulty_glmm(sub, engine=engine, item_effects=effects),
+                compute_item_analysis(sub)["items"][["item", "p"]],
+            )
+    stored = st.session_state.get("_glmm_result")
+    if not stored or stored[0] != (inst_key, form, engine, effects):
+        st.caption("Choose settings and press **Fit model**.")
+        return
+    _k, res, _ctt = stored
+    if res.get("error"):
+        st.error(res["error"])
+        return
+
+    engine_name = {"r": "R lme4 (Laplace approximation)", "python": "Python statsmodels (variational Bayes)"}[res["engine"]]
+    st.caption(
+        f"Engine: **{engine_name}** · item effects: **{res['mode']}** · {res['n_persons']} students × "
+        f"{res['n_items']} items · {res['n_obs']} responses · "
+        f"student ability SD = {res['sigma_person']:.2f} logits"
+        + (f" · item difficulty SD = {res['sigma_item']:.2f} logits" if res.get("sigma_item") else "")
+    )
+    if res.get("engine_note"):
+        st.info(res["engine_note"])
+    for w in res.get("warnings", []):
+        st.warning(w)
+
+    it = res["items"].copy()
+    show = pd.DataFrame({
+        "Item": it["item"],
+        "n": it["n"],
+        "% correct (p)": (100 * it["p"]).round(0),
+        "Difficulty (logits)": it["difficulty"].round(2),
+        "SE": it["se"].round(2),
+        "95% interval": [f"{a:.2f} to {b:.2f}" for a, b in zip(it["ci_low"], it["ci_high"])],
+        "Rank (1 = hardest)": it["rank_hardest"],
+    })
+    st.markdown("**Item difficulty** (logit scale; the average student's ability = 0; higher = harder)")
+    st.dataframe(show, hide_index=True, width="stretch")
+
+    try:
+        import plotly.graph_objects as go
+        order = it.sort_values("difficulty")
+        fig = go.Figure(go.Scatter(
+            x=order["difficulty"], y=order["item"], mode="markers",
+            error_x=dict(type="data", symmetric=False,
+                         array=(order["ci_high"] - order["difficulty"]).values,
+                         arrayminus=(order["difficulty"] - order["ci_low"]).values),
+            marker=dict(size=8, color="#0077BB"),
+        ))
+        fig.update_layout(height=max(300, 22 * len(order) + 120), margin=dict(l=10, r=10, t=30, b=40),
+                          xaxis_title="Difficulty (logits) with 95% interval", yaxis=dict(autorange="reversed"),
+                          title="Item difficulties, easiest to hardest")
+        st.plotly_chart(fig, width="stretch")
+    except Exception:
+        pass
+    st.caption(
+        "The intervals describe uncertainty in estimating each item from THIS group; in our simulations "
+        "they covered the true value about 90–92% of the time (nominal 95%), so read them as slightly "
+        "optimistic. Difficulty here cannot separate a hard item from content that was not learned."
+    )
+    st.download_button(
+        "⬇ Download item difficulties (CSV)", show.to_csv(index=False).encode("utf-8"),
+        file_name=f"glmm_item_difficulty_{inst_key}_{form.replace(' ', '')}.csv", mime="text/csv", key="glmm_dl",
+    )
+
+
 def _render_irt_result(
     result: dict,
     item_ids: List[str],
@@ -5101,14 +5947,11 @@ def _render_irt_result(
     n = result["n_persons"]
     model = result["model_type"]
 
-    # Low-n warning
-    if result.get("low_n_warning"):
-        st.warning(
-            f"⚠️ **n = {n}** — IRT parameter estimates at this sample size "
-            f"are unstable. Results are shown for pipeline verification. "
-            f"Reliable IRT analysis requires n ≥ {MIN_N_WARN}. "
-            f"Re-run after the July/August cohort (expected n ≈ 90)."
-        )
+    # Sample-size cautions (warnings, never gates)
+    for _w in result.get("warnings", []):
+        st.warning("⚠️ " + _w)
+    if result.get("low_n_warning") and not result.get("warnings"):
+        st.warning(f"⚠️ **n = {n}**: estimates at this sample size are unstable; read them as exploratory.")
 
     # Model fit row
     c1, c2, c3, c4 = st.columns(4)
@@ -5388,6 +6231,8 @@ def _count_available_sources(cohort_ids: list = None) -> dict:
                     "WHERE instrument_name LIKE '%module_reflections%' "
                     "AND response_value IS NOT NULL"
                 ).fetchall()
+            from core.exclusions import is_excluded as _is_excl
+            rows = [r for r in rows if not _is_excl(r[0])]
             if cohort_ids:
                 from auth.user_manager import get_user_cohort_map
                 _cmap = get_user_cohort_map()
@@ -5459,6 +6304,8 @@ def _load_combined_transcripts(
                 "AND response_value IS NOT NULL"
             ).fetchall()
             conn.close()
+            from core.exclusions import is_excluded as _is_excl
+            rows = [r for r in rows if not _is_excl(r[0])]
             _reflection_cohort_map = {}
             if cohort_ids:
                 try:
@@ -7703,6 +8550,8 @@ def _execute_lo_run(username, models, temperature,
         "AND response_value IS NOT NULL"
     ).fetchall()
     conn3.close()
+    from core.exclusions import is_excluded as _is_excl
+    rows3 = [r for r in rows3 if not _is_excl(r[0])]
     lo_trans = []
     for uid, iname, rval in rows3:
         if not str(rval).strip(): continue
@@ -8152,10 +9001,13 @@ Source: **Guay, Vallerand & Blanchard (2000)**. Measures motivation type in
 four constructs: Intrinsic Motivation, Identified Regulation, External
 Regulation, and Amotivation. The original instrument has 16 items on a
 7-point scale; this adaptation uses 13 items on a 4-point scale. Items
-Q4_1–Q4_4 (External Regulation) and Q5_1–Q5_3 (Amotivation) are
-reverse-scored so that all four constructs read in the same direction:
-**higher mean = better self-determined motivation**. The Relative Autonomy
-Index (RAI), computed from these four constructs, adapts the standard SDT
+Q4_1–Q4_4 (External Regulation) and Q5_1–Q5_3 (Amotivation) are NOT
+reverse-scored: for all four constructs a higher mean means MORE of that
+regulation (Strongly disagree = 1 … Strongly agree = 4). A high mean is
+therefore good for Intrinsic Motivation and Identified Regulation but a
+concern for External Regulation and Amotivation. The Relative Autonomy
+Index (RAI), computed from these four constructs, subtracts External
+Regulation and Amotivation (higher RAI = more self-determined) and adapts the standard SDT
 scoring protocol -- see **Grolnick & Ryan (1989)**, **Ryan & Connell
 (1989)**, **Vallerand (2007)**, and **Ünlü (2016)** below -- to this
 instrument's 4-subscale structure, which has no Introjected Regulation
@@ -8204,7 +9056,7 @@ published instrument for full item listings.
                 "*Motivation and Emotion, 24*(3), 175–213. "
                 "https://doi.org/10.1023/a:1005614228250"
             ),
-            "note": "SIMS source instrument. Adapted for Basics4AI: 13 of 16 items, 4-point (not 7-point) scale; External Regulation and Amotivation items reverse-scored.",
+            "note": "SIMS source instrument. Adapted for Basics4AI: 13 of 16 items, 4-point (not 7-point) scale; no item reverse-scored (higher External Regulation / Amotivation = worse; direction flipped only inside RAI and CPI).",
         },
         {
             "section": "Instruments",
@@ -8718,6 +9570,22 @@ published instrument for full item listings.
 # PDF builder — shared utility
 # -----------------------------------------------------------------------
 
+# Characters the PDF font (Helvetica) has no glyph for print as black squares. LLM text (ITA reports) often
+# contains these; map them to plain look-alikes. Characters Helvetica or its fallbacks can draw are left alone.
+_PDF_CHAR_MAP = {
+    **{c: "-" for c in "‐‑‒⁃"},      # hyphen, non-breaking hyphen, figure dash, hyphen bullet
+    "―": "—",                                      # horizontal bar -> em dash
+    **{c: " " for c in "           　"},
+    **{c: "" for c in "­​‌‍⁠﻿"},   # soft hyphen, zero-width characters
+}
+_PDF_CHAR_TABLE = str.maketrans(_PDF_CHAR_MAP)
+
+
+def _pdf_clean(text) -> str:
+    """Replace characters the PDF font cannot draw (black squares) by plain look-alikes."""
+    return str(text).translate(_PDF_CHAR_TABLE)
+
+
 def _build_pdf(sections: list, title: str) -> bytes:
     """
     Build a PDF report from a list of content sections.
@@ -8780,6 +9648,14 @@ def _build_pdf(sections: list, title: str) -> bytes:
     )
 
     story = []
+    title = _pdf_clean(title)
+    sections = [
+        {**sec,
+         **{k: _pdf_clean(sec[k]) for k in ("heading", "body", "caption") if sec.get(k)},
+         **({"table": sec["table"].rename(columns=_pdf_clean).astype(str).apply(lambda c: c.map(_pdf_clean))}
+            if sec.get("table") is not None and not sec["table"].empty else {})}
+        for sec in sections
+    ]
 
     # ── Cover ──────────────────────────────────────────────────────────────
     story.append(Paragraph("Basics4AI Programme", styles["Heading2"]))
@@ -9444,6 +10320,133 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
 # iii. IRT Analysis report
 # -----------------------------------------------------------------------
 
+def _irt_report_sections(canonical_df, irt_report_type, irt_model=None,
+                         irt_survey=None, irt_construct=None):
+    """Build the IRT report sections. Returns (sections, failed) where failed lists
+    (instrument, reason) for every instrument that could not be analysed."""
+    sections = [{"heading": "IRT Analysis Report", "body": ""}]
+    failed = []
+    if irt_report_type == "Binary Assessments":
+        # Run Rasch on all binary instruments
+        for inst_key in [
+            "precourse_pre_ai_misconceptions_assessment",
+            "postcourse_post_ai_misconceptions_assessment",
+            "precourse_pre_aici_assessment",
+            "postcourse_post_aici_assessment",
+        ] + [f"module{n}_content_mcq_assessment" for n in discover_all_module_numbers()]:
+            label = _ASSESSMENT_LABELS.get(inst_key, inst_key)
+            try:
+                try:
+                    mat, item_ids = build_binary_response_matrix(canonical_df, inst_key)
+                except ValueError as _e:
+                    if str(_e).startswith("No data found"):
+                        continue   # instrument not administered: nothing to report
+                    raise
+                if len(mat) < 3:
+                    failed.append((label, f"only {len(mat)} student(s); at least 3 needed"))
+                    continue
+                if irt_model.startswith("Classical") or irt_model.startswith("Random"):
+                    _forms = list_forms(mat)
+                    if _forms.empty:
+                        failed.append((label, "no response form found"))
+                        continue
+                    _sub = subset_form(mat, _forms, _forms.loc[0, "form"])
+                    _label = label
+                    _fnote = (f" Largest form of {len(_forms)} (students saw different item sets in "
+                              "different cohorts)." if len(_forms) > 1 else "")
+                    if irt_model.startswith("Classical"):
+                        _ca = compute_item_analysis(_sub)
+                        if _ca.get("error"):
+                            failed.append((label, str(_ca["error"])))
+                            continue
+                        _it = _ca["items"]
+                        _tbl = pd.DataFrame({
+                            "Item": _it["item"], "n": _it["n"],
+                            "% correct": (100 * _it["p"]).round(0),
+                            "r (item-total)": _it["r_it"].round(2),
+                            "Review flags": _it["flags"],
+                        })
+                        _t = _ca["test"]
+                        _kr = _t.get("kr20")
+                        sections.append({
+                            "heading": f"Classical item analysis - {_label}",
+                            "body": (f"Students: {_ca['n_persons']}  |  Items: {_t.get('k_items')}  |  "
+                                     f"KR-20: {(f'{_kr:.2f}' if _kr == _kr else 'n/a')}.{_fnote} "
+                                     f"{_ca.get('note') or ''}"),
+                            "table": _tbl,
+                            "caption": ("p = share correct (higher = easier); r = corrected item-total "
+                                        "correlation. Describes this group on this form only. "
+                                        "Kuder & Richardson (1937); Crocker & Algina (1986)."),
+                        })
+                    else:
+                        _g = fit_item_difficulty_glmm(_sub, engine="python")
+                        if _g.get("error"):
+                            failed.append((label, str(_g["error"])))
+                            continue
+                        _gi = _g["items"]
+                        _tbl = pd.DataFrame({
+                            "Item": _gi["item"], "% correct": (100 * _gi["p"]).round(0),
+                            "Difficulty (logits)": _gi["difficulty"].round(2), "SE": _gi["se"].round(2),
+                            "Rank (1=hardest)": _gi["rank_hardest"],
+                        })
+                        sections.append({
+                            "heading": f"Random-effects item difficulty - {_label}",
+                            "body": (f"Students: {_g['n_persons']}  |  Items: {_g['n_items']}  |  "
+                                     f"Item effects: {_g['mode']}.{_fnote} " + " ".join(_g.get("warnings", []))),
+                            "table": _tbl,
+                            "caption": ("Logit scale, average student = 0, higher = harder. Python engine "
+                                        "(variational Bayes); intervals run slightly narrow. "
+                                        "De Boeck et al. (2011); Doran et al. (2007); Linacre (1994)."),
+                        })
+                    continue
+                if "2PL" in irt_model:
+                    res = run_2pl_model(mat, item_ids)
+                else:
+                    res = run_rasch_model(mat, item_ids)
+                if res.get("error"):
+                    failed.append((label, str(res["error"])))
+                    continue
+                params = res.get("item_params", pd.DataFrame())
+                sections.append({
+                    "heading": f"IRT — {label}",
+                    "body":    (
+                        f"Model: {res['model_type']}  |  "
+                        f"N persons: {res['n_persons']}  |  "
+                        f"N items: {res['n_items']}  |  "
+                        f"AIC: {res.get('aic','—')}  |  "
+                        + " ".join(res.get("warnings", []))
+                    ),
+                    "table":   params.round(3) if not params.empty else None,
+                    "caption": "Item parameters estimated by IRT model.",
+                })
+            except Exception as _e:
+                failed.append((label, f"{type(_e).__name__}: {_e}"))
+    else:
+        survey_key = ("b4ai_sccces_survey"
+                      if irt_survey == _SURVEY_LABELS["b4ai_sccces_survey"]
+                      else "b4ai_sims_survey")
+        lmat, litem_ids = build_likert_response_matrix(
+            canonical_df, survey_key, irt_construct
+        )
+        res = run_grm_model(lmat, litem_ids)
+        if res.get("error"):
+            failed.append((irt_construct.replace("_", " ").title(), str(res["error"])))
+        else:
+            params = res.get("item_params", pd.DataFrame())
+            sections.append({
+                "heading": f"GRM — {irt_construct.replace('_',' ').title()}",
+                "body":    (
+                    f"Model: {res['model_type']}  |  "
+                    f"N persons: {res['n_persons']}  |  "
+                    f"N items: {res['n_items']}"
+                ),
+                "table":   params.round(3) if not params.empty else None,
+                "caption": "Item parameters from Graded Response Model.",
+            })
+
+    return sections, failed
+
+
 def _report_irt(canonical_df: pd.DataFrame) -> None:
     st.markdown("### iii. IRT Analysis Report")
     st.caption("Generates a PDF of IRT model results for the selected instrument.")
@@ -9452,6 +10455,7 @@ def _report_irt(canonical_df: pd.DataFrame) -> None:
         st.error("IRT library (girth) not available — cannot generate IRT report.")
         return
 
+    irt_model = irt_survey = irt_construct = None
     col1, col2 = st.columns(2)
     with col1:
         irt_report_type = st.selectbox(
@@ -9461,7 +10465,9 @@ def _report_irt(canonical_df: pd.DataFrame) -> None:
         )
     with col2:
         if irt_report_type == "Binary Assessments":
-            irt_model = st.selectbox("Model", ["Rasch (1PL)", "2PL (requires n≥50)"],
+            irt_model = st.selectbox("Model", ["Rasch (1PL)", "2PL (about 500+ students recommended)",
+                                               "Classical item analysis (CTT)",
+                                               "Random-effects logistic (Python engine)"],
                                      key="rpt_irt_model")
         else:
             irt_survey = st.selectbox(
@@ -9478,62 +10484,17 @@ def _report_irt(canonical_df: pd.DataFrame) -> None:
 
     if st.button("📄 Generate IRT Report (PDF)", key="rpt_irt_gen", type="primary"):
         with st.spinner("Fitting model and building PDF…"):
-            sections = [{"heading": "IRT Analysis Report", "body": ""}]
             try:
-                if irt_report_type == "Binary Assessments":
-                    # Run Rasch on all binary instruments
-                    for inst_key in [
-                        "precourse_pre_ai_misconceptions_assessment",
-                        "postcourse_post_ai_misconceptions_assessment",
-                        "precourse_pre_aici_assessment",
-                        "postcourse_post_aici_assessment",
-                    ] + [f"module{n}_content_mcq_assessment" for n in discover_all_module_numbers()]:
-                        try:
-                            mat, item_ids = build_binary_response_matrix(canonical_df, inst_key)
-                            if len(mat) < 3:
-                                continue
-                            if "2PL" in irt_model:
-                                res = run_2pl_model(mat, item_ids)
-                            else:
-                                res = run_rasch_model(mat, item_ids)
-                            if res.get("error"):
-                                continue
-                            label = _ASSESSMENT_LABELS.get(inst_key, inst_key)
-                            params = res.get("item_params", pd.DataFrame())
-                            sections.append({
-                                "heading": f"IRT — {label}",
-                                "body":    (
-                                    f"Model: {res['model_type']}  |  "
-                                    f"N persons: {res['n_persons']}  |  "
-                                    f"N items: {res['n_items']}  |  "
-                                    f"AIC: {res.get('aic','—')}"
-                                ),
-                                "table":   params.round(3) if not params.empty else None,
-                                "caption": "Item parameters estimated by IRT model.",
-                            })
-                        except Exception:
-                            pass
-                else:
-                    survey_key = ("b4ai_sccces_survey"
-                                  if irt_survey == _SURVEY_LABELS["b4ai_sccces_survey"]
-                                  else "b4ai_sims_survey")
-                    lmat, litem_ids = build_likert_response_matrix(
-                        canonical_df, survey_key, irt_construct
-                    )
-                    res = run_grm_model(lmat, litem_ids)
-                    if not res.get("error"):
-                        params = res.get("item_params", pd.DataFrame())
-                        sections.append({
-                            "heading": f"GRM — {irt_construct.replace('_',' ').title()}",
-                            "body":    (
-                                f"Model: {res['model_type']}  |  "
-                                f"N persons: {res['n_persons']}  |  "
-                                f"N items: {res['n_items']}"
-                            ),
-                            "table":   params.round(3) if not params.empty else None,
-                            "caption": "Item parameters from Graded Response Model.",
-                        })
-
+                sections, failed = _irt_report_sections(
+                    canonical_df, irt_report_type,
+                    irt_model=irt_model,
+                    irt_survey=irt_survey,
+                    irt_construct=irt_construct)
+                if failed:
+                    sections.append({
+                        "heading": "Not analysed",
+                        "body": "\n".join(f"- {_n}: {_why}" for _n, _why in failed),
+                    })
                 pdf_bytes = _build_pdf(sections, "IRT Analysis Report")
                 st.download_button(
                     "⬇️ Download IRT Report (PDF)",
@@ -9542,7 +10503,14 @@ def _report_irt(canonical_df: pd.DataFrame) -> None:
                     mime="application/pdf",
                     key="rpt_irt_dl",
                 )
-                st.success("PDF ready.")
+                if len(sections) - (1 if failed else 0) <= 1:
+                    st.warning("No analysis section could be produced, so the PDF has no results. "
+                               "See the list below.")
+                else:
+                    st.success("PDF ready.")
+                if failed:
+                    st.warning("Not analysed (also listed at the end of the PDF):\n\n"
+                               + "\n".join(f"- **{_n}**: {_why}" for _n, _why in failed))
             except Exception as e:
                 st.error(f"IRT report error: {e}")
 

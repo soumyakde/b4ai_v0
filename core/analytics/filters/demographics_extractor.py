@@ -168,6 +168,9 @@ def extract_demographics(db_path: Union[str, Path]) -> pd.DataFrame:
     finally:
         conn.close()
 
+    from core.exclusions import drop_excluded
+    raw = drop_excluded(raw)
+
     if raw.empty:
         # Return empty DataFrame with correct schema
         return pd.DataFrame(columns=[

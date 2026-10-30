@@ -1,0 +1,96 @@
+[
+ {
+  "id": "Q1",
+  "question": "When you read the passage, were the answers to the questions explicitly (mentioned clearly) stated in the passage?",
+  "options": [
+   "Yes",
+   "No"
+  ]
+ },
+ {
+  "id": "Q3",
+  "question": "When you read the passage, to find the answers to the questions, what did you have to look for in the passage?",
+  "options": [
+   "Information",
+   "Words",
+   "Sentences",
+   "Evidence"
+  ]
+ },
+ {
+  "id": "Q4",
+  "question": "What is evidence, in the context of the passage?",
+  "options": [
+   "A pattern of words/phrases that helps support your answers",
+   "A pattern of words/phrases",
+   "Any sentence in the paragraph",
+   "All of the above"
+  ]
+ },
+ {
+  "id": "Q5",
+  "question": "When AI answered the questions from the passage, what was the expectation?",
+  "options": [
+   "The answers could be hallucinated (made up)",
+   "The answers could have bias",
+   "All the AIs could give the same answers",
+   "The answers could be different for all AIs",
+   "All the above"
+  ]
+ },
+ {
+  "id": "Q7",
+  "question": "Should you always trust the answers AI gives you?",
+  "options": [
+   "Yes",
+   "No"
+  ]
+ },
+ {
+  "id": "Q9",
+  "question": "How did Scripts help early AI to make inferences?",
+  "options": [
+   "It helped detect patterns",
+   "It helped fill missing information",
+   "It helped connect different parts",
+   "It helped the computers make smart guesses",
+   "All of the above"
+  ]
+ },
+ {
+  "id": "Q11",
+  "question": "When you inferred the answers based on evidence from the passage, did you fill missing information in the passage?",
+  "options": [
+   "Yes",
+   "No"
+  ]
+ },
+ {
+  "id": "Q13",
+  "question": "When you inferred the answers based on evidence from the passage, did you make smart guesses?",
+  "options": [
+   "Yes",
+   "No"
+  ]
+ },
+ {
+  "id": "Q15",
+  "question": "When you say to Alexa, \"I am feeling sleepy\"and it switches off the light; How did it know what you actually wanted it to do?",
+  "options": [
+   "It randomly guessed",
+   "It asked another AI",
+   "It inferred",
+   "None of the above"
+  ]
+ },
+ {
+  "id": "Q19",
+  "question": "If AI always mentions \"she\" in the sentence, \"the nurse phoned the doctor because she was late\" what could be the source of any bias?",
+  "options": [
+   "Its training had language bias",
+   "It's training had societal bias",
+   "Its training has human thinking bias",
+   "All of the above"
+  ]
+ }
+]
