@@ -5278,6 +5278,8 @@ def _render_item_review_tab(username: str, canonical_df: pd.DataFrame) -> None:
             format_func=lambda k: f"{_IR_SHORT[k]} — {ibl.model_id(k)}", key=key,
             help="Each model is a different company's product. Claude's cost is calculated; for the others the "
                  "screen shows token counts. Groq hosts an open-weight model (no Llama chat model there today).")
+        st.caption("💰 Each AI request is billed to this platform's API accounts (ChatGPT, Claude and Gemini are "
+                   "paid; Groq's free tier has a daily limit). Ask only for the items and models you need.")
         if missing:
             st.caption("Not available on this server (no API key): " + ", ".join(_IR_SHORT[k] for k in missing))
         return sel
