@@ -3478,49 +3478,20 @@ def _render_inferential_tab(
                 sccces_constructs if survey_key == "b4ai_sccces_survey"
                 else sims_constructs
             )
-            _rm_base = [c for c in constructs if c not in _SCCCES_COMPOSITE_OPTIONS]
-            _rm_multi_key = f"inf_rm_construct_multi_{survey_key}"
-
-            def _rm_apply_preset(_mk=_rm_multi_key):
-                _lab = st.session_state.get("inf_rm_preset_" + survey_key)
-                _info = _SCCCES_COMPOSITE_OPTIONS.get(_lab)
-                if _info:
-                    st.session_state[_mk] = list(DEFAULT_SCCCES_COMPOSITE_MAP[_info["map_key"]])
-
             with col2:
-                rm_constructs_sel = st.multiselect(
-                    "Construct(s)",
-                    options=_rm_base,
-                    default=[_rm_base[0]],
-                    key=_rm_multi_key,
-                    help=(
-                        "Pick one construct, or several to analyse them as ONE combined score "
-                        "(all their items pooled into a single mean per student and module)."
-                    ),
+                rm_construct = st.selectbox(
+                    "Construct",
+                    options=constructs,
+                    key="inf_rm_construct",
                 )
-                if survey_key == "b4ai_sccces_survey":
-                    st.selectbox(
-                        "Quick preset (fills the list above)",
-                        options=[None, *_SCCCES_COMPOSITE_OPTIONS.keys()],
-                        format_func=lambda x: "— none —" if x is None else x,
-                        key="inf_rm_preset_" + survey_key,
-                        on_change=_rm_apply_preset,
-                    )
+            _rm_composite_info = _SCCCES_COMPOSITE_OPTIONS.get(rm_construct)
+            _rm_is_composite = _rm_composite_info is not None
             _rm_construct_arg = (
-                rm_constructs_sel[0] if len(rm_constructs_sel) == 1 else list(rm_constructs_sel)
+                DEFAULT_SCCCES_COMPOSITE_MAP[_rm_composite_info["map_key"]]
+                if _rm_is_composite else rm_construct
             )
-            _rm_composite_info = None
-            for _o in _SCCCES_COMPOSITE_OPTIONS.values():
-                if set(DEFAULT_SCCCES_COMPOSITE_MAP[_o["map_key"]]) == set(rm_constructs_sel):
-                    _rm_composite_info = _o
-            if _rm_composite_info is not None:
+            if _rm_is_composite:
                 st.caption("ℹ️ " + _interpretation_caption(_rm_composite_info["note_key"]))
-            elif len(rm_constructs_sel) > 1:
-                st.caption(
-                    "ℹ️ Combined score: items from "
-                    + ", ".join(c.replace("_", " ") for c in rm_constructs_sel)
-                    + " are pooled into one mean per student and module."
-                )
 
             import re as _re_rm2
 
@@ -3564,9 +3535,7 @@ def _render_inferential_tab(
                 k for k in _survey_keys if _survey_labels[k] in _selected_survey_labels
             ]
 
-            if not rm_constructs_sel:
-                st.info("Select at least 1 construct.")
-            elif len(_selected_survey_keys) < 2:
+            if len(_selected_survey_keys) < 2:
                 st.info("Select at least 2 modules to run the repeated-measures test.")
             else:
                 _survey_scope_canonical = canonical_df[
