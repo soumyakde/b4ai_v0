@@ -702,6 +702,78 @@ def run_between_groups(
 # Public function 3: run_repeated_measures
 # -----------------------------------------------------------------------
 
+def _posthoc_pairs(pivot: pd.DataFrame, test: str, alpha: float) -> Dict[str, Any]:
+    """
+    Post-hoc pairwise comparisons of all k(k-1)/2 pairs of occasions (columns of
+    `pivot`, complete cases only), Bonferroni-adjusted across the m comparisons:
+    adjusted p = min(1, p x m).
+
+    test = "paired_t"  -> paired t-test (after a significant RM-ANOVA); effect size
+                          Cohen's d_z = mean(diff) / SD(diff).
+    test = "wilcoxon"  -> Wilcoxon signed-rank test (after a significant Friedman
+                          test); effect size = matched-pairs rank-biserial
+                          correlation, (sum of positive ranks - sum of negative
+                          ranks) / sum of all ranks. Zero differences are dropped
+                          (scipy's default); identical occasions give p = 1.
+
+    Differences are always later occasion minus earlier occasion (column order).
+    References: Hahs-Vaughn et al. (2019), Statistical Concepts: A Second Course,
+    pp. 100-101 (Dunn/Bonferroni), 307-308 (dependent t tests / Wilcoxon after
+    RM-ANOVA / Friedman, alpha adjusted Bonferroni-style).
+    """
+    cols = list(pivot.columns)
+    pairs = []
+    for i in range(len(cols)):
+        for j in range(i + 1, len(cols)):
+            a = pivot[cols[i]].astype(float).values
+            b = pivot[cols[j]].astype(float).values
+            # Round away floating-point noise (e.g. 33/100*100 = 33.00000000000001) so that
+            # equal scores count as ties / zero differences, as they would in R or by hand.
+            diff = np.round(b - a, 9)
+            stat = None
+            eff = None
+            if test == "paired_t":
+                sd = float(np.std(diff, ddof=1)) if len(diff) > 1 else 0.0
+                if sd == 0.0:
+                    p = 1.0 if float(np.mean(diff)) == 0.0 else 0.0
+                else:
+                    t, p = stats.ttest_1samp(diff, 0.0)   # identical to ttest_rel(b, a)
+                    stat = float(t)
+                    p = float(p)
+                    eff = float(np.mean(diff) / sd)
+            else:
+                nz = diff[diff != 0]
+                if len(nz) == 0:
+                    p = 1.0
+                else:
+                    w = stats.wilcoxon(diff)               # identical to wilcoxon(b, a)
+                    stat = float(w.statistic)
+                    p = float(w.pvalue)
+                    rk = stats.rankdata(np.abs(nz))
+                    eff = float((rk[nz > 0].sum() - rk[nz < 0].sum()) / rk.sum())
+            pairs.append({
+                "time_a": str(cols[i]), "time_b": str(cols[j]), "n": int(len(diff)),
+                "statistic": None if stat is None else round(stat, 4),
+                "p_raw": p, "effect_size": None if eff is None else round(eff, 4),
+            })
+    m = len(pairs)
+    for x in pairs:
+        padj = min(1.0, x["p_raw"] * m)
+        x["p_adj"] = round(padj, 6)
+        x["p_raw"] = round(x["p_raw"], 6)
+        x["significant"] = bool(padj < alpha)
+    return {
+        "post_test": "Paired t-test" if test == "paired_t" else "Wilcoxon signed-rank test",
+        "correction": "Bonferroni",
+        "n_comparisons": m,
+        "alpha": alpha,
+        "alpha_adjusted": alpha / m if m else alpha,
+        "effect_size_name": ("Cohen's d_z (mean difference / SD of differences)" if test == "paired_t"
+                             else "matched-pairs rank-biserial correlation"),
+        "pairs": pairs,
+    }
+
+
 def run_repeated_measures(
     canonical_df: pd.DataFrame,
     instrument_key: str,
@@ -913,6 +985,40 @@ def run_repeated_measures(
             )
         result["recommended_test"] = rec
         result["recommendation_rationale"] = rationale
+
+        # ── Post-hoc pairwise comparisons (Bonferroni) ──────────────────
+        # Only where the PRIMARY omnibus test (RM-ANOVA when recommended,
+        # else Friedman) is significant and there are 3+ occasions. New keys
+        # only; nothing above is changed. For RM-ANOVA the Greenhouse-Geisser
+        # p is used when available (this app's guidance at small n).
+        result["posthoc"] = None
+        result["posthoc_note"] = None
+        try:
+            rm_primary = str(rec).startswith("RM-ANOVA")
+            if rm_primary and not rm:
+                result["posthoc_note"] = ("RM-ANOVA is the primary test but is unavailable"
+                                          f" ({result.get('rm_anova_error')}); no post-hoc comparisons.")
+            elif len(time_points) < 3:
+                result["posthoc_note"] = "Fewer than 3 occasions: no post-hoc comparisons."
+            else:
+                if rm_primary:
+                    p_primary = rm["p_gg_corr"] if rm.get("p_gg_corr") is not None else rm["p_unc"]
+                    primary_name = "RM-ANOVA (Greenhouse-Geisser p)" if rm.get("p_gg_corr") is not None else "RM-ANOVA"
+                else:
+                    p_primary = float(p_value)
+                    primary_name = "Friedman test"
+                if not p_primary < alpha:
+                    result["posthoc_note"] = (f"Primary omnibus test ({primary_name}, p = {p_primary:.4f}) "
+                                              f"is not significant at alpha = {alpha}: no post-hoc comparisons conducted.")
+                else:
+                    ph = _posthoc_pairs(pivot, "paired_t" if rm_primary else "wilcoxon", alpha)
+                    ph["primary_test"] = primary_name
+                    ph["primary_p"] = round(float(p_primary), 6)
+                    result["posthoc"] = ph
+                    result["posthoc_note"] = (f"Primary omnibus test ({primary_name}, p = {p_primary:.4f}) is significant: "
+                                              f"{ph['n_comparisons']} pairwise comparisons, Bonferroni-adjusted.")
+        except Exception as e:
+            result["posthoc_note"] = f"Post-hoc comparisons could not be computed: {e}"
 
         result["low_n_warning"] = n < LOW_N_THRESHOLD
 

@@ -2183,6 +2183,41 @@ _STAT_HELP = {
         "Greenhouse-Geisser corrected p-value regardless of what Mauchly's "
         "test reports."
     ),
+    "posthoc": (
+        "**Post-hoc pairwise comparisons (Bonferroni)**\n\n"
+        "**Why this step exists.** The omnibus test (RM-ANOVA or Friedman) only "
+        "says that *at least one* occasion differs from the others. The "
+        "pairwise comparisons say *which* occasions differ. The table appears "
+        "only when the primary omnibus test is significant; otherwise no "
+        "post-hoc test is run.\n\n"
+        "**Which test is used.** It follows the primary omnibus test: a "
+        "paired t-test for each pair after a significant RM-ANOVA, a Wilcoxon "
+        "signed-rank test for each pair after a significant Friedman test. The "
+        "primary test is the one matching the normality verdict (RM-ANOVA if "
+        "all occasions look normal, otherwise Friedman).\n\n"
+        "**What the Bonferroni correction does.** Running many tests inflates "
+        "the chance of a false positive, so the alpha level is divided by the "
+        "number of comparisons (equivalently, each p-value is multiplied by "
+        "that number and capped at 1). That keeps the familywise Type I error "
+        "at alpha. With 6 occasions there are 15 pairs, so the adjusted alpha "
+        "is .05/15 = .0033.\n\n"
+        "**How to read the table.** *p (raw)* is the ordinary p-value of that "
+        "pair; *p (adjusted)* is the Bonferroni-adjusted value: read this one "
+        "against alpha (.05). The effect size shows how large the difference "
+        "is (Cohen's d_z for paired t-tests; the rank-biserial correlation, "
+        "from -1 to +1, for Wilcoxon tests; differences are later occasion "
+        "minus earlier occasion). A significant omnibus test does not "
+        "guarantee that any single pair is significant after adjustment.\n\n"
+        "**Small samples.** With few complete cases the comparisons have low "
+        "power, and the Bonferroni correction lowers it further; treat the "
+        "results as indicative, not conclusive.\n\n"
+        "*Sources: Hahs-Vaughn et al. (2019), Statistical Concepts: A Second "
+        "Course, pp. 100-101 (Dunn/Bonferroni procedure), p. 307 (multiple "
+        "dependent t tests with Bonferroni-adjusted alpha after a significant "
+        "repeated-measures F test; Maxwell, 1980; Wilcox, 1987) and p. 308 "
+        "(matched-pair Wilcoxon tests with adjusted alpha after the Friedman "
+        "test).*"
+    ),
     "cronbach_alpha": (
         "**Cronbach's α — Internal Consistency Reliability**\n\n"
         "For a sub-construct with 3+ items, measures how consistently "
@@ -2376,6 +2411,62 @@ _STAT_HELP = {
         "not instead of it."
     ),
 }
+
+
+def _posthoc_table(ph: dict) -> pd.DataFrame:
+    """Display/report table of a run_repeated_measures() post-hoc result (result["posthoc"])."""
+    rows = []
+    for x in ph["pairs"]:
+        rows.append({
+            "Comparison": f"{x['time_a']} vs {x['time_b']}",
+            "n": x["n"],
+            "Statistic": "—" if x["statistic"] is None else f"{x['statistic']:.3f}",
+            "p (raw)": f"{x['p_raw']:.4f}",
+            "p (Bonferroni-adjusted)": f"{x['p_adj']:.4f}",
+            "Effect size": "—" if x["effect_size"] is None else f"{x['effect_size']:.2f}",
+            "Significant after adjustment": "Yes" if x["significant"] else "No",
+        })
+    return pd.DataFrame(rows)
+
+
+def _posthoc_caption(ph: dict) -> str:
+    m = ph["n_comparisons"]
+    n_min = min((x["n"] for x in ph["pairs"]), default=0)
+    return (
+        f"{ph['post_test']} for each of the {m} pairs of occasions, after a significant primary omnibus test "
+        f"({ph['primary_test']}, p = {ph['primary_p']:.4f}). Bonferroni correction: adjusted p = raw p × {m} "
+        f"(capped at 1), the same as comparing raw p with α/{m} = {ph['alpha_adjusted']:.4f}. Read the adjusted p "
+        f"against α = {ph['alpha']}. Effect size: {ph['effect_size_name']}; differences are later minus earlier "
+        f"occasion. Complete cases only (n = {n_min} per pair); with few cases power is low, so treat as indicative "
+        "(Hahs-Vaughn et al., 2019, pp. 100-101, 307-308)."
+    )
+
+
+def _render_posthoc(result: dict) -> None:
+    """Post-hoc table under the Friedman / RM-ANOVA result (new in 2026-11; shown only after a significant omnibus test)."""
+    ph = result.get("posthoc")
+    if ph:
+        st.markdown("**Post-hoc pairwise comparisons (Bonferroni-corrected)**")
+        st.dataframe(_posthoc_table(ph), hide_index=True, width="stretch")
+        st.caption(_posthoc_caption(ph))
+        with st.expander("ℹ️ What are post-hoc comparisons?", expanded=False):
+            st.markdown(_STAT_HELP["posthoc"])
+    elif result.get("posthoc_note"):
+        st.caption("Post-hoc comparisons: " + result["posthoc_note"])
+
+
+def _posthoc_report_sections(r: dict, name: str) -> list:
+    """PDF-report sections for the post-hoc table of one run_repeated_measures() result (empty if none)."""
+    ph = r.get("posthoc")
+    if not ph:
+        return []
+    return [{
+        "heading": f"Post-hoc comparisons — {name}",
+        "body": f"Primary omnibus test: {ph['primary_test']}, p = {ph['primary_p']:.4f} (significant).",
+        "table": _posthoc_table(ph),
+        "caption": _posthoc_caption(ph),
+    }]
+
 
 _CTT_HELP = """
 **Classical item analysis (CTT) -- Method 1 of 3 for judging item difficulty**
@@ -2856,6 +2947,8 @@ def _render_result_card(result: dict, score_label: str = "% Correct") -> None:
         elif result.get("rm_anova_error"):
             st.caption(f"RM-ANOVA unavailable: {result['rm_anova_error']}")
 
+        _render_posthoc(result)
+
         # ── RM ANOVA-style source table ───────────────────────────────
         _n   = result.get("n_subjects", 0)
         _tp  = result.get("time_points", [])
@@ -2932,6 +3025,8 @@ def _render_result_card(result: dict, score_label: str = "% Correct") -> None:
                 st.markdown(_STAT_HELP["rm_anova"])
                 st.divider()
                 st.markdown(_STAT_HELP["sphericity"])
+            st.divider()
+            st.markdown(_STAT_HELP["posthoc"])
         st.divider()
         st.markdown(_STAT_HELP["p_value"])
 
@@ -10225,6 +10320,7 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                             "table":   mbt_df,
                             "caption": "Mean % correct per module across all students.",
                         })
+                        sections.extend(_posthoc_report_sections(r, "MCQ Content Knowledge"))
                 except Exception:
                     pass
 
@@ -10250,6 +10346,7 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                     survey_label = _SURVEY_LABELS.get(survey_key, survey_key)
                     _survey_active_df = _active_scoped_df(_rpt_inf_survey_df, survey_key)
                     summary_rows = []
+                    _posthoc_secs = []
                     for construct in constructs:
                         try:
                             r = run_repeated_measures(_survey_active_df, survey_key, construct=construct)
@@ -10264,6 +10361,7 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                                 "Significant":  "Yes" if r["significant"] else "No",
                                 "Recommended":  r.get("recommended_test", "—"),
                             })
+                            _posthoc_secs.extend(_posthoc_report_sections(r, construct.replace("_", " ").title()))
                         except Exception:
                             pass
 
@@ -10291,6 +10389,7 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                                         "Recommended":  r.get("recommended_test", "—"),
                                     })
                                     _composite_notes_used.append(_info["note_key"])
+                                    _posthoc_secs.extend(_posthoc_report_sections(r, f"{_info['map_key']} (composite)"))
                             except Exception:
                                 pass
 
@@ -10304,6 +10403,7 @@ def _report_inferential(canonical_df: pd.DataFrame) -> None:
                             "table":   pd.DataFrame(summary_rows),
                             "caption": _caption,
                         })
+                        sections.extend(_posthoc_secs)
 
             pdf_bytes = _build_pdf(sections, "Inferential Statistics Report")
             st.download_button(
