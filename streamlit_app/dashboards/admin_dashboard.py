@@ -899,6 +899,12 @@ def show_admin_dashboard(username: str):
                 except Exception as e:
                     st.error(f"Error: {e}")
 
+    # Imported (outside-platform) cohorts: admin-only panel, kept in its own module
+    with tabs[tab_offset + 1]:
+        st.divider()
+        from streamlit_app.dashboards.admin_imported_cohorts import render_imported_cohorts_panel
+        render_imported_cohorts_panel(username)
+
     # ---------------------------------------------------------
     # RESEARCH OPERATIONS
     # ---------------------------------------------------------

@@ -270,7 +270,7 @@ def _build_scoring_dict() -> Dict[str, Any]:
 # Public API
 # -----------------------------------------------------------------------
 
-def load_canonical_data(
+def _load_platform_canonical_data(
     db_path: Optional[Path] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, Optional[str]]]:
     """
@@ -365,4 +365,33 @@ def load_canonical_data(
     )
     canonical_df = builder.build()
 
+    return canonical_df, demographics_df, cohort_map
+
+
+def load_canonical_data(
+    db_path: Optional[Path] = None,
+    include_imported: bool = False,
+) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, Optional[str]]]:
+    """
+    Platform canonical dataset (see _load_platform_canonical_data), optionally combined with the
+    admin-imported cohorts (UB / community-centre groups stored by core.analytics.datasets.imported_cohorts).
+
+    include_imported=False (default) returns exactly what the dashboard has always returned.
+    """
+    canonical_df, demographics_df, cohort_map = _load_platform_canonical_data(db_path)
+    if not include_imported:
+        return canonical_df, demographics_df, cohort_map
+    if not db_path:
+        from core.db_utils import DB_PATH as _DB_PATH
+    path = Path(db_path) if db_path else _DB_PATH
+    from core.analytics.datasets.imported_cohorts import load_imported
+    ic_canon, ic_demo, ic_map = load_imported(path)
+    if ic_canon.empty:
+        return canonical_df, demographics_df, cohort_map
+    # imported IDs are validated at import time not to clash with platform users; guard anyway
+    ic_canon = ic_canon[~ic_canon["user_id"].isin(set(canonical_df["user_id"]))]
+    ic_demo = ic_demo[~ic_demo["user_id"].isin(set(demographics_df["user_id"]))]
+    canonical_df = pd.concat([canonical_df, ic_canon], ignore_index=True)
+    demographics_df = pd.concat([demographics_df, ic_demo], ignore_index=True)
+    cohort_map = {**cohort_map, **{u: c for u, c in ic_map.items() if u not in cohort_map}}
     return canonical_df, demographics_df, cohort_map
