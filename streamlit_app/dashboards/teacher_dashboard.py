@@ -281,8 +281,8 @@ _PREPOST_PAIRS_REVERSE: dict[str, str] = {
 # -----------------------------------------------------------------------
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _load_data():
-    return load_canonical_data()
+def _load_data(include_imported: bool = False):
+    return load_canonical_data(include_imported=include_imported)
 
 
 # -----------------------------------------------------------------------
@@ -4917,10 +4917,24 @@ def show_teacher_dashboard(username: str) -> None:
     [data-testid="stDataFrame"] th { text-align: left !important; }
     </style>""", unsafe_allow_html=True)
 
+    # Admin-imported cohorts (outside-platform data): opt-in so the default view is unchanged
+    _include_imported = False
+    try:
+        from core.db_utils import DB_PATH as _IMP_DB
+        from core.analytics.datasets.imported_cohorts import list_imports as _list_imports
+        _imp = _list_imports(_IMP_DB)
+    except Exception:
+        _imp = None
+    if _imp is not None and not _imp.empty:
+        _include_imported = st.sidebar.checkbox(
+            "Include imported cohorts", value=False, key="td_include_imported",
+            help="Adds cohorts imported by an admin (e.g. UB workshops): " + ", ".join(_imp['cohort_id'].tolist())
+                 + ". Then choose them in the Cohort filter below, alone or combined with platform cohorts.")
+
     # Load data (cached)
     with st.spinner("Loading research dataset…"):
         try:
-            canonical_df, demographics_df, cohort_map = _load_data()
+            canonical_df, demographics_df, cohort_map = _load_data(_include_imported)
             # Explicitly UTC (not the container's local clock) so the
             # caption below is never ambiguous about which timezone it's in.
             st.session_state["_teacher_data_loaded_at"] = datetime.utcnow().strftime("%H:%M:%S")

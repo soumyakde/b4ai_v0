@@ -45,6 +45,8 @@ class AdminAction(Enum):
 
     IMPORT_USERS         = "IMPORT_USERS"
     IMPORT_HUMAN_RATINGS = "IMPORT_HUMAN_RATINGS"
+    IMPORT_COHORT        = "IMPORT_COHORT"            # outside-platform cohort imported for analysis
+    DELETE_IMPORTED_COHORT = "DELETE_IMPORTED_COHORT"
 
     BACKUP_DATABASE  = "BACKUP_DATABASE"
     RESTORE_DATABASE = "RESTORE_DATABASE"     # ← NEW
