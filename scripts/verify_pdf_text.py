@@ -36,6 +36,16 @@ OK = "– — ‘ ’ “ ” • … é × ° ± –"
 t = pdf_text([{"heading": "Keep", "body": OK}])
 check("characters the font can draw are left as they are", all(c in t for c in "–—‘’“”…é×°±"), t.split("\n")[4] if len(t.split("\n")) > 4 else "")
 
+# Greek letters / maths symbols come from the non-embedded Symbol font and show as black squares in some viewers:
+# they are spelled out (seen 2026-11-14 in the Inferential Statistics PDF: alpha, chi-square, Delta, d-bar)
+t = pdf_text([{"heading": "Greek", "body": "Friedman \u03c7\u00b2 = 5.0, \u03b1 = 0.05, \u0394 = 2, Bias d\u0304: 1.9",
+               "table": pd.DataFrame({"Friedman \u03c7\u00b2": ["\u03b1/15"]}), "caption": "\u03b1 \u2248 .05, p \u2264 \u03b1"}])
+check("Greek letters are spelled out (alpha, chi, Delta)", all(w in t for w in ("alpha", "chi", "Delta")), t[:200])
+check("no Greek letter, d-bar or combining mark is left in the PDF text",
+      not any("\u0300" <= c <= "\u036f" or "\u0370" <= c <= "\u03ff" for c in t))
+check("d-bar reads 'mean d'", "mean d" in t)
+check("<= and ~ are spelled out", "<=" in t and "~" in t)
+
 # the real ITA wording: 'non-verbal' with a non-breaking hyphen reads as 'non-verbal'
 t = pdf_text([{"heading": "ITA", "body": "Students used non‑verbal cues and self‑regulation."}])
 check("ITA wording keeps its hyphens as plain hyphens", "non-verbal" in t and "self-regulation" in t)

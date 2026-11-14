@@ -9675,10 +9675,33 @@ _PDF_CHAR_MAP = {
 }
 _PDF_CHAR_TABLE = str.maketrans(_PDF_CHAR_MAP)
 
+# Greek letters and maths symbols are drawn by reportlab from the non-embedded Symbol font; many PDF viewers
+# show them as black squares or blanks (seen 2026-11-14 on alpha, chi, Delta in the Inferential Statistics PDF).
+# Spell them out instead. Latin-1 characters Helvetica draws itself (x, +/-, superscript 2, mu sign, ...) stay.
+_PDF_SYMBOL_WORDS = {
+    "≤": "<=", "≥": ">=", "≠": "!=", "≈": "~", "→": "->", "←": "<-", "−": "-",
+    "∆": "Delta", "∑": "Sum", "√": "sqrt", "∞": "inf",
+}
+
+
+def _pdf_symbol_word(ch: str) -> str:
+    if ch in _PDF_SYMBOL_WORDS:
+        return _PDF_SYMBOL_WORDS[ch]
+    if "\u0370" <= ch <= "\u03ff":  # Greek block: 'GREEK SMALL LETTER ALPHA' -> alpha, capital -> Alpha
+        import unicodedata
+        nm = unicodedata.name(ch, "")
+        if nm.startswith("GREEK "):
+            word = nm.split(" ")[-1].lower()
+            return word.capitalize() if "CAPITAL" in nm else word
+    return ch
+
 
 def _pdf_clean(text) -> str:
     """Replace characters the PDF font cannot draw (black squares) by plain look-alikes."""
-    return str(text).translate(_PDF_CHAR_TABLE)
+    t = str(text).replace("d\u0304", "mean d")  # d with combining macron
+    t = "".join(c for c in t if not ("\u0300" <= c <= "\u036f"))  # other combining marks print as squares
+    t = t.translate(_PDF_CHAR_TABLE)
+    return "".join(_pdf_symbol_word(c) for c in t)
 
 
 def _build_pdf(sections: list, title: str) -> bytes:
