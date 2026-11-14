@@ -42,6 +42,11 @@ def _log(admin_user: str, action_name: str, details: str):
 
 
 def render_imported_cohorts_panel(admin_user: str) -> None:
+    from auth.user_manager import is_super_admin
+    if not is_super_admin(admin_user):
+        st.subheader("📥 Imported cohorts (outside-platform data)")
+        st.info("Importing or removing outside-platform cohorts is restricted to super administrators.")
+        return
     st.subheader("📥 Imported cohorts (outside-platform data)")
     st.caption(
         "Add cohorts collected outside the platform (e.g. UB workshops on Qualtrics) so the Teacher Dashboard can analyse them "
